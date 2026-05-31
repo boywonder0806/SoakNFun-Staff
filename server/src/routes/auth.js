@@ -17,7 +17,8 @@ router.post('/login', async (req, res) => {
     const { rows } = await pool.query(
       `SELECT id, email, password_hash, name, role, department, departments,
               position, avatar, phone, hire_date AS "hireDate", is_active AS "isActive",
-              force_password_reset AS "mustChangePassword", is_locked AS "isLocked"
+              force_password_reset AS "mustChangePassword", is_locked AS "isLocked",
+              COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"
        FROM employees WHERE email = $1`,
       [email.toLowerCase().trim()]
     );

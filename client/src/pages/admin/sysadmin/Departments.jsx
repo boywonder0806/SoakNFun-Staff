@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import api from '../../../lib/api.js';
 
 const DEPT_META = [
@@ -47,6 +47,7 @@ export default function SysAdminDepartments() {
   );
   const [selectedId, setSelectedId] = useState('aquatics');
   const [loading, setLoading]       = useState(true);
+  const [dragState, setDragState]   = useState({ from: null, over: null });
 
   useEffect(() => {
     api.get('/admin/departments/roles')
@@ -93,6 +94,25 @@ export default function SysAdminDepartments() {
       console.error(err);
     }
   }
+
+  const reorderPositions = useCallback(async (deptName, fromIdx, toIdx) => {
+    if (fromIdx === toIdx) return;
+    const deptPositions = allEntries.filter(e => e.department === deptName);
+    const reordered = [...deptPositions];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved);
+    const otherEntries = allEntries.filter(e => e.department !== deptName);
+    setAllEntries([...otherEntries, ...reordered]);
+    try {
+      await api.patch('/admin/departments/roles/reorder', {
+        items: reordered.map((e, i) => ({ id: e.id, sortOrder: i })),
+      });
+    } catch (err) {
+      console.error(err);
+      api.get('/admin/departments/roles')
+        .then(r => setAllEntries(r.data.roles.filter(e => e.type === 'position')));
+    }
+  }, [allEntries]);
 
   return (
     <div className="flex flex-col gap-5" style={{ height: 'calc(100vh - 3rem)' }}>
@@ -190,6 +210,17 @@ export default function SysAdminDepartments() {
                     onUpdate={fields => updateEntry(entry.id, fields)}
                     onDelete={() => deleteEntry(entry.id)}
                     onDuplicate={() => addPosition(dept.name, `${entry.name} (copy)`, entry.schedulingNotes)}
+                    isDragging={dragState.from === idx}
+                    isDragOver={dragState.over === idx && dragState.from !== null && dragState.from !== idx}
+                    onDragStart={() => setDragState(s => ({ ...s, from: idx }))}
+                    onDragOver={() => setDragState(s => ({ ...s, over: idx }))}
+                    onDrop={() => {
+                      if (dragState.from !== null && dragState.from !== idx) {
+                        reorderPositions(dept.name, dragState.from, idx);
+                      }
+                      setDragState({ from: null, over: null });
+                    }}
+                    onDragEnd={() => setDragState({ from: null, over: null })}
                   />
                 ))}
 
@@ -204,7 +235,7 @@ export default function SysAdminDepartments() {
 }
 
 // ── Entry row ─────────────────────────────────────────────────────────────────
-function EntryRow({ entry, index, dept, onUpdate, onDelete, onDuplicate }) {
+function EntryRow({ entry, index, dept, onUpdate, onDelete, onDuplicate, isDragging, isDragOver, onDragStart, onDragOver, onDrop, onDragEnd }) {
   const [editing, setEditing]           = useState(false);
   const [name, setName]                 = useState(entry.name);
   const [schedulingNotes, setNotes]     = useState(entry.schedulingNotes ?? '');
@@ -278,10 +309,20 @@ function EntryRow({ entry, index, dept, onUpdate, onDelete, onDuplicate }) {
 
   return (
     <div
-      className="rounded-lg border px-3 py-2 transition-all group bg-shell/40 border-rim/40 hover:border-rim/70 hover:bg-shell/60"
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={e => { e.preventDefault(); onDragOver(); }}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      className={`rounded-lg border px-3 py-2 transition-all group
+        ${isDragging ? 'opacity-40 cursor-grabbing bg-shell/60 border-rim/60' : 'bg-shell/40 hover:bg-shell/60'}
+        ${isDragOver ? 'border-cyan/50 border-t-2' : isDragging ? 'border-rim/60' : 'border-rim/40 hover:border-rim/70'}
+      `}
     >
       <div className="flex items-center gap-2">
-        <span className="text-10 text-fog font-mono shrink-0 w-4 text-center">{String(index).padStart(2, '0')}</span>
+        <span className="text-fog/20 group-hover:text-fog/50 transition-colors shrink-0 cursor-grab active:cursor-grabbing">
+          <DragIcon />
+        </span>
 
         <button className="flex-1 text-left min-w-0 flex items-center gap-2" onClick={() => setEditing(true)}>
           <p className="text-xs font-semibold text-ink leading-none">{entry.name}</p>
@@ -400,6 +441,15 @@ function DescriptionEditor({ value, onChange }) {
 }
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
+function DragIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
+      <circle cx="9" cy="6" r="1.5" /><circle cx="15" cy="6" r="1.5" />
+      <circle cx="9" cy="12" r="1.5" /><circle cx="15" cy="12" r="1.5" />
+      <circle cx="9" cy="18" r="1.5" /><circle cx="15" cy="18" r="1.5" />
+    </svg>
+  );
+}
 function SparkleIcon({ className = 'w-4 h-4' }) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className}>

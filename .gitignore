@@ -2,15 +2,20 @@
 node_modules/
 client/node_modules/
 server/node_modules/
+reception-client/node_modules/
 
 # Build output
 client/dist/
+reception-client/dist/
 
 # Environment variables — never commit these
 .env
 .env.local
 .env.production
 server/.env
+
+# Server credentials — keep local only
+SERVER_INFO.md
 
 # Logs
 *.log

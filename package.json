@@ -3,10 +3,12 @@
   "version": "1.0.0",
   "description": "Blue Bayou Waterpark Staff Portal",
   "scripts": {
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\" \"npm run dev:reception\"",
     "dev:server": "npm --prefix server run dev",
     "dev:client": "npm --prefix client run dev",
-    "install:all": "npm install && npm --prefix server install && npm --prefix client install"
+    "dev:reception": "npm --prefix reception-client run dev",
+    "install:all": "npm install && npm --prefix server install && npm --prefix client install && npm --prefix reception-client install",
+    "build:all": "npm --prefix client run build && npm --prefix reception-client run build"
   },
   "devDependencies": {
     "concurrently": "^8.2.0"

@@ -37,6 +37,11 @@ export default function SysAdminUsers() {
     setSelected(s => s?.id === userId ? { ...s, isLocked } : s);
   }
 
+  function handleReceptionUpdate(userId, hasReceptionAccess) {
+    setStaff(prev => prev.map(s => s.id === userId ? { ...s, hasReceptionAccess } : s));
+    setSelected(s => s?.id === userId ? { ...s, hasReceptionAccess } : s);
+  }
+
   const visible = search
     ? staff.filter(s => {
         const q = search.toLowerCase();
@@ -163,6 +168,7 @@ export default function SysAdminUsers() {
           onRoleUpdate={handleRoleUpdate}
           onUserUpdate={handleUserUpdate}
           onLockUpdate={handleLockUpdate}
+          onReceptionUpdate={handleReceptionUpdate}
         />
       )}
 
@@ -186,7 +192,7 @@ const DEPT_STYLE = {
 };
 
 // ── User Modal ────────────────────────────────────────────────────────────────
-function UserModal({ user, isSelf, onClose, onRoleUpdate, onUserUpdate, onLockUpdate }) {
+function UserModal({ user, isSelf, onClose, onRoleUpdate, onUserUpdate, onLockUpdate, onReceptionUpdate }) {
   const navigate       = useNavigate();
   const backdropRef    = useRef(null);
   const photoInputRef  = useRef(null);
@@ -205,8 +211,9 @@ function UserModal({ user, isSelf, onClose, onRoleUpdate, onUserUpdate, onLockUp
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError]   = useState('');
 
-  const [photoUploading, setPhotoUploading] = useState(false);
-  const [lockSaving, setLockSaving]         = useState(false);
+  const [photoUploading, setPhotoUploading]       = useState(false);
+  const [lockSaving, setLockSaving]               = useState(false);
+  const [receptionSaving, setReceptionSaving]     = useState(false);
 
   const role = ROLES.find(r => r.value === user.role) ?? ROLES[0];
 
@@ -307,6 +314,19 @@ function UserModal({ user, isSelf, onClose, onRoleUpdate, onUserUpdate, onLockUp
       console.error(err);
     } finally {
       setLockSaving(false);
+    }
+  }
+
+  async function handleReceptionToggle() {
+    setReceptionSaving(true);
+    try {
+      const next = !user.hasReceptionAccess;
+      await api.patch(`/reception/access/${user.id}`, { access: next });
+      onReceptionUpdate(user.id, next);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setReceptionSaving(false);
     }
   }
 
@@ -641,6 +661,34 @@ function UserModal({ user, isSelf, onClose, onRoleUpdate, onUserUpdate, onLockUp
                 </div>
               </div>
             )}
+
+            {/* Reception portal access */}
+            <div className={`mt-3 rounded-xl p-4 border transition-colors ${user.hasReceptionAccess ? 'bg-cyan/5 border-cyan/25' : 'bg-shell/40 border-rim/40'}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className={`text-xs font-semibold ${user.hasReceptionAccess ? 'text-cyan' : 'text-ink'}`}>
+                    Reception Portal Access
+                  </p>
+                  <p className="text-10 text-fog mt-0.5">
+                    {user.hasReceptionAccess
+                      ? 'Can sign in at reception.bluebayoustaff.com'
+                      : 'Cannot access the reception portal.'}
+                  </p>
+                </div>
+                <button
+                  onClick={handleReceptionToggle}
+                  disabled={receptionSaving}
+                  className={`shrink-0 ml-4 px-4 py-2 rounded-md text-xs font-bold border transition-colors
+                    ${user.hasReceptionAccess
+                      ? 'text-red-400 border-red-500/30 hover:bg-red-500/10'
+                      : 'text-cyan border-cyan/30 hover:bg-cyan/10'
+                    }
+                    ${receptionSaving ? 'opacity-50 cursor-wait' : ''}`}
+                >
+                  {receptionSaving ? '…' : user.hasReceptionAccess ? 'Revoke' : 'Grant Access'}
+                </button>
+              </div>
+            </div>
 
             {!isSelf && (
               <div className="mt-3 bg-red-950/20 border border-red-500/20 rounded-xl p-4">

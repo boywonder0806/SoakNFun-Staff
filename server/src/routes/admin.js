@@ -9,6 +9,7 @@ const router = Router();
 pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS photo_url TEXT').catch(() => {});
 pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS force_password_reset BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
 pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS is_locked BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
+pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_reception_access BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
 pool.query(`CREATE TABLE IF NOT EXISTS employee_notes (
   id         SERIAL PRIMARY KEY,
   employee_id INT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
@@ -736,7 +737,8 @@ router.get('/sysadmin/users', requireSysAdmin, async (_req, res) => {
     const { rows } = await pool.query(
       `SELECT id, email, name, role, department, departments, position,
               avatar, phone, hire_date AS "hireDate", is_active AS "isActive", created_at AS "createdAt",
-              photo_url AS "photoUrl", is_locked AS "isLocked"
+              photo_url AS "photoUrl", is_locked AS "isLocked",
+              COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"
        FROM employees WHERE role != 'crew_member' ORDER BY name`
     );
     res.json({ users: rows });
@@ -797,6 +799,22 @@ router.post('/departments/:dept/roles', requireAdmin, async (req, res) => {
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Name already exists for this type.' });
     res.status(500).json({ error: 'Failed to add entry' });
+  }
+});
+
+router.patch('/departments/roles/reorder', requireAdmin, async (req, res) => {
+  const { items } = req.body; // [{ id, sortOrder }]
+  if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'items is required' });
+  try {
+    for (const item of items) {
+      await pool.query(
+        `UPDATE department_roles SET sort_order = $1 WHERE id = $2`,
+        [item.sortOrder, parseInt(item.id)]
+      );
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to reorder' });
   }
 });
 

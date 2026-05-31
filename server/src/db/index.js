@@ -5,9 +5,11 @@ import pg from 'pg';
 // rejectUnauthorized: false.
 const connectionString = process.env.DATABASE_URL?.replace(/[?&]sslmode=[^&]*/g, '');
 
+const isLocalhost = (connectionString || '').includes('localhost') || (connectionString || '').includes('127.0.0.1');
+
 const pool = new pg.Pool({
   connectionString,
-  ssl: { rejectUnauthorized: false },
+  ssl: isLocalhost ? false : { rejectUnauthorized: false },
 });
 
 export default pool;

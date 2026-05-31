@@ -31,3 +31,12 @@ export function requireSysAdmin(req, res, next) {
     next();
   });
 }
+
+export function requireReception(req, res, next) {
+  requireAuth(req, res, () => {
+    if (!req.user.hasReceptionAccess) {
+      return res.status(403).json({ error: 'Reception portal access required' });
+    }
+    next();
+  });
+}

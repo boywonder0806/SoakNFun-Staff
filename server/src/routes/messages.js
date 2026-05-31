@@ -4,6 +4,89 @@ import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
+// Idempotent table creation for messaging
+pool.query(`CREATE TABLE IF NOT EXISTS conversations (
+  id         SERIAL PRIMARY KEY,
+  name       TEXT,
+  type       TEXT NOT NULL DEFAULT 'direct',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+)`).catch(e => console.error('conversations table:', e.message));
+
+pool.query(`CREATE TABLE IF NOT EXISTS conversation_members (
+  conversation_id INT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  employee_id     INT NOT NULL REFERENCES employees(id)     ON DELETE CASCADE,
+  PRIMARY KEY (conversation_id, employee_id)
+)`).catch(e => console.error('conversation_members table:', e.message));
+
+pool.query(`CREATE TABLE IF NOT EXISTS messages (
+  id              SERIAL PRIMARY KEY,
+  conversation_id INT  NOT NULL REFERENCES conversations(id)  ON DELETE CASCADE,
+  sender_id       INT  NOT NULL REFERENCES employees(id)      ON DELETE CASCADE,
+  text            TEXT NOT NULL,
+  sent_at         TIMESTAMPTZ DEFAULT NOW()
+)`).catch(e => console.error('messages table:', e.message));
+
+// GET /api/messages/employees?q= — search employees to message
+router.get('/employees', requireAuth, async (req, res) => {
+  const q = `%${(req.query.q || '').trim()}%`;
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name, avatar, department, position
+       FROM employees
+       WHERE is_active = TRUE AND id <> $1
+         AND (name ILIKE $2 OR department ILIKE $2 OR position ILIKE $2)
+       ORDER BY name LIMIT 20`,
+      [req.user.id, q]
+    );
+    res.json({ employees: rows });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to search employees' });
+  }
+});
+
+// POST /api/messages/direct — find or create a DM conversation
+router.post('/direct', requireAuth, async (req, res) => {
+  const userId   = req.user.id;
+  const { targetId } = req.body;
+  if (!targetId || targetId === userId) return res.status(400).json({ error: 'Invalid target' });
+
+  try {
+    // Find an existing direct conversation between the two users
+    const { rows: existing } = await pool.query(
+      `SELECT c.id FROM conversations c
+       JOIN conversation_members cm1 ON cm1.conversation_id = c.id AND cm1.employee_id = $1
+       JOIN conversation_members cm2 ON cm2.conversation_id = c.id AND cm2.employee_id = $2
+       WHERE c.type = 'direct'
+       LIMIT 1`,
+      [userId, targetId]
+    );
+    if (existing[0]) return res.json({ conversationId: existing[0].id });
+
+    // Create a new one inside a transaction so members are always added
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows: [convo] } = await client.query(
+        `INSERT INTO conversations (name, type) VALUES (NULL, 'direct') RETURNING id`
+      );
+      await client.query(
+        `INSERT INTO conversation_members (conversation_id, employee_id) VALUES ($1,$2),($1,$3)`,
+        [convo.id, userId, targetId]
+      );
+      await client.query('COMMIT');
+      res.json({ conversationId: convo.id });
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('Direct message error:', err.message);
+    res.status(500).json({ error: 'Failed to create conversation' });
+  }
+});
+
 // GET /api/messages/conversations
 router.get('/conversations', requireAuth, async (req, res) => {
   const userId = req.user.id;
