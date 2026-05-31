@@ -26,7 +26,9 @@ export function AuthProvider({ children }) {
   async function login(email, password) {
     const { data } = await api.post('/auth/login', { email, password });
     if (!data.user.hasReceptionAccess) {
-      throw new Error('Your account does not have reception portal access. Contact your administrator.');
+      const err = new Error('Your account does not have access to the reception portal. Contact your system administrator to request access.');
+      err.type = 'no_access';
+      throw err;
     }
     localStorage.setItem('rc_token', data.token);
     setUser(data.user);
