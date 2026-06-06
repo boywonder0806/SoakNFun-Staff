@@ -91,7 +91,7 @@ router.post('/', requireAdmin, async (req, res) => {
       return `${d}: ${dailyCoverage[d] ?? 2} staff/day (no positions defined — distribute evenly)`;
     }).join('\n\n');
 
-    const prompt = `You are a professional waterpark scheduler. Generate a weekly shift schedule as a JSON array.
+    const prompt = `You are a professional waterpark scheduler. Generate a weekly shift schedule.
 
 WEEK: ${days[0]} to ${days[6]} (Mon–Sun)
 
@@ -118,19 +118,22 @@ Each position may have SCHEDULING NOTES. These are operational requirements writ
 - If notes say the position isn't needed certain days, skip those days
 Treat every scheduling note as a binding instruction, not a suggestion.
 
-Return ONLY a valid JSON array with this exact shape, no explanation:
-[
-  {
-    "employeeId": 1,
-    "date": "2026-05-26",
-    "start": "09:00",
-    "end": "17:00",
-    "department": "Aquatics",
-    "position": "Tower 1",
-    "location": "",
-    "notes": ""
-  }
-]`;
+Return ONLY a valid JSON object with this exact shape, no other text:
+{
+  "shifts": [
+    {
+      "employeeId": 1,
+      "date": "2026-05-26",
+      "start": "09:00",
+      "end": "17:00",
+      "department": "Aquatics",
+      "position": "Tower 1",
+      "location": "",
+      "notes": ""
+    }
+  ],
+  "summary": "A 2–4 sentence paragraph explaining your overall scheduling decisions for this week — how you distributed hours, any positions you could not fully fill and why (e.g. not enough staff, department constraints), any employees who received fewer or more shifts than ideal, and any other notable trade-offs or assumptions you made."
+}`;
 
     const message = await client.messages.create({
       model: 'claude-opus-4-7',
@@ -140,11 +143,13 @@ Return ONLY a valid JSON array with this exact shape, no explanation:
 
     const raw = message.content[0].text.trim();
 
-    // Extract JSON array from response
-    const jsonMatch = raw.match(/\[[\s\S]*\]/);
+    // Extract JSON object from response
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return res.status(502).json({ error: 'AI returned an unexpected format. Try again.' });
 
-    const schedule = JSON.parse(jsonMatch[0]);
+    const parsed   = JSON.parse(jsonMatch[0]);
+    const schedule = Array.isArray(parsed) ? parsed : (parsed.shifts ?? []);
+    const summary  = typeof parsed.summary === 'string' ? parsed.summary.trim() : '';
 
     // Validate and insert each shift
     const inserted = [];
@@ -170,7 +175,7 @@ Return ONLY a valid JSON array with this exact shape, no explanation:
       if (rows[0]) inserted.push(rows[0]);
     }
 
-    res.json({ generated: inserted.length, shifts: inserted });
+    res.json({ generated: inserted.length, shifts: inserted, summary });
   } catch (err) {
     console.error('Auto-schedule error:', err.message);
     res.status(500).json({ error: 'Auto-schedule failed: ' + err.message });

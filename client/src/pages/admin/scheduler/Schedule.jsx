@@ -55,6 +55,7 @@ export default function Schedule() {
   const [ctxMenu, setCtxMenu]           = useState(null);
   const [aiModal, setAiModal]           = useState(false);
   const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiSummary, setAiSummary]       = useState(null);
   const [aiConfig, setAiConfig]         = useState({
     departments: SCHEDULABLE_DEPTS,
     dailyCoverage: { 'Aquatics': 2, 'Food & Beverage': 2, 'Guest Services': 2, 'Cleaning Crew': 1 },
@@ -153,7 +154,7 @@ export default function Schedule() {
     try {
       const res = await api.post('/admin/scheduler/auto-schedule', { weekStart, ...aiConfig });
       setAiModal(false);
-      showToast(`Generated ${res.data.generated} shifts for the week.`);
+      setAiSummary({ generated: res.data.generated, text: res.data.summary });
       load();
     } catch (e) {
       showToast(e.response?.data?.error ?? 'Auto-schedule failed. Try again.', 'error');
@@ -561,6 +562,43 @@ export default function Schedule() {
         </div>
       )}
 
+      {/* AI Summary modal */}
+      {aiSummary && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setAiSummary(null)} />
+          <div className="relative panel-raised w-full max-w-lg shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-rim/40">
+              <div className="flex items-center gap-3">
+                <span className="w-8 h-8 rounded-full bg-violet-500/20 border border-violet-500/30 flex items-center justify-center shrink-0">
+                  <SparkleIcon />
+                </span>
+                <div>
+                  <h2 className="font-heading font-bold text-ink text-base leading-tight">Schedule Generated</h2>
+                  <p className="text-10 text-fog mt-0.5">{aiSummary.generated} shift{aiSummary.generated !== 1 ? 's' : ''} added to the draft</p>
+                </div>
+              </div>
+              <button onClick={() => setAiSummary(null)} className="text-fog hover:text-ink transition-colors text-2xl leading-none">×</button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <p className="label-xs mb-2">AI Scheduling Notes</p>
+                <div className="bg-shell/60 border border-rim/40 rounded-xl px-4 py-4">
+                  <p className="text-sm text-fog-hi leading-relaxed">
+                    {aiSummary.text || 'No additional notes from the AI.'}
+                  </p>
+                </div>
+              </div>
+              <p className="text-10 text-fog">Review the draft schedule above and publish when ready.</p>
+            </div>
+            <div className="px-6 py-4 border-t border-rim/40 flex justify-end">
+              <button onClick={() => setAiSummary(null)} className="btn-primary px-6 py-2">
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Shift modal */}
       {modal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -649,6 +687,14 @@ function ShiftBlock({ shift, isPublished, onClick, onDragStart, onDragEnd, onCon
       </p>
       {shift.location && <p className="text-xs mt-0.5 opacity-75 truncate">{shift.location}</p>}
     </button>
+  );
+}
+
+function SparkleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-4 h-4 text-violet-400">
+      <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" />
+    </svg>
   );
 }
 
