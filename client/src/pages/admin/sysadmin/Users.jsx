@@ -246,7 +246,8 @@ function UserModal({ user, isSelf, onClose, onRoleUpdate, onUserUpdate, onLockUp
     setActiveDepts(next);
     setDeptSaving(true);
     try {
-      await api.patch(`/admin/employees/${user.id}/departments`, { departments: next });
+      const { data } = await api.patch(`/admin/employees/${user.id}/departments`, { departments: next });
+      onUserUpdate(user.id, { departments: data.user.departments, department: data.user.department });
     } catch (err) {
       setActiveDepts(activeDepts);
       console.error(err);
