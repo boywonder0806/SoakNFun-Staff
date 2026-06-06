@@ -7,6 +7,11 @@ import { requireAuth } from '../middleware/auth.js';
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
+// Ensure the has_reception_access column exists — safe to run multiple times
+pool.query(
+  'ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_reception_access BOOLEAN NOT NULL DEFAULT FALSE'
+).catch(e => console.error('auth migration (has_reception_access):', e.message));
+
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
@@ -14,14 +19,32 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'Email and password are required' });
   }
   try {
-    const { rows } = await pool.query(
-      `SELECT id, email, password_hash, name, role, department, departments,
-              position, avatar, phone, hire_date AS "hireDate", is_active AS "isActive",
-              force_password_reset AS "mustChangePassword", is_locked AS "isLocked",
-              COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"
-       FROM employees WHERE email = $1`,
-      [email.toLowerCase().trim()]
-    );
+    let rows;
+    try {
+      ({ rows } = await pool.query(
+        `SELECT id, email, password_hash, name, role, department, departments,
+                position, avatar, phone, hire_date AS "hireDate", is_active AS "isActive",
+                force_password_reset AS "mustChangePassword", is_locked AS "isLocked",
+                COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"
+         FROM employees WHERE email = $1`,
+        [email.toLowerCase().trim()]
+      ));
+    } catch (colErr) {
+      // Column doesn't exist yet — fall back to query without it
+      if (colErr.code === '42703') {
+        ({ rows } = await pool.query(
+          `SELECT id, email, password_hash, name, role, department, departments,
+                  position, avatar, phone, hire_date AS "hireDate", is_active AS "isActive",
+                  force_password_reset AS "mustChangePassword", is_locked AS "isLocked"
+           FROM employees WHERE email = $1`,
+          [email.toLowerCase().trim()]
+        ));
+        if (rows[0]) rows[0].hasReceptionAccess = false;
+      } else {
+        throw colErr;
+      }
+    }
+
     const user = rows[0];
     if (!user || !user.isActive) {
       return res.status(401).json({ error: 'Invalid email or password.' });
@@ -72,7 +95,9 @@ router.post('/change-password', requireAuth, async (req, res) => {
     const { rows } = await pool.query(
       `UPDATE employees SET password_hash = $1, force_password_reset = FALSE
        WHERE id = $2
-       RETURNING id, email, name, role, department, departments, position, avatar, phone`,
+       RETURNING id, email, name, role, department, departments, position, avatar, phone,
+                 is_locked AS "isLocked",
+                 COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"`,
       [hash, req.user.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'User not found' });

@@ -20,7 +20,7 @@ export default function ChangePassword() {
     try {
       const { data } = await api.post('/auth/change-password', { password });
       updateUser(data.token, data.user);
-      navigate(data.user.role === 'manager' || data.user.role === 'sysadmin' ? '/admin' : '/home');
+      navigate(data.user.role === 'manager' || data.user.role === 'sysadmin' ? '/scheduler' : '/home');
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to update password.');
     } finally {
