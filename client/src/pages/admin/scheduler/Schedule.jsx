@@ -36,9 +36,11 @@ export default function Schedule() {
     if (depts.length === 1) setDept(depts[0]);
   }, [depts.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [weekStart, setWeekStart] = useState(() =>
-    format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
-  );
+  const [weekStart, setWeekStart] = useState(() => {
+    const saved = localStorage.getItem('bb_sched_weekStart');
+    if (saved) return saved;
+    return format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+  });
   const [draftData, setDraftData]       = useState(null);
   const [publishedCount, setPublishedCount] = useState(0);
   const [loading, setLoading]           = useState(true);
@@ -92,6 +94,11 @@ export default function Schedule() {
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
   }, [ctxMenu]);
+
+  // Persist selected week so returning after closing the tab lands on the right draft
+  useEffect(() => {
+    localStorage.setItem('bb_sched_weekStart', weekStart);
+  }, [weekStart]);
 
   const nav = dir => setWeekStart(w =>
     format(dir === 'prev' ? subWeeks(parseISO(w), 1) : addWeeks(parseISO(w), 1), 'yyyy-MM-dd')
@@ -322,6 +329,14 @@ export default function Schedule() {
             >
               {publishing ? 'Publishing…' : isPublished ? 'Re-publish' : `Publish${hasDraft ? ` (${shifts.length})` : ''}`}
             </button>
+            {hasDraft && (
+              <span className="flex items-center gap-1 text-10 text-fog" title="Draft shifts are saved to the server — safe to close this tab">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3 text-green-400 shrink-0">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+                Auto-saved
+              </span>
+            )}
           </div>
         </div>
 
