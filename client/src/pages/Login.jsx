@@ -1,8 +1,27 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import api from '../lib/api.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function fmt12(t) {
+  if (!t) return '';
+  const [h, m] = t.split(':').map(Number);
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+}
+
+function fmtDur(mins) {
+  if (!mins) return null;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h > 0 ? `${h}h${m > 0 ? ` ${m}m` : ''}` : `${m}m`;
+}
+
+function fmtDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
 
 export default function Login() {
   const [email, setEmail]         = useState('');
@@ -13,8 +32,15 @@ export default function Login() {
   const [locked, setLocked]       = useState(false);
   const [attempts, setAttempts]   = useState(0);
   const [loading, setLoading]     = useState(false);
+  const [sunshine, setSunshine]   = useState([]);
   const { login } = useAuth();
   const navigate  = useNavigate();
+
+  useEffect(() => {
+    api.get('/operations/sunshine/recent')
+      .then(r => setSunshine(r.data.entries ?? []))
+      .catch(() => {});
+  }, []);
 
   function validateFields() {
     let ok = true;
@@ -149,6 +175,42 @@ export default function Login() {
         </div>
       </form>
 
+      {/* Sunshine Days quick-view */}
+      {sunshine.length > 0 && (
+        <div className="w-full max-w-sm relative z-10 mt-4">
+          <div className="panel p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <SunIcon className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <p className="text-10 font-bold tracking-widest uppercase text-fog">Recent Sunshine Day Closures</p>
+            </div>
+            <div className="space-y-2">
+              {sunshine.map(e => (
+                <div key={e.id} className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60 shrink-0" />
+                    <span className="text-xs text-fog-hi truncate">{fmtDate(e.date)}</span>
+                    {e.startTime && (
+                      <span className="text-10 text-fog shrink-0">
+                        {fmt12(e.startTime)}{e.endTime ? ` – ${fmt12(e.endTime)}` : ''}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {e.durationMinutes ? (
+                      <span className="text-10 font-bold text-amber-400 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full">
+                        {fmtDur(e.durationMinutes)}
+                      </span>
+                    ) : (
+                      <span className="text-10 text-fog italic">Ongoing</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Animated waves */}
       <div className="absolute bottom-0 left-0 right-0 overflow-hidden pointer-events-none" style={{ height: '90px' }}>
         <div className="absolute bottom-0 left-0 flex" style={{ width: '200%', animation: 'wave-flow 40s linear infinite' }}>
@@ -178,6 +240,18 @@ function AlertIcon() {
       <circle cx="12" cy="12" r="10" />
       <line x1="12" y1="8" x2="12" y2="12" />
       <line x1="12" y1="16" x2="12.01" y2="16" />
+    </svg>
+  );
+}
+
+function SunIcon({ className = 'w-4 h-4' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
+      <circle cx="12" cy="12" r="4" />
+      <line x1="12" y1="2"  x2="12" y2="4" /><line x1="12" y1="20" x2="12" y2="22" />
+      <line x1="4.22" y1="4.22"  x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+      <line x1="2"  y1="12" x2="4"  y2="12" /><line x1="20" y1="12" x2="22" y2="12" />
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
     </svg>
   );
 }

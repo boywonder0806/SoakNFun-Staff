@@ -23,6 +23,7 @@ import TimeOff from './pages/TimeOff.jsx';
 import ShiftBoard from './pages/ShiftBoard.jsx';
 import ChangePassword from './pages/ChangePassword.jsx';
 import Reports from './pages/Reports.jsx';
+import Operations from './pages/Operations.jsx';
 
 function ProtectedRoute({ children, adminOnly = false, sysadminOnly = false, managerOnly = false, managementOnly = false }) {
   const { user, loading } = useAuth();
@@ -107,6 +108,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute managementOnly>
               <Reports />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="operations"
+          element={
+            <ProtectedRoute adminOnly>
+              <Operations />
             </ProtectedRoute>
           }
         />
