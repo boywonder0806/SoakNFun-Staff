@@ -25,12 +25,14 @@ function calcDuration(start, end) {
 
 // ── Public: login screen quick-view ──────────────────────────────────────────
 // GET /api/operations/sunshine/recent  (no auth — shown on login screen)
+// Only returns closures that actually triggered the 90-minute policy
 router.get('/sunshine/recent', async (_req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT id, date::text, start_time::text AS "startTime",
               end_time::text AS "endTime", duration_minutes AS "durationMinutes", notes
        FROM sunshine_days
+       WHERE duration_minutes >= 90
        ORDER BY date DESC, start_time DESC
        LIMIT 5`
     );
