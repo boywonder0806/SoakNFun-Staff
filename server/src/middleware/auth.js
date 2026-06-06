@@ -40,3 +40,14 @@ export function requireReception(req, res, next) {
     next();
   });
 }
+
+export function requireManagement(req, res, next) {
+  requireAuth(req, res, () => {
+    const depts = req.user.departments ?? [];
+    if (req.user.role === 'sysadmin' || depts.includes('Management')) {
+      next();
+    } else {
+      res.status(403).json({ error: 'Management department access required' });
+    }
+  });
+}

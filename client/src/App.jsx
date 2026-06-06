@@ -22,8 +22,9 @@ import StaffProfile from './pages/admin/staff/StaffProfile.jsx';
 import TimeOff from './pages/TimeOff.jsx';
 import ShiftBoard from './pages/ShiftBoard.jsx';
 import ChangePassword from './pages/ChangePassword.jsx';
+import Reports from './pages/Reports.jsx';
 
-function ProtectedRoute({ children, adminOnly = false, sysadminOnly = false, managerOnly = false }) {
+function ProtectedRoute({ children, adminOnly = false, sysadminOnly = false, managerOnly = false, managementOnly = false }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="flex items-center justify-center h-screen text-bb-muted">Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
@@ -31,6 +32,7 @@ function ProtectedRoute({ children, adminOnly = false, sysadminOnly = false, man
   if (sysadminOnly && user.role !== 'sysadmin') return <Navigate to="/home" replace />;
   if (adminOnly && user.role !== 'manager' && user.role !== 'sysadmin') return <Navigate to="/home" replace />;
   if (managerOnly && user.role !== 'manager') return <Navigate to="/home" replace />;
+  if (managementOnly && user.role !== 'sysadmin' && !user.departments?.includes('Management')) return <Navigate to="/home" replace />;
   return children;
 }
 
@@ -97,6 +99,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute adminOnly>
               <ManageStaff />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="reports"
+          element={
+            <ProtectedRoute managementOnly>
+              <Reports />
             </ProtectedRoute>
           }
         />

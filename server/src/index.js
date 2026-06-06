@@ -13,6 +13,7 @@ import timeOffRouter from './routes/timeoff.js';
 import shiftBoardRouter from './routes/shiftboard.js';
 import netchexRouter from './routes/netchex.js';
 import receptionRouter from './routes/reception.js';
+import reportsRouter from './routes/reports.js';
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -44,6 +45,7 @@ app.use('/api/shiftboard', shiftBoardRouter);
 app.use('/api/netchex/parse', express.raw({ type: 'application/pdf', limit: '8mb' }));
 app.use('/api/netchex',    netchexRouter);
 app.use('/api/reception',  receptionRouter);
+app.use('/api/reports',    reportsRouter);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'Blue Bayou Staff API' }));
 

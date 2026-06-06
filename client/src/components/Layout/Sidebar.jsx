@@ -8,8 +8,11 @@ const NAV = [
   { to: '/announcements', label: 'Board',    icon: BroadcastIcon },
 ];
 const ADMIN_NAV = [
-  { to: '/scheduler',   label: 'T&A',  icon: ClockIcon },
+  { to: '/scheduler',    label: 'T&A',   icon: ClockIcon },
   { to: '/staff/manage', label: 'Staff', icon: StaffIcon },
+];
+const MANAGEMENT_NAV = [
+  { to: '/reports', label: 'Reports', icon: ReportIcon },
 ];
 const SYSADMIN_NAV = [
   { to: '/sysadmin/users', label: 'System', icon: ShieldIcon },
@@ -19,9 +22,11 @@ export default function Sidebar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
+  const isManagement = user?.role === 'sysadmin' || user?.departments?.includes('Management');
+
   const items =
-    user?.role === 'sysadmin' ? [...NAV, ...ADMIN_NAV, ...SYSADMIN_NAV] :
-    user?.role === 'manager'  ? [...NAV, ...ADMIN_NAV] :
+    user?.role === 'sysadmin' ? [...NAV, ...ADMIN_NAV, ...MANAGEMENT_NAV, ...SYSADMIN_NAV] :
+    user?.role === 'manager'  ? [...NAV, ...ADMIN_NAV, ...(isManagement ? MANAGEMENT_NAV : [])] :
     NAV;
 
   return (
@@ -220,6 +225,17 @@ function LightningIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} className="w-full h-full">
       <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+function ReportIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} className="w-full h-full">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="8" y1="13" x2="16" y2="13" />
+      <line x1="8" y1="17" x2="16" y2="17" />
+      <line x1="8" y1="9"  x2="10" y2="9"  />
     </svg>
   );
 }
