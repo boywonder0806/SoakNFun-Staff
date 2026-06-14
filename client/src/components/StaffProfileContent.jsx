@@ -78,6 +78,7 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
   const [lockSaving, setLockSaving]       = useState(false);
   const [statusSaving, setStatusSaving]   = useState(false);
   const [deactivateConfirm, setDeactivateConfirm] = useState(false);
+  const [receptionSaving, setReceptionSaving] = useState(false);
 
   const color     = DEPT_COLOR[emp.department];
   const pillStyle = DEPT_PILL[emp.department] ?? 'bg-rim/20 border-rim/40 text-fog';
@@ -205,6 +206,17 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
       await api.delete(`/admin/staff/notes/${noteId}`);
       setNotes(prev => prev.filter(n => n.id !== noteId));
     } catch {}
+  }
+
+  async function handleReceptionToggle() {
+    setReceptionSaving(true);
+    const newAccess = !emp.hasReceptionAccess;
+    try {
+      await api.patch(`/admin/staff/${emp.id}/reception-access`, { hasAccess: newAccess });
+      setLogs(prev => [{ id: Date.now(), event: newAccess ? 'Reception access granted' : 'Reception access revoked', createdAt: new Date().toISOString(), actorName: currentUser?.name }, ...prev]);
+      onUpdated({ ...emp, hasReceptionAccess: newAccess });
+    } catch {}
+    finally { setReceptionSaving(false); }
   }
 
   return (
@@ -473,6 +485,38 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
                 </div>
               </div>
             </div>
+
+            {/* Reception access */}
+            {emp.role === 'crew_member' && (
+              <div>
+                <p className="label-xs mb-4">Portal Access</p>
+                <div className={`panel p-4 flex items-start justify-between ${emp.hasReceptionAccess ? 'border-cyan/30 bg-cyan/5' : ''}`}>
+                  <div>
+                    <p className="text-sm font-semibold text-ink">Reception Portal</p>
+                    <p className="text-10 text-fog mt-0.5">
+                      {emp.hasReceptionAccess
+                        ? 'This staff member can log in to the reception portal'
+                        : 'Grant access to the reception portal (call log, lost & found)'}
+                    </p>
+                    {emp.hasReceptionAccess && (
+                      <span className="inline-flex items-center gap-1.5 text-10 font-semibold text-cyan mt-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-cyan" /> Access enabled
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleReceptionToggle}
+                    disabled={receptionSaving}
+                    className={`rounded-md px-3 py-1.5 text-xs shrink-0 ml-3 border font-semibold transition-colors
+                      ${emp.hasReceptionAccess
+                        ? 'bg-red-950/20 border-red-500/30 text-red-400 hover:bg-red-950/40'
+                        : 'bg-cyan/10 border-cyan/30 text-cyan hover:bg-cyan/20'}`}
+                  >
+                    {receptionSaving ? 'Saving…' : emp.hasReceptionAccess ? 'Revoke' : 'Grant Access'}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Security actions */}
             <div>

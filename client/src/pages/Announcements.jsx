@@ -132,8 +132,7 @@ export default function Announcements() {
 // ── Announcement card ─────────────────────────────────────────────────────────
 function AnnouncementCard({ a, isManager, onEdit, onDelete }) {
   const [expanded, setExpanded]     = useState(false);
-  const [deleting, setDeleting]     = useState(false);
-  const [confirmDel, setConfirmDel] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const isHigh = a.priority === 'high';
   const isNew  = a.date >= new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
@@ -141,6 +140,7 @@ function AnnouncementCard({ a, isManager, onEdit, onDelete }) {
   const long   = a.body.length > 200;
 
   async function handleDelete() {
+    if (!window.confirm('Delete this announcement? This cannot be undone.')) return;
     setDeleting(true);
     try {
       await api.delete(`/announcements/${a.id}`);
@@ -148,7 +148,6 @@ function AnnouncementCard({ a, isManager, onEdit, onDelete }) {
     } catch (err) {
       console.error(err);
       setDeleting(false);
-      setConfirmDel(false);
     }
   }
 
@@ -198,26 +197,14 @@ function AnnouncementCard({ a, isManager, onEdit, onDelete }) {
                 >
                   <PencilIcon />
                 </button>
-                {!confirmDel ? (
-                  <button
-                    onClick={() => setConfirmDel(true)}
-                    className="p-1.5 rounded-md text-fog hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                    title="Delete"
-                  >
-                    <TrashIcon />
-                  </button>
-                ) : (
-                  <div className="flex gap-1 items-center">
-                    <button onClick={handleDelete} disabled={deleting}
-                      className="px-2 py-1 rounded text-10 font-bold bg-red-500 text-white hover:bg-red-600 transition-colors">
-                      {deleting ? '…' : 'Delete'}
-                    </button>
-                    <button onClick={() => setConfirmDel(false)}
-                      className="px-2 py-1 rounded text-10 font-bold text-fog hover:text-ink transition-colors">
-                      Cancel
-                    </button>
-                  </div>
-                )}
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="p-1.5 rounded-md text-fog hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                  title="Delete"
+                >
+                  {deleting ? '…' : <TrashIcon />}
+                </button>
               </div>
             )}
           </div>

@@ -61,6 +61,15 @@ export default function LostFound({ onUnclaimedCount }) {
     setSelected(null);
   }
 
+  function handleDeleted(id) {
+    setItems(prev => {
+      const next = prev.filter(i => i.id !== id);
+      onUnclaimedCount?.(next.filter(i => i.status === 'unclaimed').length);
+      return next;
+    });
+    setSelected(null);
+  }
+
   const visible = items.filter(i => {
     if (filter !== 'all' && i.status !== filter) return false;
     if (search) {
@@ -148,15 +157,14 @@ export default function LostFound({ onUnclaimedCount }) {
       </div>
 
       {showModal  && <LogItemModal onClose={() => setShowModal(false)} onCreated={handleCreated} />}
-      {selected   && <ItemDetailModal item={selected} onClose={() => setSelected(null)} onUpdated={handleUpdated} />}
+      {selected   && <ItemDetailModal item={selected} onClose={() => setSelected(null)} onUpdated={handleUpdated} onDeleted={handleDeleted} />}
     </div>
   );
 }
 
 function LogItemModal({ onClose, onCreated }) {
   const [form, setForm] = useState({
-    itemType: '', itemDescription: '', locationFound: '', foundDate: today(),
-    ownerName: '', ownerContact: '', notes: '',
+    itemType: '', itemDescription: '', locationFound: '', foundDate: today(), notes: '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState('');
@@ -211,17 +219,6 @@ function LogItemModal({ onClose, onCreated }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="label">Owner Name</label>
-            <input className="field" placeholder="If known" value={form.ownerName} onChange={set('ownerName')} />
-          </div>
-          <div>
-            <label className="label">Owner Contact</label>
-            <input className="field" placeholder="Phone or email" value={form.ownerContact} onChange={set('ownerContact')} />
-          </div>
-        </div>
-
         <div>
           <label className="label">Notes</label>
           <textarea className="field resize-none" rows={2} placeholder="Condition, color, any other details…" value={form.notes} onChange={set('notes')} />
@@ -239,13 +236,14 @@ function LogItemModal({ onClose, onCreated }) {
   );
 }
 
-function ItemDetailModal({ item, onClose, onUpdated }) {
+function ItemDetailModal({ item, onClose, onUpdated, onDeleted }) {
   const [status, setStatus]             = useState(item.status);
   const [itemType, setItemType]         = useState(item.itemType || '');
   const [ownerName, setOwnerName]       = useState(item.ownerName || '');
   const [ownerContact, setOwnerContact] = useState(item.ownerContact || '');
   const [notes, setNotes]               = useState(item.notes || '');
   const [saving, setSaving]             = useState(false);
+  const [deleting, setDeleting]         = useState(false);
 
   async function handleSave() {
     setSaving(true);
@@ -254,6 +252,17 @@ function ItemDetailModal({ item, onClose, onUpdated }) {
       onUpdated(data.item);
     } catch {}
     setSaving(false);
+  }
+
+  async function handleDelete() {
+    if (!window.confirm('Delete this lost & found entry? This cannot be undone.')) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/reception/lost-found/${item.id}`);
+      onDeleted(item.id);
+    } catch {
+      setDeleting(false);
+    }
   }
 
   return (
@@ -300,16 +309,18 @@ function ItemDetailModal({ item, onClose, onUpdated }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="label">Owner Name</label>
-            <input className="field" value={ownerName} onChange={e => setOwnerName(e.target.value)} placeholder="If claimed" />
+        {status === 'claimed' && (
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">Owner Name</label>
+              <input className="field" value={ownerName} onChange={e => setOwnerName(e.target.value)} placeholder="Full name" autoFocus />
+            </div>
+            <div>
+              <label className="label">Owner Contact</label>
+              <input className="field" value={ownerContact} onChange={e => setOwnerContact(e.target.value)} placeholder="Phone or email" />
+            </div>
           </div>
-          <div>
-            <label className="label">Owner Contact</label>
-            <input className="field" value={ownerContact} onChange={e => setOwnerContact(e.target.value)} placeholder="Phone or email" />
-          </div>
-        </div>
+        )}
 
         <div>
           <label className="label">Notes</label>
@@ -318,8 +329,15 @@ function ItemDetailModal({ item, onClose, onUpdated }) {
 
         <div className="flex gap-3 pt-1">
           <button type="button" onClick={onClose} className="btn-ghost flex-1">Cancel</button>
-          <button onClick={handleSave} disabled={saving} className="btn-primary flex-1">
+          <button onClick={handleSave} disabled={saving || deleting} className="btn-primary flex-1">
             {saving ? <><Spinner /> Saving…</> : 'Update'}
+          </button>
+        </div>
+
+        <div className="flex justify-end pt-1">
+          <button onClick={handleDelete} disabled={deleting || saving}
+            className="text-xs text-gray-400 hover:text-red-500 hover:bg-red-50 px-3 py-2 rounded-lg transition-colors disabled:opacity-50">
+            {deleting ? 'Deleting…' : 'Delete this entry'}
           </button>
         </div>
       </div>

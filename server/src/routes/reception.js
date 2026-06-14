@@ -268,6 +268,19 @@ router.patch('/lost-found/:id', requireReception, async (req, res) => {
   }
 });
 
+router.delete('/lost-found/:id', requireReception, async (req, res) => {
+  try {
+    const { rowCount } = await pool.query(
+      `DELETE FROM lost_found WHERE id = $1`,
+      [parseInt(req.params.id)]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Item not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete item' });
+  }
+});
+
 // ── Callback Requests ─────────────────────────────────────────────────────────
 router.get('/callbacks', requireReception, async (_req, res) => {
   try {

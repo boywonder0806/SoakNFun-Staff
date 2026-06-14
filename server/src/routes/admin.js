@@ -113,7 +113,8 @@ router.get('/employees', requireAdmin, async (_req, res) => {
       `SELECT id, email, name, role, department, departments, position,
               avatar, phone, hire_date AS "hireDate", is_active AS "isActive",
               photo_url AS "photoUrl", is_locked AS "isLocked",
-              created_at AS "createdAt"
+              created_at AS "createdAt",
+              COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"
        FROM employees ORDER BY name`
     );
     res.json({ employees: rows });
@@ -301,7 +302,8 @@ router.patch('/staff/:id', requireAdmin, async (req, res) => {
        WHERE id = $7 AND role = 'crew_member'
        RETURNING id, name, email, role, department, departments, position, phone,
                  hire_date AS "hireDate", avatar, is_active AS "isActive",
-                 is_locked AS "isLocked", photo_url AS "photoUrl"`,
+                 is_locked AS "isLocked", photo_url AS "photoUrl",
+                 COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"`,
       [name||null, email||null, phone||null, position||null, department||null,
        hireDate||null, parseInt(req.params.id)]
     );
@@ -313,6 +315,23 @@ router.patch('/staff/:id', requireAdmin, async (req, res) => {
   }
 });
 
+router.patch('/staff/:id/reception-access', requireAdmin, async (req, res) => {
+  const { hasAccess } = req.body;
+  const empId = parseInt(req.params.id);
+  try {
+    const { rows } = await pool.query(
+      `UPDATE employees SET has_reception_access = $1 WHERE id = $2 AND role = 'crew_member'
+       RETURNING id, COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"`,
+      [hasAccess === true, empId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Staff member not found.' });
+    logEvent(empId, hasAccess ? 'Reception access granted' : 'Reception access revoked', {}, req.user.id, req.ip);
+    res.json({ employee: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update reception access.' });
+  }
+});
+
 // ── Staff detail tabs ─────────────────────────────────────────────────────────
 router.get('/staff/:id', requireAdmin, async (req, res) => {
   try {
@@ -320,7 +339,8 @@ router.get('/staff/:id', requireAdmin, async (req, res) => {
       `SELECT id, name, email, role, department, departments, position, phone,
               hire_date AS "hireDate", avatar, is_active AS "isActive",
               is_locked AS "isLocked", photo_url AS "photoUrl",
-              created_at AS "createdAt"
+              created_at AS "createdAt",
+              COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"
        FROM employees WHERE id = $1 AND role = 'crew_member'`,
       [parseInt(req.params.id)]
     );
