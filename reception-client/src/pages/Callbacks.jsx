@@ -13,6 +13,7 @@ export default function Callbacks({ onPendingCount }) {
   const [staff, setStaff]         = useState([]);
   const [loading, setLoading]     = useState(true);
   const [showModal, setShowModal]  = useState(false);
+  const [editTarget, setEditTarget] = useState(null);
   const [filter, setFilter]        = useState('pending');
   const [search, setSearch]        = useState('');
 
@@ -47,6 +48,18 @@ export default function Callbacks({ onPendingCount }) {
     } catch {}
   }
 
+  async function deleteCallback(id) {
+    if (!window.confirm('Delete this callback request?')) return;
+    try {
+      await api.delete(`/reception/callbacks/${id}`);
+      setCallbacks(prev => {
+        const next = prev.filter(c => c.id !== id);
+        updatePendingCount(next);
+        return next;
+      });
+    } catch {}
+  }
+
   function handleCreated(cb) {
     setCallbacks(prev => {
       const next = [cb, ...prev];
@@ -54,6 +67,15 @@ export default function Callbacks({ onPendingCount }) {
       return next;
     });
     setShowModal(false);
+  }
+
+  function handleEdited(cb) {
+    setCallbacks(prev => {
+      const next = prev.map(c => c.id === cb.id ? { ...c, ...cb } : c);
+      updatePendingCount(next);
+      return next;
+    });
+    setEditTarget(null);
   }
 
   const visible = callbacks.filter(c => {
@@ -68,8 +90,8 @@ export default function Callbacks({ onPendingCount }) {
     return true;
   });
 
-  const pending   = visible.filter(c => c.status === 'pending');
-  const resolved  = visible.filter(c => c.status !== 'pending');
+  const pending  = visible.filter(c => c.status === 'pending');
+  const resolved = visible.filter(c => c.status !== 'pending');
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -115,37 +137,61 @@ export default function Callbacks({ onPendingCount }) {
         <div className="card p-12 text-center text-gray-400 text-sm">No callbacks found.</div>
       ) : (
         <div className="space-y-6">
-          {/* Pending */}
           {(filter === 'pending' || filter === 'all') && pending.length > 0 && (
             <section>
               {filter === 'all' && <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Pending</h3>}
               <div className="space-y-3">
-                {pending.map(cb => <CallbackCard key={cb.id} cb={cb} onStatusChange={updateStatus} />)}
+                {pending.map(cb => (
+                  <CallbackCard key={cb.id} cb={cb}
+                    onStatusChange={updateStatus}
+                    onEdit={() => setEditTarget(cb)}
+                    onDelete={() => deleteCallback(cb.id)}
+                  />
+                ))}
               </div>
             </section>
           )}
 
-          {/* Resolved */}
-          {(filter !== 'pending') && resolved.length > 0 && (
+          {filter !== 'pending' && resolved.length > 0 && (
             <section>
               {filter === 'all' && pending.length > 0 && (
                 <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Resolved</h3>
               )}
               <div className="space-y-3">
-                {resolved.map(cb => <CallbackCard key={cb.id} cb={cb} onStatusChange={updateStatus} />)}
+                {resolved.map(cb => (
+                  <CallbackCard key={cb.id} cb={cb}
+                    onStatusChange={updateStatus}
+                    onEdit={() => setEditTarget(cb)}
+                    onDelete={() => deleteCallback(cb.id)}
+                  />
+                ))}
               </div>
             </section>
           )}
         </div>
       )}
 
-      {showModal && <LogCallbackModal staff={staff} onClose={() => setShowModal(false)} onCreated={handleCreated} />}
+      {showModal && (
+        <CallbackFormModal
+          staff={staff}
+          onClose={() => setShowModal(false)}
+          onSaved={handleCreated}
+        />
+      )}
+      {editTarget && (
+        <CallbackFormModal
+          staff={staff}
+          initial={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSaved={handleEdited}
+        />
+      )}
     </div>
   );
 }
 
-function CallbackCard({ cb, onStatusChange }) {
-  const meta     = STATUS_META[cb.status] ?? STATUS_META.pending;
+function CallbackCard({ cb, onStatusChange, onEdit, onDelete }) {
+  const meta      = STATUS_META[cb.status] ?? STATUS_META.pending;
   const isPending = cb.status === 'pending';
 
   return (
@@ -158,36 +204,57 @@ function CallbackCard({ cb, onStatusChange }) {
           </div>
           <p className="text-sm text-gray-500 mt-0.5">{cb.callerPhone}</p>
           {cb.reason && <p className="text-sm text-gray-700 mt-1.5">"{cb.reason}"</p>}
+          {cb.notes  && <p className="text-xs text-gray-500 mt-1 italic">{cb.notes}</p>}
           <div className="flex items-center gap-4 mt-2 flex-wrap">
             {cb.requestedStaffName && (
               <span className="text-xs text-gray-500">For: <span className="font-medium text-gray-700">{cb.requestedStaffName}</span></span>
             )}
             <span className="text-xs text-gray-400">Logged by {cb.loggedByName || 'unknown'} · {fmtTime(cb.createdAt)}</span>
+            {!isPending && cb.completedByName && (
+              <span className="text-xs text-gray-400">Resolved by {cb.completedByName} · {fmtTime(cb.completedAt)}</span>
+            )}
           </div>
         </div>
 
-        {isPending && (
-          <div className="flex flex-col gap-2 shrink-0">
-            <button
-              onClick={() => onStatusChange(cb, 'completed')}
-              className="px-3 py-1.5 text-xs font-semibold bg-green-100 text-green-700 hover:bg-green-200 rounded-lg transition-colors">
-              Completed
+        <div className="flex flex-col gap-2 shrink-0 items-end">
+          {isPending && (
+            <>
+              <button
+                onClick={() => onStatusChange(cb, 'completed')}
+                className="px-3 py-1.5 text-xs font-semibold bg-green-100 text-green-700 hover:bg-green-200 rounded-lg transition-colors">
+                Completed
+              </button>
+              <button
+                onClick={() => onStatusChange(cb, 'unable_to_reach')}
+                className="px-3 py-1.5 text-xs font-semibold bg-red-100 text-red-600 hover:bg-red-200 rounded-lg transition-colors">
+                Unable to Reach
+              </button>
+            </>
+          )}
+          <div className="flex gap-1 mt-1">
+            <button onClick={onEdit} title="Edit"
+              className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors">
+              <EditIcon />
             </button>
-            <button
-              onClick={() => onStatusChange(cb, 'unable_to_reach')}
-              className="px-3 py-1.5 text-xs font-semibold bg-red-100 text-red-600 hover:bg-red-200 rounded-lg transition-colors">
-              Unable to Reach
+            <button onClick={onDelete} title="Delete"
+              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors">
+              <TrashIcon />
             </button>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
 }
 
-function LogCallbackModal({ staff, onClose, onCreated }) {
+function CallbackFormModal({ staff, onClose, onSaved, initial = null }) {
+  const isEdit = initial !== null;
   const [form, setForm] = useState({
-    callerName: '', callerPhone: '', reason: '', requestedStaffId: '', notes: '',
+    callerName:       initial?.callerName  || '',
+    callerPhone:      initial?.callerPhone || '',
+    reason:           initial?.reason      || '',
+    requestedStaffId: initial?.requestedStaffId ? String(initial.requestedStaffId) : '',
+    notes:            initial?.notes       || '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState('');
@@ -200,18 +267,21 @@ function LogCallbackModal({ staff, onClose, onCreated }) {
     if (!form.callerPhone.trim()) { setError('Caller phone is required.'); return; }
     setSaving(true); setError('');
     try {
-      const { data } = await api.post('/reception/callbacks', {
+      const payload = {
         ...form,
         requestedStaffId: form.requestedStaffId ? parseInt(form.requestedStaffId) : null,
-      });
-      onCreated(data.callback);
+      };
+      const { data } = isEdit
+        ? await api.patch(`/reception/callbacks/${initial.id}`, payload)
+        : await api.post('/reception/callbacks', payload);
+      onSaved(data.callback);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to log callback.');
+      setError(err.response?.data?.error || `Failed to ${isEdit ? 'update' : 'log'} callback.`);
     } finally { setSaving(false); }
   }
 
   return (
-    <Modal title="Log Callback Request" onClose={onClose}>
+    <Modal title={isEdit ? 'Edit Callback Request' : 'Log Callback Request'} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -249,7 +319,7 @@ function LogCallbackModal({ staff, onClose, onCreated }) {
         <div className="flex gap-3 pt-1">
           <button type="button" onClick={onClose} className="btn-ghost flex-1">Cancel</button>
           <button type="submit" disabled={saving} className="btn-primary flex-1">
-            {saving ? <><Spinner /> Saving…</> : 'Save Request'}
+            {saving ? <><Spinner /> Saving…</> : isEdit ? 'Save Changes' : 'Save Request'}
           </button>
         </div>
       </form>
@@ -265,10 +335,31 @@ function fmtTime(iso) {
   const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   return isToday ? time : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
 }
+
 function PlusIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-4 h-4">
       <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
+function EditIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14H6L5 6" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M9 6V4h6v2" />
     </svg>
   );
 }

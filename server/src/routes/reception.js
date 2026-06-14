@@ -243,9 +243,13 @@ router.post('/callbacks', requireReception, async (req, res) => {
 });
 
 router.patch('/callbacks/:id', requireReception, async (req, res) => {
-  const { status, notes } = req.body;
+  const { status, notes, callerName, callerPhone, reason, requestedStaffId } = req.body;
   const fields = [];
   const vals   = [];
+  if (callerName       !== undefined) { fields.push(`caller_name        = $${vals.length + 1}`); vals.push(callerName || null); }
+  if (callerPhone      !== undefined) { fields.push(`caller_phone       = $${vals.length + 1}`); vals.push(callerPhone || null); }
+  if (reason           !== undefined) { fields.push(`reason             = $${vals.length + 1}`); vals.push(reason || null); }
+  if (requestedStaffId !== undefined) { fields.push(`requested_staff_id = $${vals.length + 1}`); vals.push(requestedStaffId || null); }
   if (status !== undefined) {
     fields.push(`status = $${vals.length + 1}`);
     vals.push(status);
@@ -255,20 +259,42 @@ router.patch('/callbacks/:id', requireReception, async (req, res) => {
       vals.push(req.user.id);
     }
   }
-  if (notes !== undefined) { fields.push(`notes = $${vals.length + 1}`); vals.push(notes); }
+  if (notes !== undefined) { fields.push(`notes = $${vals.length + 1}`); vals.push(notes || null); }
   if (!fields.length) return res.status(400).json({ error: 'Nothing to update' });
   vals.push(parseInt(req.params.id));
   try {
-    const { rows } = await pool.query(
-      `UPDATE callback_requests SET ${fields.join(', ')} WHERE id = $${vals.length}
-       RETURNING id, caller_name AS "callerName", caller_phone AS "callerPhone",
-                 reason, status, notes, created_at AS "createdAt", completed_at AS "completedAt"`,
+    const { rowCount } = await pool.query(
+      `UPDATE callback_requests SET ${fields.join(', ')} WHERE id = $${vals.length}`,
       vals
     );
-    if (!rows[0]) return res.status(404).json({ error: 'Callback not found' });
+    if (!rowCount) return res.status(404).json({ error: 'Callback not found' });
+    const { rows } = await pool.query(
+      `SELECT cb.id, cb.caller_name AS "callerName", cb.caller_phone AS "callerPhone",
+              cb.reason, cb.status, cb.notes,
+              cb.created_at AS "createdAt", cb.completed_at AS "completedAt",
+              e.name  AS "loggedByName",
+              rs.id   AS "requestedStaffId", rs.name AS "requestedStaffName",
+              ce.name AS "completedByName"
+       FROM callback_requests cb
+       LEFT JOIN employees e  ON cb.logged_by          = e.id
+       LEFT JOIN employees rs ON cb.requested_staff_id  = rs.id
+       LEFT JOIN employees ce ON cb.completed_by        = ce.id
+       WHERE cb.id = $1`,
+      [parseInt(req.params.id)]
+    );
     res.json({ callback: rows[0] });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update callback' });
+  }
+});
+
+router.delete('/callbacks/:id', requireReception, async (req, res) => {
+  try {
+    const { rowCount } = await pool.query('DELETE FROM callback_requests WHERE id = $1', [parseInt(req.params.id)]);
+    if (!rowCount) return res.status(404).json({ error: 'Callback not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete callback' });
   }
 });
 
