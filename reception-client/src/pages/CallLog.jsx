@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import api from '../lib/api.js';
 
 const DIRECTION_OPTS = [
-  { value: 'inbound',  label: 'Inbound',  color: 'bg-blue-100 text-blue-700'   },
+  { value: 'inbound',  label: 'Inbound',  color: 'bg-blue-100 text-blue-700'     },
   { value: 'outbound', label: 'Outbound', color: 'bg-violet-100 text-violet-700' },
 ];
 
@@ -10,12 +10,14 @@ function directionStyle(d) {
   return DIRECTION_OPTS.find(o => o.value === d)?.color ?? 'bg-gray-100 text-gray-600';
 }
 
-export default function CallLog() {
-  const [calls, setCalls]     = useState([]);
-  const [loading, setLoading] = useState(true);
+const todayStr = new Date().toDateString();
+
+export default function CallLog({ onTodayCallsCount }) {
+  const [calls, setCalls]         = useState([]);
+  const [loading, setLoading]     = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [search, setSearch]   = useState('');
-  const [filter, setFilter]   = useState('all'); // all | unresolved | resolved
+  const [search, setSearch]       = useState('');
+  const [filter, setFilter]       = useState('all');
 
   useEffect(() => { fetchCalls(); }, []);
 
@@ -24,6 +26,7 @@ export default function CallLog() {
     try {
       const { data } = await api.get('/reception/calls');
       setCalls(data.calls);
+      onTodayCallsCount?.(data.calls.filter(c => new Date(c.createdAt).toDateString() === todayStr).length);
     } catch {}
     setLoading(false);
   }
@@ -39,17 +42,25 @@ export default function CallLog() {
     if (!confirm('Delete this call log entry?')) return;
     try {
       await api.delete(`/reception/calls/${id}`);
-      setCalls(prev => prev.filter(c => c.id !== id));
+      setCalls(prev => {
+        const next = prev.filter(c => c.id !== id);
+        onTodayCallsCount?.(next.filter(c => new Date(c.createdAt).toDateString() === todayStr).length);
+        return next;
+      });
     } catch {}
   }
 
   function handleCreated(call) {
-    setCalls(prev => [call, ...prev]);
+    setCalls(prev => {
+      const next = [call, ...prev];
+      onTodayCallsCount?.(next.filter(c => new Date(c.createdAt).toDateString() === todayStr).length);
+      return next;
+    });
     setShowModal(false);
   }
 
   const visible = calls.filter(c => {
-    if (filter === 'unresolved' && c.resolved) return false;
+    if (filter === 'unresolved' && c.resolved)  return false;
     if (filter === 'resolved'   && !c.resolved) return false;
     if (search) {
       const q = search.toLowerCase();
@@ -60,106 +71,109 @@ export default function CallLog() {
     return true;
   });
 
+  const unresolvedCount = calls.filter(c => !c.resolved).length;
+  const todayCount      = calls.filter(c => new Date(c.createdAt).toDateString() === todayStr).length;
+
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="h-full overflow-y-auto">
+      <div className="p-6">
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Call Log</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {calls.filter(c => !c.resolved).length} unresolved · {calls.length} total today
-          </p>
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Call Log</h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {unresolvedCount} unresolved · {todayCount} logged today
+            </p>
+          </div>
+          <button onClick={() => setShowModal(true)} className="btn-primary">
+            <PlusIcon /> Log Call
+          </button>
         </div>
-        <button onClick={() => setShowModal(true)} className="btn-primary">
-          <PlusIcon /> Log Call
-        </button>
-      </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="flex bg-white border border-gray-200 rounded-lg p-0.5 gap-0.5">
-          {[['all','All'],['unresolved','Unresolved'],['resolved','Resolved']].map(([v,l]) => (
-            <button key={v} onClick={() => setFilter(v)}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors
-                ${filter === v ? 'bg-brand text-white' : 'text-gray-500 hover:text-gray-700'}`}>
-              {l}
-            </button>
-          ))}
+        {/* Filters */}
+        <div className="flex items-center gap-3 mb-4">
+          <div className="flex bg-white border border-gray-200 rounded-lg p-0.5 gap-0.5">
+            {[['all','All'],['unresolved','Unresolved'],['resolved','Resolved']].map(([v,l]) => (
+              <button key={v} onClick={() => setFilter(v)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors
+                  ${filter === v ? 'bg-brand text-white' : 'text-gray-500 hover:text-gray-700'}`}>
+                {l}
+              </button>
+            ))}
+          </div>
+          <input
+            type="text"
+            placeholder="Search name, phone, or reason…"
+            className="field max-w-sm"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
         </div>
-        <input
-          type="text"
-          placeholder="Search name, phone, or reason…"
-          className="field flex-1 max-w-xs"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
-      </div>
 
-      {/* Table */}
-      {loading ? (
-        <div className="card p-12 flex items-center justify-center">
-          <Spinner className="w-6 h-6 text-brand" />
-        </div>
-      ) : visible.length === 0 ? (
-        <div className="card p-12 text-center text-gray-400 text-sm">
-          No calls found.
-        </div>
-      ) : (
-        <div className="card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50">
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Time</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Caller</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Direction</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Reason</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Logged By</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {visible.map(call => (
-                <tr key={call.id} className={`hover:bg-gray-50 transition-colors ${call.resolved ? 'opacity-60' : ''}`}>
-                  <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
-                    {fmtTime(call.createdAt)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-gray-900">{call.callerName || <span className="text-gray-400">—</span>}</p>
-                    <p className="text-xs text-gray-400">{call.callerPhone || ''}</p>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`badge ${directionStyle(call.callDirection)}`}>
-                      {call.callDirection}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-700 max-w-xs">
-                    <p className="truncate">{call.reason || <span className="text-gray-400">—</span>}</p>
-                    {call.notes && <p className="text-xs text-gray-400 truncate mt-0.5">{call.notes}</p>}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-gray-500">{call.loggedByName || '—'}</td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => toggleResolved(call)}
-                      className={`badge cursor-pointer transition-colors ${call.resolved
-                        ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                        : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`}
-                    >
-                      {call.resolved ? 'Resolved' : 'Unresolved'}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3">
-                    <button onClick={() => deleteCall(call.id)} className="text-gray-300 hover:text-red-400 transition-colors">
-                      <TrashIcon />
-                    </button>
-                  </td>
+        {/* Table */}
+        {loading ? (
+          <div className="card p-12 flex items-center justify-center">
+            <Spinner className="w-6 h-6 text-brand" />
+          </div>
+        ) : visible.length === 0 ? (
+          <div className="card p-12 text-center text-gray-400 text-sm">No calls found.</div>
+        ) : (
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Time</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Caller</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Direction</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-full">Reason / Notes</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Logged By</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+                  <th className="px-4 py-3" />
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {visible.map(call => (
+                  <tr key={call.id} className={`hover:bg-gray-50 transition-colors ${call.resolved ? 'opacity-55' : ''}`}>
+                    <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+                      {fmtTime(call.createdAt)}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <p className="font-medium text-gray-900">{call.callerName || <span className="text-gray-400">—</span>}</p>
+                      <p className="text-xs text-gray-400">{call.callerPhone || ''}</p>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className={`badge ${directionStyle(call.callDirection)}`}>
+                        {call.callDirection}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-700">
+                      <p>{call.reason || <span className="text-gray-400">—</span>}</p>
+                      {call.notes && <p className="text-xs text-gray-400 mt-0.5">{call.notes}</p>}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{call.loggedByName || '—'}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <button
+                        onClick={() => toggleResolved(call)}
+                        className={`badge cursor-pointer transition-colors ${call.resolved
+                          ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                          : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`}
+                      >
+                        {call.resolved ? 'Resolved' : 'Unresolved'}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3">
+                      <button onClick={() => deleteCall(call.id)} className="text-gray-300 hover:text-red-400 transition-colors">
+                        <TrashIcon />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {showModal && <LogCallModal onClose={() => setShowModal(false)} onCreated={handleCreated} />}
     </div>
@@ -177,16 +191,13 @@ function LogCallModal({ onClose, onCreated }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    setSaving(true);
-    setError('');
+    setSaving(true); setError('');
     try {
       const { data } = await api.post('/reception/calls', form);
       onCreated(data.call);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to log call.');
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   }
 
   return (
@@ -245,7 +256,8 @@ function LogCallModal({ onClose, onCreated }) {
 // ── Shared components ─────────────────────────────────────────────────────────
 export function Modal({ title, onClose, children }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="w-full max-w-lg mx-4 bg-white rounded-2xl shadow-2xl overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <h3 className="text-base font-bold text-gray-900">{title}</h3>
@@ -266,8 +278,7 @@ export function Spinner({ className = 'w-4 h-4' }) {
 function fmtTime(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
-  const today = new Date();
-  const isToday = d.toDateString() === today.toDateString();
+  const isToday = d.toDateString() === todayStr;
   const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   return isToday ? time : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
 }

@@ -1,38 +1,77 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import CallLog from './CallLog.jsx';
 import LostFound from './LostFound.jsx';
 import Callbacks from './Callbacks.jsx';
 
 const TABS = [
-  { id: 'calls',     label: 'Call Log',       icon: PhoneIcon },
-  { id: 'lostfound', label: 'Lost & Found',   icon: TagIcon   },
-  { id: 'callbacks', label: 'Callbacks',      icon: ClockIcon },
+  { id: 'calls',     label: 'Call Log',     icon: PhoneIcon  },
+  { id: 'lostfound', label: 'Lost & Found', icon: TagIcon    },
+  { id: 'callbacks', label: 'Callbacks',    icon: ClockIcon  },
 ];
 
+function useClock() {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+
 export default function Dashboard() {
-  const { user, logout }  = useAuth();
-  const [tab, setTab]     = useState('calls');
-  const [counts, setCounts] = useState({ callbacks: 0 });
+  const { user, logout } = useAuth();
+  const [tab, setTab]    = useState('calls');
+  const [counts, setCounts] = useState({ callbacks: 0, unclaimed: 0, todayCalls: 0 });
+  const now = useClock();
 
   const initials = user?.name
     ? user.name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()
     : '?';
 
+  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const dateStr = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
+    <div className="flex h-screen overflow-hidden bg-gray-100">
 
       {/* Sidebar */}
-      <aside className="w-56 shrink-0 bg-white border-r border-gray-200 flex flex-col">
+      <aside className="w-72 shrink-0 bg-gray-900 flex flex-col text-white">
 
-        {/* Logo */}
-        <div className="px-5 py-5 border-b border-gray-100">
-          <p className="text-xs font-bold tracking-widest uppercase text-brand mb-0.5">Blue Bayou</p>
-          <h1 className="text-lg font-bold text-gray-900 leading-tight">Reception</h1>
+        {/* Brand */}
+        <div className="px-6 pt-6 pb-4">
+          <p className="text-xs font-bold tracking-widest uppercase text-brand-light mb-0.5">Blue Bayou</p>
+          <h1 className="text-xl font-bold text-white leading-tight">Reception</h1>
+        </div>
+
+        {/* Clock */}
+        <div className="mx-4 mb-4 bg-gray-800 rounded-xl px-4 py-3">
+          <p className="text-3xl font-bold text-white tabular-nums tracking-tight">{timeStr}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{dateStr}</p>
+        </div>
+
+        {/* Stats */}
+        <div className="mx-4 mb-5 grid grid-cols-3 gap-2">
+          <div className="bg-gray-800 rounded-lg px-2 py-2.5 text-center">
+            <p className={`text-xl font-bold tabular-nums ${counts.callbacks > 0 ? 'text-amber-400' : 'text-white'}`}>
+              {counts.callbacks}
+            </p>
+            <p className="text-[10px] text-gray-500 leading-tight mt-0.5">Pending<br/>Callbacks</p>
+          </div>
+          <div className="bg-gray-800 rounded-lg px-2 py-2.5 text-center">
+            <p className={`text-xl font-bold tabular-nums ${counts.unclaimed > 0 ? 'text-blue-400' : 'text-white'}`}>
+              {counts.unclaimed}
+            </p>
+            <p className="text-[10px] text-gray-500 leading-tight mt-0.5">Unclaimed<br/>Items</p>
+          </div>
+          <div className="bg-gray-800 rounded-lg px-2 py-2.5 text-center">
+            <p className="text-xl font-bold tabular-nums text-white">{counts.todayCalls}</p>
+            <p className="text-[10px] text-gray-500 leading-tight mt-0.5">Today's<br/>Calls</p>
+          </div>
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 px-3 py-4 space-y-1">
+        <nav className="flex-1 px-3 space-y-1">
           {TABS.map(t => {
             const Icon = t.icon;
             const isActive = tab === t.id;
@@ -43,14 +82,14 @@ export default function Dashboard() {
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left
                   ${isActive
                     ? 'bg-brand text-white'
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                    : 'text-gray-400 hover:bg-gray-800 hover:text-white'
                   }`}
               >
-                <Icon active={isActive} />
+                <Icon />
                 {t.label}
                 {t.id === 'callbacks' && counts.callbacks > 0 && (
                   <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full
-                    ${isActive ? 'bg-white/25 text-white' : 'bg-brand text-white'}`}>
+                    ${isActive ? 'bg-white/20 text-white' : 'bg-amber-500/20 text-amber-400'}`}>
                     {counts.callbacks}
                   </span>
                 )}
@@ -60,19 +99,19 @@ export default function Dashboard() {
         </nav>
 
         {/* User */}
-        <div className="px-4 py-4 border-t border-gray-100">
+        <div className="px-4 py-4 border-t border-gray-800 mt-4">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-8 h-8 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center text-xs font-bold text-brand shrink-0">
+            <div className="w-9 h-9 rounded-full bg-brand/20 border border-brand/40 flex items-center justify-center text-xs font-bold text-brand-light shrink-0">
               {initials}
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-gray-900 truncate">{user?.name}</p>
-              <p className="text-xs text-gray-400 truncate">{user?.position || user?.role}</p>
+              <p className="text-sm font-semibold text-white truncate">{user?.name}</p>
+              <p className="text-xs text-gray-500 truncate">{user?.position || user?.role}</p>
             </div>
           </div>
           <button
             onClick={logout}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-gray-500 hover:text-red-400 hover:bg-red-900/20 rounded-lg transition-colors"
           >
             <LogoutIcon /> Sign Out
           </button>
@@ -80,16 +119,22 @@ export default function Dashboard() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 min-w-0 overflow-y-auto">
-        {tab === 'calls'     && <CallLog />}
-        {tab === 'lostfound' && <LostFound />}
-        {tab === 'callbacks' && <Callbacks onPendingCount={n => setCounts(c => ({ ...c, callbacks: n }))} />}
+      <main className="flex-1 min-w-0 overflow-hidden">
+        {tab === 'calls' && (
+          <CallLog onTodayCallsCount={n => setCounts(c => ({ ...c, todayCalls: n }))} />
+        )}
+        {tab === 'lostfound' && (
+          <LostFound onUnclaimedCount={n => setCounts(c => ({ ...c, unclaimed: n }))} />
+        )}
+        {tab === 'callbacks' && (
+          <Callbacks onPendingCount={n => setCounts(c => ({ ...c, callbacks: n }))} />
+        )}
       </main>
     </div>
   );
 }
 
-function PhoneIcon({ active }) {
+function PhoneIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 shrink-0">
       <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.4 2 2 0 0 1 3.6 1.22h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.77a16 16 0 0 0 6.29 6.29l1.62-1.62a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />

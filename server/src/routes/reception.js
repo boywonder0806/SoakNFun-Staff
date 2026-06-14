@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import pool from '../db/index.js';
 import { requireReception, requireSysAdmin } from '../middleware/auth.js';
+import { sendCallbackNotification } from '../services/email.js';
 
 const router = Router();
 
@@ -228,15 +229,46 @@ router.post('/callbacks', requireReception, async (req, res) => {
   if (!callerName?.trim())  return res.status(400).json({ error: 'Caller name is required' });
   if (!callerPhone?.trim()) return res.status(400).json({ error: 'Caller phone is required' });
   try {
-    const { rows } = await pool.query(
+    const { rows: [inserted] } = await pool.query(
       `INSERT INTO callback_requests (logged_by, caller_name, caller_phone, reason, requested_staff_id, notes)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, caller_name AS "callerName", caller_phone AS "callerPhone",
-                 reason, status, notes, created_at AS "createdAt"`,
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
       [req.user.id, callerName.trim(), callerPhone.trim(),
        reason || null, requestedStaffId || null, notes || null]
     );
-    res.status(201).json({ callback: { ...rows[0], loggedByName: req.user.name } });
+    const { rows } = await pool.query(
+      `SELECT cb.id, cb.caller_name AS "callerName", cb.caller_phone AS "callerPhone",
+              cb.reason, cb.status, cb.notes,
+              cb.created_at AS "createdAt", cb.completed_at AS "completedAt",
+              e.name  AS "loggedByName",
+              rs.id   AS "requestedStaffId", rs.name AS "requestedStaffName",
+              ce.name AS "completedByName"
+       FROM callback_requests cb
+       LEFT JOIN employees e  ON cb.logged_by          = e.id
+       LEFT JOIN employees rs ON cb.requested_staff_id  = rs.id
+       LEFT JOIN employees ce ON cb.completed_by        = ce.id
+       WHERE cb.id = $1`,
+      [inserted.id]
+    );
+    res.status(201).json({ callback: rows[0] });
+
+    // Fire-and-forget email to requested staff
+    if (requestedStaffId && rows[0]?.requestedStaffName) {
+      pool.query('SELECT email FROM employees WHERE id = $1', [requestedStaffId])
+        .then(({ rows: staff }) => {
+          if (staff[0]?.email) {
+            sendCallbackNotification({
+              toEmail:     staff[0].email,
+              toName:      rows[0].requestedStaffName,
+              callerName:  rows[0].callerName,
+              callerPhone: rows[0].callerPhone,
+              reason:      rows[0].reason,
+              notes:       rows[0].notes,
+              loggedBy:    rows[0].loggedByName || req.user.name,
+            });
+          }
+        })
+        .catch(() => {});
+    }
   } catch (err) {
     res.status(500).json({ error: 'Failed to log callback' });
   }
