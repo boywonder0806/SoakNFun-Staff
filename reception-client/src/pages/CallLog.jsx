@@ -37,18 +37,62 @@ let _nextId = Date.now();
 const FAQS_KEY = 'bayou_call_faqs';
 
 const DEFAULT_FAQS = [
-  { id: 101, question: 'What are the operating hours?',          answer: 'Blue Bayou is open daily 10am–8pm, extended to 10pm on weekends and holidays during summer season.' },
-  { id: 102, question: 'How much do tickets cost?',              answer: 'General admission: $35 adults, $25 children (12 & under). Season passes start at $89/person.' },
-  { id: 103, question: 'Do you offer group rates?',              answer: 'Groups of 15+ receive 20% off general admission. Contact us for group or event packages.' },
-  { id: 104, question: 'How do I book a birthday party?',        answer: 'Birthday packages start at $15/person (min 10 guests). Call reception to check availability.' },
-  { id: 105, question: 'Is the park ADA accessible?',            answer: 'Yes. Blue Bayou is ADA compliant with wheelchair rentals, accessible restrooms, and pathways.' },
-  { id: 106, question: 'Where is the park and is parking free?', answer: 'Located at 18142 Perkins Rd, Baton Rouge, LA 70810. Parking is free.' },
-  { id: 107, question: 'What food is available in the park?',    answer: 'Full food court: burgers, pizza, salads, snacks. Outside food is not permitted (dietary exceptions apply).' },
-  { id: 108, question: 'What do I do about a lost item?',        answer: 'Lost items are held at Guest Services near the main entrance. Call during park hours to check.' },
-  { id: 109, question: 'Are there height restrictions on rides?', answer: 'Most slides require a 42" minimum height. The kiddie area is for children under 48".' },
-  { id: 110, question: 'Can I re-enter after leaving?',          answer: 'Yes, re-entry is allowed the same day with your wristband on.' },
-  { id: 111, question: 'Can I bring outside food?',              answer: 'Outside food and drinks are not permitted inside the park, except for documented dietary or medical needs.' },
-  { id: 112, question: 'What is the cancellation/refund policy?', answer: 'Tickets are non-refundable but can be exchanged for a future date within 30 days of purchase. Season passes are non-refundable.' },
+  { id: 101,
+    question: 'Where is the park and how do I get there?',
+    answer:   'GPS address: 18200 Perkins Road East, Baton Rouge, LA 70810. From I-10, take Exit 162A and head eastbound on Perkins Road — follow the signs to the park.',
+    tags:     ['location','directions','address','navigate','find','i10','highway','perkins','baton rouge','map'] },
+  { id: 102,
+    question: 'What are the operating hours?',
+    answer:   'Hours vary by date — the park runs 10am–6pm, 10am–5pm, or 2:30pm–6pm depending on the day. Always check bluebayouwaterpark.com or call (225) 753-3333 before visiting, as the schedule changes seasonally.',
+    tags:     ['hours','open','close','schedule','time','when','days','weekend','holiday','season'] },
+  { id: 103,
+    question: 'What do season passes cost?',
+    answer:   'Single Park Pass: $54.99 · 2-Park Pass (Blue Bayou + Gulf Islands): $64.99 · Premium 2-Park Pass: $74.99 (adds early Saturday entry, a bring-a-friend voucher, and 10% food discount). All passes include unlimited fountain drinks.',
+    tags:     ['season pass','annual pass','membership','price','cost','how much','2 park','gulf islands','premium','discount','drinks'] },
+  { id: 104,
+    question: 'Do all guests need to pay admission even if not swimming?',
+    answer:   'Yes. Every guest entering the park must pay admission, regardless of whether they plan to use the water attractions.',
+    tags:     ['admission','pay','ticket','entrance','spectator','watching','not swimming','supervising'] },
+  { id: 105,
+    question: 'Can guests bring their own food or drinks?',
+    answer:   'No outside food, beverages, or coolers are allowed inside the park. On-site dining includes T. Joe\'s Po-Boys & Grill, Fuel Dock, pizza, Bayou Treats Stand (ice cream), and The Thirsty Cypress (beverages including alcohol). Fountain drinks are included with admission.',
+    tags:     ['food','drink','cooler','outside','bring','eat','dining','restaurant','lunch','snack','alcohol','beverage','menu'] },
+  { id: 106,
+    question: 'What are the height requirements for rides?',
+    answer:   'Attractions have height requirements of 36", 42", or 48" depending on the ride. Staff at each attraction can confirm the exact requirement. Children below the minimum for a specific ride cannot board for safety.',
+    tags:     ['height','requirement','restriction','ride','slide','tall','inch','children','kids','minimum','safety','36','42','48'] },
+  { id: 107,
+    question: 'Can guests re-enter the park after leaving?',
+    answer:   'Yes, re-entry is allowed on the same day with an unaltered wristband or stamp. Note: the park can reach maximum capacity on peak days (weekends and holidays) — guests who leave during a capacity hold may not be readmitted right away.',
+    tags:     ['re-entry','reentry','leave','come back','wristband','stamp','exit','capacity','full','return'] },
+  { id: 108,
+    question: 'What swimwear is required?',
+    answer:   'Appropriate swimwear is required and subject to park approval. Not permitted: visible undergarments, jeans, denim, thongs, long pants, belts, or cut-off shorts. Swim diapers are mandatory for children not yet potty-trained.',
+    tags:     ['swimwear','clothes','attire','dress code','diapers','shorts','jeans','outfit','what to wear'] },
+  { id: 109,
+    question: 'Can guests bring their own life jackets or floats?',
+    answer:   'Life jackets and tubes are provided free of charge. Guests may bring their own U.S. Coast Guard-approved life jackets. Not permitted inside the park: rafts, arm floaties, fun noodles, swim boards, or swim rings.',
+    tags:     ['life jacket','float','tube','raft','noodle','floaties','safety vest','coast guard','flotation','arm bands','swim ring'] },
+  { id: 110,
+    question: 'Are pets or service animals allowed?',
+    answer:   'No pets are allowed in the park. Only trained service animals are permitted — emotional support animals do not qualify. Service animals must remain leashed at all times and may not enter pools or water attractions.',
+    tags:     ['pet','dog','animal','service animal','emotional support','esa','leash','pool','allowed'] },
+  { id: 111,
+    question: 'Is the park smoke-free?',
+    answer:   'Yes. Blue Bayou Waterpark is a completely smoke-free facility. Smoking, vaping, and tobacco use are not permitted anywhere on park grounds.',
+    tags:     ['smoke','smoking','cigarette','vape','vaping','tobacco','e-cigarette','nicotine'] },
+  { id: 112,
+    question: 'Are lockers and cabanas available?',
+    answer:   'Yes. Lockers are available on a first-come basis using facial recognition (Snap-N-Lock) or PIN technology. Cabanas can be rented until sold out and include shaded seating; cabana guests can order food for delivery to their rental.',
+    tags:     ['locker','cabana','shade','storage','rent','valuables','belongings','secure','key','umbrella'] },
+  { id: 113,
+    question: 'What forms of payment are accepted?',
+    answer:   'Cash, Visa, MasterCard, and Discover are accepted. Checks are only accepted for group event deposits or with advance arrangements.',
+    tags:     ['payment','pay','cash','credit card','visa','mastercard','discover','check','method'] },
+  { id: 114,
+    question: 'Is there a gift shop if guests need something they forgot?',
+    answer:   'Yes. The gift shop carries towels, sunscreen, flip flops, swim diapers, earplugs, hats, cover-ups, and T-shirts, plus souvenirs. It\'s located near the main entrance.',
+    tags:     ['gift shop','store','buy','sunscreen','towel','flip flops','diaper','forgot','purchase','souvenir','shop'] },
 ];
 
 function loadFaqs() {
@@ -59,12 +103,50 @@ function loadFaqs() {
   return DEFAULT_FAQS;
 }
 
+const STOP_WORDS = new Set([
+  'the','a','an','is','are','was','were','be','been','being','i','me','my',
+  'we','our','you','your','it','its','this','that','these','those','do','does',
+  'did','will','would','could','should','may','might','can','have','has','had',
+  'not','but','and','or','if','in','on','at','to','for','of','with','by','from',
+  'up','about','what','which','who','how','when','where','just','also','get',
+  'want','need','like','know','call','please','thank','there','they','their',
+]);
+
+function stem(w) {
+  return w
+    .replace(/tion(s?)$/, '')
+    .replace(/ing$/, '')
+    .replace(/ness$/, '')
+    .replace(/ment$/, '')
+    .replace(/tion$/, '')
+    .replace(/ies$/, 'y')
+    .replace(/([^aeiou])es$/, '$1')
+    .replace(/([^s])s$/, '$1')
+    .replace(/ed$/, '')
+    .replace(/er$/, '')
+    .replace(/ly$/, '');
+}
+
 function scoreFaq(faq, query) {
   if (!query || !query.trim()) return 0;
-  const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-  if (words.length === 0) return 0;
-  const text = (faq.question + ' ' + faq.answer).toLowerCase();
-  return words.reduce((sum, w) => sum + (text.includes(w) ? 1 : 0), 0);
+  const queryWords = query.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !STOP_WORDS.has(w))
+    .map(stem);
+  if (queryWords.length === 0) return 0;
+
+  const qStemmed   = faq.question.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).map(stem);
+  const aStemmed   = faq.answer.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).map(stem);
+  const tagTokens  = (faq.tags || []).join(' ').toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+
+  let score = 0;
+  for (const w of queryWords) {
+    if (qStemmed.some(t => t === w || t.startsWith(w) || w.startsWith(t)))  score += 4;
+    else if (tagTokens.includes(w))                                           score += 3;
+    else if (aStemmed.some(t => t === w || t.startsWith(w) || w.startsWith(t))) score += 1;
+  }
+  return score;
 }
 
 function getStatusMeta(call) {
@@ -557,9 +639,18 @@ function TemplateManagerDrawer({ templates, onChange, onClose }) {
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t border-gray-100 shrink-0 flex gap-3">
-          <button type="button" onClick={onClose} className="btn-ghost flex-1">Cancel</button>
-          <button type="button" onClick={handleSave} className="btn-primary flex-1">Done</button>
+        <div className="px-5 py-4 border-t border-gray-100 shrink-0 space-y-2">
+          <div className="flex gap-3">
+            <button type="button" onClick={onClose} className="btn-ghost flex-1">Cancel</button>
+            <button type="button" onClick={handleSave} className="btn-primary flex-1">Done</button>
+          </div>
+          <button
+            type="button"
+            onClick={() => { if (window.confirm('Reset all FAQs to the built-in defaults?')) setItems(DEFAULT_FAQS.map(f => ({ ...f }))); }}
+            className="w-full text-xs text-gray-400 hover:text-red-500 transition-colors py-1"
+          >
+            Reset to defaults
+          </button>
         </div>
       </div>
     </div>
