@@ -20,6 +20,13 @@ pool.query(`CREATE TABLE IF NOT EXISTS call_log (
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`).catch(e => console.error('call_log migration:', e.message));
 
+// Callback columns added to call_log to unify call log + callbacks into one table
+pool.query('ALTER TABLE call_log ADD COLUMN IF NOT EXISTS needs_callback BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
+pool.query('ALTER TABLE call_log ADD COLUMN IF NOT EXISTS requested_staff_id INTEGER REFERENCES employees(id) ON DELETE SET NULL').catch(() => {});
+pool.query("ALTER TABLE call_log ADD COLUMN IF NOT EXISTS callback_status VARCHAR(20) DEFAULT NULL").catch(() => {});
+pool.query('ALTER TABLE call_log ADD COLUMN IF NOT EXISTS callback_completed_at TIMESTAMPTZ').catch(() => {});
+pool.query('ALTER TABLE call_log ADD COLUMN IF NOT EXISTS callback_completed_by INTEGER REFERENCES employees(id) ON DELETE SET NULL').catch(() => {});
+
 pool.query(`CREATE TABLE IF NOT EXISTS lost_found (
   id               SERIAL PRIMARY KEY,
   logged_by        INTEGER REFERENCES employees(id) ON DELETE SET NULL,
@@ -64,19 +71,26 @@ router.patch('/access/:id', requireSysAdmin, async (req, res) => {
   }
 });
 
+// ── Shared SELECT for call_log with all joined columns ────────────────────────
+const CALLS_SELECT = `
+  SELECT cl.id, cl.caller_name AS "callerName", cl.caller_phone AS "callerPhone",
+         cl.call_direction AS "callDirection", cl.reason, cl.notes, cl.resolved,
+         cl.created_at AS "createdAt",
+         cl.needs_callback AS "needsCallback",
+         cl.callback_status AS "callbackStatus",
+         cl.callback_completed_at AS "callbackCompletedAt",
+         e.name  AS "loggedByName",
+         rs.id   AS "requestedStaffId", rs.name AS "requestedStaffName",
+         ce.name AS "callbackCompletedByName"
+  FROM call_log cl
+  LEFT JOIN employees e  ON cl.logged_by             = e.id
+  LEFT JOIN employees rs ON cl.requested_staff_id    = rs.id
+  LEFT JOIN employees ce ON cl.callback_completed_by = ce.id`;
+
 // ── Call Log ──────────────────────────────────────────────────────────────────
 router.get('/calls', requireReception, async (_req, res) => {
   try {
-    const { rows } = await pool.query(
-      `SELECT cl.id, cl.caller_name AS "callerName", cl.caller_phone AS "callerPhone",
-              cl.call_direction AS "callDirection", cl.reason, cl.notes, cl.resolved,
-              cl.created_at AS "createdAt",
-              e.name AS "loggedByName"
-       FROM call_log cl
-       LEFT JOIN employees e ON cl.logged_by = e.id
-       ORDER BY cl.created_at DESC
-       LIMIT 300`
-    );
+    const { rows } = await pool.query(`${CALLS_SELECT} ORDER BY cl.created_at DESC LIMIT 300`);
     res.json({ calls: rows });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch call log' });
@@ -84,39 +98,86 @@ router.get('/calls', requireReception, async (_req, res) => {
 });
 
 router.post('/calls', requireReception, async (req, res) => {
-  const { callerName, callerPhone, callDirection = 'inbound', reason, notes } = req.body;
+  const { callerName, callerPhone, callDirection = 'inbound', reason, notes, needsCallback, requestedStaffId } = req.body;
+  const cbStaffId = needsCallback && requestedStaffId ? requestedStaffId : null;
+  const cbStatus  = needsCallback ? 'pending' : null;
   try {
-    const { rows } = await pool.query(
-      `INSERT INTO call_log (logged_by, caller_name, caller_phone, call_direction, reason, notes)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, caller_name AS "callerName", caller_phone AS "callerPhone",
-                 call_direction AS "callDirection", reason, notes, resolved,
-                 created_at AS "createdAt"`,
-      [req.user.id, callerName || null, callerPhone || null, callDirection, reason || null, notes || null]
+    const { rows: [inserted] } = await pool.query(
+      `INSERT INTO call_log
+         (logged_by, caller_name, caller_phone, call_direction, reason, notes,
+          needs_callback, requested_staff_id, callback_status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+      [req.user.id, callerName || null, callerPhone || null, callDirection,
+       reason || null, notes || null, needsCallback || false, cbStaffId, cbStatus]
     );
-    res.status(201).json({ call: { ...rows[0], loggedByName: req.user.name } });
+    const { rows } = await pool.query(`${CALLS_SELECT} WHERE cl.id = $1`, [inserted.id]);
+    res.status(201).json({ call: rows[0] });
+
+    if (needsCallback && cbStaffId && rows[0]?.requestedStaffName) {
+      pool.query('SELECT email FROM employees WHERE id = $1', [cbStaffId])
+        .then(({ rows: staff }) => {
+          if (staff[0]?.email) {
+            sendCallbackNotification({
+              toEmail:     staff[0].email,
+              toName:      rows[0].requestedStaffName,
+              callerName:  rows[0].callerName,
+              callerPhone: rows[0].callerPhone,
+              reason:      rows[0].reason,
+              notes:       rows[0].notes,
+              loggedBy:    rows[0].loggedByName || req.user.name,
+            });
+          }
+        })
+        .catch(() => {});
+    }
   } catch (err) {
     res.status(500).json({ error: 'Failed to log call' });
   }
 });
 
 router.patch('/calls/:id', requireReception, async (req, res) => {
-  const { resolved, notes } = req.body;
+  const { resolved, notes, callerName, callerPhone, callDirection,
+          reason, needsCallback, requestedStaffId, callbackStatus } = req.body;
   const fields = [];
   const vals   = [];
-  if (resolved !== undefined) { fields.push(`resolved = $${vals.length + 1}`); vals.push(resolved); }
-  if (notes    !== undefined) { fields.push(`notes    = $${vals.length + 1}`); vals.push(notes); }
+
+  if (callerName    !== undefined) { fields.push(`caller_name    = $${vals.length+1}`); vals.push(callerName    || null); }
+  if (callerPhone   !== undefined) { fields.push(`caller_phone   = $${vals.length+1}`); vals.push(callerPhone   || null); }
+  if (callDirection !== undefined) { fields.push(`call_direction = $${vals.length+1}`); vals.push(callDirection); }
+  if (reason        !== undefined) { fields.push(`reason         = $${vals.length+1}`); vals.push(reason        || null); }
+  if (notes         !== undefined) { fields.push(`notes          = $${vals.length+1}`); vals.push(notes         || null); }
+  if (resolved      !== undefined) { fields.push(`resolved       = $${vals.length+1}`); vals.push(resolved); }
+
+  if (needsCallback !== undefined) {
+    fields.push(`needs_callback = $${vals.length+1}`); vals.push(needsCallback);
+    if (!needsCallback) {
+      fields.push(`callback_status       = $${vals.length+1}`); vals.push(null);
+      fields.push(`requested_staff_id    = $${vals.length+1}`); vals.push(null);
+      fields.push(`callback_completed_at = $${vals.length+1}`); vals.push(null);
+      fields.push(`callback_completed_by = $${vals.length+1}`); vals.push(null);
+    } else if (callbackStatus === undefined) {
+      fields.push(`callback_status = COALESCE(callback_status, $${vals.length+1})`); vals.push('pending');
+    }
+  }
+  if (requestedStaffId !== undefined && needsCallback !== false) {
+    fields.push(`requested_staff_id = $${vals.length+1}`); vals.push(requestedStaffId || null);
+  }
+  if (callbackStatus !== undefined) {
+    fields.push(`callback_status = $${vals.length+1}`); vals.push(callbackStatus);
+    if (callbackStatus === 'completed' || callbackStatus === 'unable_to_reach') {
+      fields.push(`callback_completed_at = NOW()`);
+      fields.push(`callback_completed_by = $${vals.length+1}`); vals.push(req.user.id);
+    }
+  }
+
   if (!fields.length) return res.status(400).json({ error: 'Nothing to update' });
   vals.push(parseInt(req.params.id));
   try {
-    const { rows } = await pool.query(
-      `UPDATE call_log SET ${fields.join(', ')} WHERE id = $${vals.length}
-       RETURNING id, caller_name AS "callerName", caller_phone AS "callerPhone",
-                 call_direction AS "callDirection", reason, notes, resolved,
-                 created_at AS "createdAt"`,
-      vals
+    const { rowCount } = await pool.query(
+      `UPDATE call_log SET ${fields.join(', ')} WHERE id = $${vals.length}`, vals
     );
-    if (!rows[0]) return res.status(404).json({ error: 'Call not found' });
+    if (!rowCount) return res.status(404).json({ error: 'Call not found' });
+    const { rows } = await pool.query(`${CALLS_SELECT} WHERE cl.id = $1`, [parseInt(req.params.id)]);
     res.json({ call: rows[0] });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update call' });

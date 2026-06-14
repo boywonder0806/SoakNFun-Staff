@@ -2,12 +2,10 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import CallLog from './CallLog.jsx';
 import LostFound from './LostFound.jsx';
-import Callbacks from './Callbacks.jsx';
 
 const TABS = [
-  { id: 'calls',     label: 'Call Log',     icon: PhoneIcon  },
-  { id: 'lostfound', label: 'Lost & Found', icon: TagIcon    },
-  { id: 'callbacks', label: 'Callbacks',    icon: ClockIcon  },
+  { id: 'calls',     label: 'Calls',        icon: PhoneIcon },
+  { id: 'lostfound', label: 'Lost & Found', icon: TagIcon   },
 ];
 
 function useClock() {
@@ -22,7 +20,7 @@ function useClock() {
 export default function Dashboard() {
   const { user, logout } = useAuth();
   const [tab, setTab]    = useState('calls');
-  const [counts, setCounts] = useState({ callbacks: 0, unclaimed: 0, todayCalls: 0 });
+  const [counts, setCounts] = useState({ pendingCallbacks: 0, unclaimed: 0, todayCalls: 0 });
   const now = useClock();
 
   const initials = user?.name
@@ -53,8 +51,8 @@ export default function Dashboard() {
         {/* Stats */}
         <div className="mx-4 mb-5 grid grid-cols-3 gap-2">
           <div className="bg-gray-800 rounded-lg px-2 py-2.5 text-center">
-            <p className={`text-xl font-bold tabular-nums ${counts.callbacks > 0 ? 'text-amber-400' : 'text-white'}`}>
-              {counts.callbacks}
+            <p className={`text-xl font-bold tabular-nums ${counts.pendingCallbacks > 0 ? 'text-amber-400' : 'text-white'}`}>
+              {counts.pendingCallbacks}
             </p>
             <p className="text-[10px] text-gray-500 leading-tight mt-0.5">Pending<br/>Callbacks</p>
           </div>
@@ -87,10 +85,10 @@ export default function Dashboard() {
               >
                 <Icon />
                 {t.label}
-                {t.id === 'callbacks' && counts.callbacks > 0 && (
+                {t.id === 'calls' && counts.pendingCallbacks > 0 && (
                   <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full
                     ${isActive ? 'bg-white/20 text-white' : 'bg-amber-500/20 text-amber-400'}`}>
-                    {counts.callbacks}
+                    {counts.pendingCallbacks}
                   </span>
                 )}
               </button>
@@ -121,13 +119,13 @@ export default function Dashboard() {
       {/* Main content */}
       <main className="flex-1 min-w-0 overflow-hidden">
         {tab === 'calls' && (
-          <CallLog onTodayCallsCount={n => setCounts(c => ({ ...c, todayCalls: n }))} />
+          <CallLog
+            onTodayCallsCount={n => setCounts(c => ({ ...c, todayCalls: n }))}
+            onPendingCallbacksCount={n => setCounts(c => ({ ...c, pendingCallbacks: n }))}
+          />
         )}
         {tab === 'lostfound' && (
           <LostFound onUnclaimedCount={n => setCounts(c => ({ ...c, unclaimed: n }))} />
-        )}
-        {tab === 'callbacks' && (
-          <Callbacks onPendingCount={n => setCounts(c => ({ ...c, callbacks: n }))} />
         )}
       </main>
     </div>
@@ -147,15 +145,6 @@ function TagIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 shrink-0">
       <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
       <line x1="7" y1="7" x2="7.01" y2="7" />
-    </svg>
-  );
-}
-
-function ClockIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 shrink-0">
-      <circle cx="12" cy="12" r="10" />
-      <polyline points="12 6 12 12 16 14" />
     </svg>
   );
 }
