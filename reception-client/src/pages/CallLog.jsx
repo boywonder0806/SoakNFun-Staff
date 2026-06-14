@@ -3,6 +3,37 @@ import api from '../lib/api.js';
 
 const todayStr = new Date().toDateString();
 
+const TEMPLATES_KEY = 'bayou_call_templates';
+
+const DEFAULT_TEMPLATES = [
+  { id: 1,  label: 'General Park Question', reason: 'General park question'           },
+  { id: 2,  label: 'Ticket Pricing',        reason: 'Ticket pricing inquiry'           },
+  { id: 3,  label: 'Operating Hours',       reason: 'Operating hours inquiry'          },
+  { id: 4,  label: 'Group / Event Rates',   reason: 'Group rates or event inquiry'     },
+  { id: 5,  label: 'Birthday Party',        reason: 'Birthday party booking inquiry'   },
+  { id: 6,  label: 'Season Passes',         reason: 'Season pass inquiry'              },
+  { id: 7,  label: 'Accessibility',         reason: 'Accessibility or ADA inquiry'     },
+  { id: 8,  label: 'Lost Item',             reason: 'Lost item report'                 },
+  { id: 9,  label: 'Food & Dining',         reason: 'Food and dining inquiry'          },
+  { id: 10, label: 'Employment',            reason: 'Employment inquiry'               },
+  { id: 11, label: 'Complaint',             reason: 'Guest complaint'                  },
+  { id: 12, label: 'Directions / Parking',  reason: 'Directions or parking inquiry'    },
+];
+
+function loadTemplates() {
+  try {
+    const raw = localStorage.getItem(TEMPLATES_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return DEFAULT_TEMPLATES;
+}
+
+function saveTemplates(tpls) {
+  localStorage.setItem(TEMPLATES_KEY, JSON.stringify(tpls));
+}
+
+let _nextId = Date.now();
+
 function getStatusMeta(call) {
   if (call.needsCallback) {
     if (call.callbackStatus === 'completed')       return { label: 'Completed',       color: 'bg-green-100 text-green-700' };
@@ -230,10 +261,17 @@ function NewCallPanel({ staff, onSave, onCancel }) {
     callerName: '', callerPhone: '', reason: '', notes: '',
     needsCallback: false, requestedStaffId: '',
   });
-  const [saving, setSaving] = useState(false);
-  const [error, setError]   = useState('');
+  const [saving, setSaving]         = useState(false);
+  const [error, setError]           = useState('');
+  const [templates, setTemplates]   = useState(loadTemplates);
+  const [showManager, setShowManager] = useState(false);
 
   function set(f) { return e => setForm(p => ({ ...p, [f]: e.target.value })); }
+
+  function applyTemplates(next) {
+    setTemplates(next);
+    saveTemplates(next);
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -241,12 +279,12 @@ function NewCallPanel({ staff, onSave, onCancel }) {
     setSaving(true); setError('');
     try {
       const { data } = await api.post('/reception/calls', {
-        callerName:      form.callerName      || null,
-        callerPhone:     form.callerPhone.trim(),
-        callDirection:   'inbound',
-        reason:          form.reason          || null,
-        notes:           form.notes           || null,
-        needsCallback:   form.needsCallback,
+        callerName:       form.callerName  || null,
+        callerPhone:      form.callerPhone.trim(),
+        callDirection:    'inbound',
+        reason:           form.reason      || null,
+        notes:            form.notes       || null,
+        needsCallback:    form.needsCallback,
         requestedStaffId: form.needsCallback && form.requestedStaffId
           ? parseInt(form.requestedStaffId) : null,
       });
@@ -257,11 +295,41 @@ function NewCallPanel({ staff, onSave, onCancel }) {
   }
 
   return (
-    <div className="max-w-2xl mx-auto p-6 space-y-5">
+    <div className="relative max-w-2xl mx-auto p-6 space-y-5">
 
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <h3 className="text-lg font-bold text-gray-900">New Inbound Call</h3>
         <p className="text-xs text-gray-400 mt-0.5">Phone number is required</p>
+      </div>
+
+      {/* Quick templates */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Quick Templates</p>
+          <button
+            type="button"
+            onClick={() => setShowManager(true)}
+            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-brand transition-colors"
+          >
+            <GearIcon /> Edit
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {templates.map(t => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setForm(p => ({ ...p, reason: t.reason }))}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                ${form.reason === t.reason
+                  ? 'bg-brand text-white border-brand'
+                  : 'bg-white text-gray-600 border-gray-200 hover:border-brand hover:text-brand'
+                }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -342,7 +410,121 @@ function NewCallPanel({ staff, onSave, onCancel }) {
           </div>
         </form>
       </div>
+
+      {/* Template manager drawer */}
+      {showManager && (
+        <TemplateManagerDrawer
+          templates={templates}
+          onChange={applyTemplates}
+          onClose={() => setShowManager(false)}
+        />
+      )}
     </div>
+  );
+}
+
+// ── Template manager side drawer ───────────────────────────────────────────────
+function TemplateManagerDrawer({ templates, onChange, onClose }) {
+  const [items, setItems] = useState(() => templates.map(t => ({ ...t })));
+
+  function updateItem(id, field, value) {
+    setItems(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t));
+  }
+
+  function deleteItem(id) {
+    setItems(prev => prev.filter(t => t.id !== id));
+  }
+
+  function addItem() {
+    setItems(prev => [...prev, { id: ++_nextId, label: '', reason: '' }]);
+  }
+
+  function handleSave() {
+    const clean = items.filter(t => t.label.trim() || t.reason.trim());
+    onChange(clean);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-[420px] h-full bg-white shadow-2xl flex flex-col">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
+          <div>
+            <h3 className="text-base font-bold text-gray-900">Manage Templates</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Changes save when you click Done</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Template list */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          {items.map((t, i) => (
+            <div key={t.id} className="bg-gray-50 rounded-xl border border-gray-200 p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400 font-medium w-4 shrink-0 text-center">{i + 1}</span>
+                <input
+                  className="field text-sm font-medium flex-1"
+                  placeholder="Button label (e.g. Ticket Pricing)"
+                  value={t.label}
+                  onChange={e => updateItem(t.id, 'label', e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => deleteItem(t.id)}
+                  className="p-1.5 text-gray-300 hover:text-red-500 transition-colors shrink-0"
+                  title="Remove"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6l-1 14H6L5 6" />
+                    <path d="M10 11v6M14 11v6" />
+                    <path d="M9 6V4h6v2" />
+                  </svg>
+                </button>
+              </div>
+              <div className="pl-6">
+                <input
+                  className="field text-xs text-gray-500"
+                  placeholder="Reason text pre-filled in form (e.g. Ticket pricing inquiry)"
+                  value={t.reason}
+                  onChange={e => updateItem(t.id, 'reason', e.target.value)}
+                />
+              </div>
+            </div>
+          ))}
+
+          <button
+            type="button"
+            onClick={addItem}
+            className="w-full py-3 text-sm text-brand border-2 border-dashed border-brand/30 rounded-xl hover:border-brand hover:bg-brand/5 transition-colors font-medium"
+          >
+            + Add Template
+          </button>
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-4 border-t border-gray-100 shrink-0 flex gap-3">
+          <button type="button" onClick={onClose} className="btn-ghost flex-1">Cancel</button>
+          <button type="button" onClick={handleSave} className="btn-primary flex-1">Done</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
   );
 }
 
