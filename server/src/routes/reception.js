@@ -30,6 +30,7 @@ pool.query('ALTER TABLE call_log ADD COLUMN IF NOT EXISTS callback_completed_by 
 pool.query(`CREATE TABLE IF NOT EXISTS lost_found (
   id               SERIAL PRIMARY KEY,
   logged_by        INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  item_type        VARCHAR(50),
   item_description TEXT NOT NULL,
   location_found   VARCHAR(255),
   found_date       DATE NOT NULL DEFAULT CURRENT_DATE,
@@ -40,6 +41,7 @@ pool.query(`CREATE TABLE IF NOT EXISTS lost_found (
   created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   resolved_at      TIMESTAMPTZ
 )`).catch(e => console.error('lost_found migration:', e.message));
+pool.query(`ALTER TABLE lost_found ADD COLUMN IF NOT EXISTS item_type VARCHAR(50)`).catch(() => {});
 
 pool.query(`CREATE TABLE IF NOT EXISTS callback_requests (
   id                 SERIAL PRIMARY KEY,
@@ -198,7 +200,8 @@ router.delete('/calls/:id', requireReception, async (req, res) => {
 router.get('/lost-found', requireReception, async (_req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT lf.id, lf.item_description AS "itemDescription", lf.location_found AS "locationFound",
+      `SELECT lf.id, lf.item_type AS "itemType", lf.item_description AS "itemDescription",
+              lf.location_found AS "locationFound",
               lf.found_date::text AS "foundDate", lf.owner_name AS "ownerName",
               lf.owner_contact AS "ownerContact", lf.status, lf.notes,
               lf.created_at AS "createdAt", lf.resolved_at AS "resolvedAt",
@@ -215,16 +218,17 @@ router.get('/lost-found', requireReception, async (_req, res) => {
 });
 
 router.post('/lost-found', requireReception, async (req, res) => {
-  const { itemDescription, locationFound, foundDate, ownerName, ownerContact, notes } = req.body;
-  if (!itemDescription?.trim()) return res.status(400).json({ error: 'Item description is required' });
+  const { itemType, itemDescription, locationFound, foundDate, ownerName, ownerContact, notes } = req.body;
+  if (!itemType?.trim()) return res.status(400).json({ error: 'Item type is required' });
   try {
     const { rows } = await pool.query(
-      `INSERT INTO lost_found (logged_by, item_description, location_found, found_date, owner_name, owner_contact, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, item_description AS "itemDescription", location_found AS "locationFound",
+      `INSERT INTO lost_found (logged_by, item_type, item_description, location_found, found_date, owner_name, owner_contact, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, item_type AS "itemType", item_description AS "itemDescription",
+                 location_found AS "locationFound",
                  found_date::text AS "foundDate", owner_name AS "ownerName",
                  owner_contact AS "ownerContact", status, notes, created_at AS "createdAt"`,
-      [req.user.id, itemDescription.trim(), locationFound || null,
+      [req.user.id, itemType.trim(), itemDescription?.trim() || null, locationFound || null,
        foundDate || null, ownerName || null, ownerContact || null, notes || null]
     );
     res.status(201).json({ item: { ...rows[0], loggedByName: req.user.name } });
@@ -234,9 +238,10 @@ router.post('/lost-found', requireReception, async (req, res) => {
 });
 
 router.patch('/lost-found/:id', requireReception, async (req, res) => {
-  const { status, ownerName, ownerContact, notes } = req.body;
+  const { status, itemType, ownerName, ownerContact, notes } = req.body;
   const fields = [];
   const vals   = [];
+  if (itemType     !== undefined) { fields.push(`item_type     = $${vals.length + 1}`); vals.push(itemType); }
   if (status       !== undefined) { fields.push(`status        = $${vals.length + 1}`); vals.push(status); }
   if (ownerName    !== undefined) { fields.push(`owner_name    = $${vals.length + 1}`); vals.push(ownerName); }
   if (ownerContact !== undefined) { fields.push(`owner_contact = $${vals.length + 1}`); vals.push(ownerContact); }
@@ -249,7 +254,8 @@ router.patch('/lost-found/:id', requireReception, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `UPDATE lost_found SET ${fields.join(', ')} WHERE id = $${vals.length}
-       RETURNING id, item_description AS "itemDescription", location_found AS "locationFound",
+       RETURNING id, item_type AS "itemType", item_description AS "itemDescription",
+                 location_found AS "locationFound",
                  found_date::text AS "foundDate", owner_name AS "ownerName",
                  owner_contact AS "ownerContact", status, notes,
                  created_at AS "createdAt", resolved_at AS "resolvedAt"`,

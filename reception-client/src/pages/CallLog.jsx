@@ -3,22 +3,13 @@ import api from '../lib/api.js';
 
 const todayStr = new Date().toDateString();
 
-const DIRECTION_OPTS = [
-  { value: 'inbound',  label: 'Inbound',  color: 'bg-blue-100 text-blue-700'     },
-  { value: 'outbound', label: 'Outbound', color: 'bg-violet-100 text-violet-700' },
-];
-
-function dirColor(d) {
-  return DIRECTION_OPTS.find(o => o.value === d)?.color ?? 'bg-gray-100 text-gray-500';
-}
-
 function getStatusMeta(call) {
   if (call.needsCallback) {
-    if (call.callbackStatus === 'completed')       return { label: 'Completed',       color: 'bg-green-100 text-green-700', dim: true  };
-    if (call.callbackStatus === 'unable_to_reach') return { label: 'Unable to Reach', color: 'bg-red-100 text-red-600',     dim: true  };
-    return { label: 'Callback', color: 'bg-amber-100 text-amber-700', dim: false };
+    if (call.callbackStatus === 'completed')       return { label: 'Completed',       color: 'bg-green-100 text-green-700' };
+    if (call.callbackStatus === 'unable_to_reach') return { label: 'Unable to Reach', color: 'bg-red-100 text-red-600'    };
+    return { label: 'Callback', color: 'bg-amber-100 text-amber-700' };
   }
-  if (call.resolved) return { label: 'Resolved', color: 'bg-gray-100 text-gray-500', dim: true };
+  if (call.resolved) return { label: 'Resolved', color: 'bg-gray-100 text-gray-500' };
   return null;
 }
 
@@ -27,13 +18,13 @@ function isPendingCallback(call) {
 }
 
 export default function CallLog({ onTodayCallsCount, onPendingCallbacksCount }) {
-  const [calls, setCalls]         = useState([]);
-  const [staff, setStaff]         = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [selected, setSelected]   = useState(null);
-  const [showModal, setShowModal] = useState(false);
-  const [filter, setFilter]       = useState('all');
-  const [search, setSearch]       = useState('');
+  const [calls, setCalls]       = useState([]);
+  const [staff, setStaff]       = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [selected, setSelected] = useState(null);
+  const [showNew, setShowNew]   = useState(false);
+  const [filter, setFilter]     = useState('all');
+  const [search, setSearch]     = useState('');
 
   function updateCounts(list) {
     onTodayCallsCount?.(list.filter(c => new Date(c.createdAt).toDateString() === todayStr).length);
@@ -106,8 +97,13 @@ export default function CallLog({ onTodayCallsCount, onPendingCallbacksCount }) 
       updateCounts(next);
       return next;
     });
-    setShowModal(false);
+    setShowNew(false);
     setSelected(call);
+  }
+
+  function openNew() {
+    setShowNew(true);
+    setSelected(null);
   }
 
   const visible = calls.filter(c => {
@@ -146,8 +142,10 @@ export default function CallLog({ onTodayCallsCount, onPendingCallbacksCount }) 
                 : 'No pending callbacks'}
             </p>
           </div>
-          <button onClick={() => setShowModal(true)} className="btn-primary">
-            <PlusIcon /> Log
+          <button
+            onClick={openNew}
+            className={`btn-primary transition-opacity ${showNew ? 'opacity-50 pointer-events-none' : ''}`}>
+            <PlusIcon /> Log Call
           </button>
         </div>
 
@@ -181,8 +179,8 @@ export default function CallLog({ onTodayCallsCount, onPendingCallbacksCount }) 
                 <CallRow
                   key={call.id}
                   call={call}
-                  isSelected={selected?.id === call.id}
-                  onClick={() => setSelected(call)}
+                  isSelected={!showNew && selected?.id === call.id}
+                  onClick={() => { setSelected(call); setShowNew(false); }}
                 />
               ))}
             </div>
@@ -190,9 +188,15 @@ export default function CallLog({ onTodayCallsCount, onPendingCallbacksCount }) 
         </div>
       </div>
 
-      {/* Right: Detail Panel */}
+      {/* Right: Detail / New-call Panel */}
       <div className="flex-1 overflow-y-auto bg-gray-50">
-        {selected ? (
+        {showNew ? (
+          <NewCallPanel
+            staff={staff}
+            onSave={handleCreated}
+            onCancel={() => setShowNew(false)}
+          />
+        ) : selected ? (
           <CallDetail
             key={selected.id}
             call={selected}
@@ -216,16 +220,138 @@ export default function CallLog({ onTodayCallsCount, onPendingCallbacksCount }) 
           </div>
         )}
       </div>
-
-      {showModal && (
-        <LogCallModal staff={staff} onClose={() => setShowModal(false)} onCreated={handleCreated} />
-      )}
     </div>
   );
 }
 
+// ── New call inline form ───────────────────────────────────────────────────────
+function NewCallPanel({ staff, onSave, onCancel }) {
+  const [form, setForm] = useState({
+    callerName: '', callerPhone: '', reason: '', notes: '',
+    needsCallback: false, requestedStaffId: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState('');
+
+  function set(f) { return e => setForm(p => ({ ...p, [f]: e.target.value })); }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.callerPhone.trim()) { setError('Phone number is required.'); return; }
+    setSaving(true); setError('');
+    try {
+      const { data } = await api.post('/reception/calls', {
+        callerName:      form.callerName      || null,
+        callerPhone:     form.callerPhone.trim(),
+        callDirection:   'inbound',
+        reason:          form.reason          || null,
+        notes:           form.notes           || null,
+        needsCallback:   form.needsCallback,
+        requestedStaffId: form.needsCallback && form.requestedStaffId
+          ? parseInt(form.requestedStaffId) : null,
+      });
+      onSave(data.call);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to log call.');
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto p-6 space-y-5">
+
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <h3 className="text-lg font-bold text-gray-900">New Inbound Call</h3>
+        <p className="text-xs text-gray-400 mt-0.5">Phone number is required</p>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">Phone Number *</label>
+              <input
+                className="field"
+                placeholder="(225) 555-0100"
+                value={form.callerPhone}
+                onChange={set('callerPhone')}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="label">Caller Name</label>
+              <input
+                className="field"
+                placeholder="John Smith"
+                value={form.callerName}
+                onChange={set('callerName')}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="label">Reason / Subject</label>
+            <input
+              className="field"
+              placeholder="What was the call about?"
+              value={form.reason}
+              onChange={set('reason')}
+            />
+          </div>
+
+          <div>
+            <label className="label">Notes</label>
+            <textarea
+              className="field resize-none"
+              rows={3}
+              placeholder="Additional details…"
+              value={form.notes}
+              onChange={set('notes')}
+            />
+          </div>
+
+          <div className="border border-gray-200 rounded-xl p-4 space-y-3">
+            <label className="flex items-center gap-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-brand"
+                checked={form.needsCallback}
+                onChange={e => setForm(p => ({ ...p, needsCallback: e.target.checked }))}
+              />
+              <span className="text-sm font-medium text-gray-900">Needs Callback</span>
+            </label>
+            {form.needsCallback && (
+              <div>
+                <label className="label">Requested Staff Member</label>
+                <select className="field" value={form.requestedStaffId} onChange={set('requestedStaffId')}>
+                  <option value="">— Not specified —</option>
+                  {staff.map(s => (
+                    <option key={s.id} value={s.id}>{s.name}{s.position ? ` (${s.position})` : ''}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onCancel} className="btn-ghost flex-1">Cancel</button>
+            <button type="submit" disabled={saving} className="btn-primary flex-1">
+              {saving ? <><Spinner /> Saving…</> : 'Save Call'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Call list row ──────────────────────────────────────────────────────────────
 function CallRow({ call, isSelected, onClick }) {
   const meta = getStatusMeta(call);
+  const displayName = call.callerName || call.callerPhone;
+  const showPhone   = !!call.callerName;
+
   return (
     <button
       onClick={onClick}
@@ -234,24 +360,20 @@ function CallRow({ call, isSelected, onClick }) {
           ? 'bg-brand/5 border-l-[3px] border-brand'
           : 'hover:bg-gray-50 border-l-[3px] border-transparent'}`}
     >
-      <div className="flex items-center justify-between gap-2 mb-1">
-        <span className="font-semibold text-sm text-gray-900 truncate">
-          {call.callerName || <span className="text-gray-400 font-normal">Unknown</span>}
-        </span>
+      <div className="flex items-center justify-between gap-2 mb-0.5">
+        <span className="font-semibold text-sm text-gray-900 truncate">{displayName}</span>
         {meta && <span className={`badge shrink-0 ${meta.color}`}>{meta.label}</span>}
       </div>
-      <p className="text-xs text-gray-500 mb-1">{call.callerPhone || '—'}</p>
-      <div className="flex items-center gap-2 text-xs text-gray-400">
-        <span className={`badge ${dirColor(call.callDirection)} text-[10px] py-0 px-1.5`}>
-          {call.callDirection}
-        </span>
-        {call.reason && <span className="truncate max-w-[170px]">{call.reason}</span>}
+      {showPhone && <p className="text-xs text-gray-500 mb-1">{call.callerPhone}</p>}
+      <div className="flex items-center gap-1 text-xs text-gray-400">
+        {call.reason && <span className="truncate max-w-[210px]">{call.reason}</span>}
         <span className="ml-auto shrink-0">{fmtTime(call.createdAt)}</span>
       </div>
     </button>
   );
 }
 
+// ── Call detail / edit panel ───────────────────────────────────────────────────
 function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, onDelete }) {
   const meta    = getStatusMeta(call);
   const pending = isPendingCallback(call);
@@ -259,14 +381,13 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
   const [form, setForm] = useState({
     callerName:       call.callerName    || '',
     callerPhone:      call.callerPhone   || '',
-    callDirection:    call.callDirection || 'inbound',
     reason:           call.reason        || '',
     notes:            call.notes         || '',
     needsCallback:    call.needsCallback || false,
     requestedStaffId: call.requestedStaffId ? String(call.requestedStaffId) : '',
   });
-  const [saving, setSaving]           = useState(false);
-  const [saved, setSaved]             = useState(false);
+  const [saving, setSaving]             = useState(false);
+  const [saved, setSaved]               = useState(false);
   const [statusSaving, setStatusSaving] = useState(false);
 
   function set(f) { return e => setForm(p => ({ ...p, [f]: e.target.value })); }
@@ -277,7 +398,6 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
     const ok = await onSave({
       callerName:       form.callerName    || null,
       callerPhone:      form.callerPhone   || null,
-      callDirection:    form.callDirection,
       reason:           form.reason        || null,
       notes:            form.notes         || null,
       needsCallback:    form.needsCallback,
@@ -301,13 +421,12 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <div className="flex items-start justify-between gap-4 mb-3">
           <div>
-            <h3 className="text-xl font-bold text-gray-900">{call.callerName || 'Unknown Caller'}</h3>
-            <p className="text-gray-500 mt-0.5">{call.callerPhone || '—'}</p>
+            <h3 className="text-xl font-bold text-gray-900">
+              {call.callerName || call.callerPhone || 'Unknown Caller'}
+            </h3>
+            {call.callerName && <p className="text-gray-500 mt-0.5">{call.callerPhone}</p>}
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className={`badge ${dirColor(call.callDirection)}`}>{call.callDirection}</span>
-            {meta && <span className={`badge ${meta.color}`}>{meta.label}</span>}
-          </div>
+          {meta && <span className={`badge ${meta.color} px-3 py-1 text-sm`}>{meta.label}</span>}
         </div>
         <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-400 border-t border-gray-100 pt-3">
           <span>Logged by <span className="text-gray-600 font-medium">{call.loggedByName || 'unknown'}</span> · {fmtTime(call.createdAt)}</span>
@@ -323,28 +442,12 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
         <form onSubmit={handleSave} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="label">Caller Name</label>
-              <input className="field" value={form.callerName} onChange={set('callerName')} />
-            </div>
-            <div>
-              <label className="label">Phone</label>
+              <label className="label">Phone Number</label>
               <input className="field" value={form.callerPhone} onChange={set('callerPhone')} />
             </div>
-          </div>
-
-          <div>
-            <label className="label">Direction</label>
-            <div className="flex gap-2">
-              {DIRECTION_OPTS.map(o => (
-                <button key={o.value} type="button"
-                  onClick={() => setForm(p => ({ ...p, callDirection: o.value }))}
-                  className={`flex-1 py-2 px-3 rounded-lg border text-sm font-semibold transition-colors
-                    ${form.callDirection === o.value
-                      ? 'bg-brand text-white border-brand'
-                      : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
-                  {o.label}
-                </button>
-              ))}
+            <div>
+              <label className="label">Caller Name</label>
+              <input className="field" value={form.callerName} onChange={set('callerName')} />
             </div>
           </div>
 
@@ -358,7 +461,6 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
             <textarea className="field resize-none" rows={3} value={form.notes} onChange={set('notes')} />
           </div>
 
-          {/* Callback toggle */}
           <div className="border border-gray-200 rounded-xl p-4 space-y-3">
             <label className="flex items-center gap-3 cursor-pointer select-none">
               <input
@@ -390,7 +492,7 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
         </form>
       </div>
 
-      {/* Pending callback: resolve actions */}
+      {/* Pending callback resolve actions */}
       {pending && (
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h4 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4">Resolve Callback</h4>
@@ -411,11 +513,11 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
         </div>
       )}
 
-      {/* Non-callback calls: resolved toggle */}
+      {/* Resolved toggle for non-callback calls */}
       {!call.needsCallback && (
         <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center justify-between">
           <span className="text-sm text-gray-500">
-            {call.resolved ? 'This call is marked resolved.' : 'Mark this call as resolved when done.'}
+            {call.resolved ? 'Marked as resolved.' : 'Mark this call resolved when done.'}
           </span>
           <button
             onClick={onResolvedToggle}
@@ -441,108 +543,7 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
   );
 }
 
-function LogCallModal({ staff, onClose, onCreated }) {
-  const [form, setForm] = useState({
-    callerName: '', callerPhone: '', callDirection: 'inbound',
-    reason: '', notes: '', needsCallback: false, requestedStaffId: '',
-  });
-  const [saving, setSaving] = useState(false);
-  const [error, setError]   = useState('');
-
-  function set(f) { return e => setForm(p => ({ ...p, [f]: e.target.value })); }
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setSaving(true); setError('');
-    try {
-      const { data } = await api.post('/reception/calls', {
-        ...form,
-        requestedStaffId: form.needsCallback && form.requestedStaffId
-          ? parseInt(form.requestedStaffId) : null,
-      });
-      onCreated(data.call);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to log call.');
-    } finally { setSaving(false); }
-  }
-
-  return (
-    <Modal title="Log a Call" onClose={onClose}>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="label">Caller Name</label>
-            <input className="field" placeholder="John Smith" value={form.callerName} onChange={set('callerName')} />
-          </div>
-          <div>
-            <label className="label">Phone Number</label>
-            <input className="field" placeholder="(225) 555-0100" value={form.callerPhone} onChange={set('callerPhone')} />
-          </div>
-        </div>
-
-        <div>
-          <label className="label">Direction</label>
-          <div className="flex gap-2">
-            {DIRECTION_OPTS.map(o => (
-              <button key={o.value} type="button"
-                onClick={() => setForm(p => ({ ...p, callDirection: o.value }))}
-                className={`flex-1 py-2 px-3 rounded-lg border text-sm font-semibold transition-colors
-                  ${form.callDirection === o.value
-                    ? 'bg-brand text-white border-brand'
-                    : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <label className="label">Reason / Subject</label>
-          <input className="field" placeholder="e.g. Lost item inquiry, Park hours…" value={form.reason} onChange={set('reason')} />
-        </div>
-
-        <div>
-          <label className="label">Notes</label>
-          <textarea className="field resize-none" rows={2} placeholder="Additional details…" value={form.notes} onChange={set('notes')} />
-        </div>
-
-        <div className="border border-gray-200 rounded-xl p-4 space-y-3">
-          <label className="flex items-center gap-3 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              className="w-4 h-4 accent-brand"
-              checked={form.needsCallback}
-              onChange={e => setForm(p => ({ ...p, needsCallback: e.target.checked }))}
-            />
-            <span className="text-sm font-medium text-gray-900">Needs Callback</span>
-          </label>
-          {form.needsCallback && (
-            <div>
-              <label className="label">Requested Staff Member</label>
-              <select className="field" value={form.requestedStaffId} onChange={set('requestedStaffId')}>
-                <option value="">— Not specified —</option>
-                {staff.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}{s.position ? ` (${s.position})` : ''}</option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-
-        {error && <p className="text-sm text-red-600">{error}</p>}
-
-        <div className="flex gap-3 pt-1">
-          <button type="button" onClick={onClose} className="btn-ghost flex-1">Cancel</button>
-          <button type="submit" disabled={saving} className="btn-primary flex-1">
-            {saving ? <><Spinner /> Saving…</> : 'Save Call'}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-// ── Shared components ─────────────────────────────────────────────────────────
+// ── Shared exports (used by LostFound.jsx) ────────────────────────────────────
 export function Modal({ title, onClose, children }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
@@ -551,7 +552,9 @@ export function Modal({ title, onClose, children }) {
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <h3 className="text-base font-bold text-gray-900">{title}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
-            <XIcon />
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
           </button>
         </div>
         <div className="px-6 py-5">{children}</div>
@@ -576,14 +579,6 @@ function PlusIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-4 h-4">
       <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-  );
-}
-
-function XIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
-      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
     </svg>
   );
 }
