@@ -34,6 +34,39 @@ function saveTemplates(tpls) {
 
 let _nextId = Date.now();
 
+const FAQS_KEY = 'bayou_call_faqs';
+
+const DEFAULT_FAQS = [
+  { id: 101, question: 'What are the operating hours?',          answer: 'Blue Bayou is open daily 10am–8pm, extended to 10pm on weekends and holidays during summer season.' },
+  { id: 102, question: 'How much do tickets cost?',              answer: 'General admission: $35 adults, $25 children (12 & under). Season passes start at $89/person.' },
+  { id: 103, question: 'Do you offer group rates?',              answer: 'Groups of 15+ receive 20% off general admission. Contact us for group or event packages.' },
+  { id: 104, question: 'How do I book a birthday party?',        answer: 'Birthday packages start at $15/person (min 10 guests). Call reception to check availability.' },
+  { id: 105, question: 'Is the park ADA accessible?',            answer: 'Yes. Blue Bayou is ADA compliant with wheelchair rentals, accessible restrooms, and pathways.' },
+  { id: 106, question: 'Where is the park and is parking free?', answer: 'Located at 18142 Perkins Rd, Baton Rouge, LA 70810. Parking is free.' },
+  { id: 107, question: 'What food is available in the park?',    answer: 'Full food court: burgers, pizza, salads, snacks. Outside food is not permitted (dietary exceptions apply).' },
+  { id: 108, question: 'What do I do about a lost item?',        answer: 'Lost items are held at Guest Services near the main entrance. Call during park hours to check.' },
+  { id: 109, question: 'Are there height restrictions on rides?', answer: 'Most slides require a 42" minimum height. The kiddie area is for children under 48".' },
+  { id: 110, question: 'Can I re-enter after leaving?',          answer: 'Yes, re-entry is allowed the same day with your wristband on.' },
+  { id: 111, question: 'Can I bring outside food?',              answer: 'Outside food and drinks are not permitted inside the park, except for documented dietary or medical needs.' },
+  { id: 112, question: 'What is the cancellation/refund policy?', answer: 'Tickets are non-refundable but can be exchanged for a future date within 30 days of purchase. Season passes are non-refundable.' },
+];
+
+function loadFaqs() {
+  try {
+    const raw = localStorage.getItem(FAQS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return DEFAULT_FAQS;
+}
+
+function scoreFaq(faq, query) {
+  if (!query || !query.trim()) return 0;
+  const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  if (words.length === 0) return 0;
+  const text = (faq.question + ' ' + faq.answer).toLowerCase();
+  return words.reduce((sum, w) => sum + (text.includes(w) ? 1 : 0), 0);
+}
+
 function getStatusMeta(call) {
   if (call.needsCallback) {
     if (call.callbackStatus === 'completed')       return { label: 'Completed',       color: 'bg-green-100 text-green-700' };
@@ -56,6 +89,12 @@ export default function CallLog({ onTodayCallsCount, onPendingCallbacksCount }) 
   const [showNew, setShowNew]   = useState(false);
   const [filter, setFilter]     = useState('all');
   const [search, setSearch]     = useState('');
+  const [faqQuery, setFaqQuery] = useState('');
+
+  useEffect(() => {
+    if (selected && !showNew) setFaqQuery(selected.reason || '');
+    if (!selected && !showNew) setFaqQuery('');
+  }, [selected?.id, showNew]);
 
   function updateCounts(list) {
     onTodayCallsCount?.(list.filter(c => new Date(c.createdAt).toDateString() === todayStr).length);
@@ -219,13 +258,14 @@ export default function CallLog({ onTodayCallsCount, onPendingCallbacksCount }) 
         </div>
       </div>
 
-      {/* Right: Detail / New-call Panel */}
+      {/* Middle: Detail / New-call Panel */}
       <div className="flex-1 overflow-y-auto bg-gray-50">
         {showNew ? (
           <NewCallPanel
             staff={staff}
             onSave={handleCreated}
             onCancel={() => setShowNew(false)}
+            onQueryChange={setFaqQuery}
           />
         ) : selected ? (
           <CallDetail
@@ -251,20 +291,27 @@ export default function CallLog({ onTodayCallsCount, onPendingCallbacksCount }) 
           </div>
         )}
       </div>
+
+      {/* Right: FAQ Panel */}
+      <FaqPanel query={faqQuery} />
     </div>
   );
 }
 
 // ── New call inline form ───────────────────────────────────────────────────────
-function NewCallPanel({ staff, onSave, onCancel }) {
+function NewCallPanel({ staff, onSave, onCancel, onQueryChange }) {
   const [form, setForm] = useState({
     callerName: '', callerPhone: '', reason: '', notes: '',
     needsCallback: false, requestedStaffId: '',
   });
-  const [saving, setSaving]         = useState(false);
-  const [error, setError]           = useState('');
-  const [templates, setTemplates]   = useState(loadTemplates);
+  const [saving, setSaving]           = useState(false);
+  const [error, setError]             = useState('');
+  const [templates, setTemplates]     = useState(loadTemplates);
   const [showManager, setShowManager] = useState(false);
+
+  useEffect(() => {
+    onQueryChange?.([form.reason, form.notes].filter(Boolean).join(' '));
+  }, [form.reason, form.notes]);
 
   function set(f) { return e => setForm(p => ({ ...p, [f]: e.target.value })); }
 
@@ -755,6 +802,179 @@ function fmtTime(iso) {
   const isToday = d.toDateString() === todayStr;
   const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   return isToday ? time : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
+}
+
+// ── FAQ right panel ────────────────────────────────────────────────────────────
+function FaqPanel({ query }) {
+  const [faqs, setFaqs]         = useState(loadFaqs);
+  const [showManager, setShowManager] = useState(false);
+  const [expanded, setExpanded] = useState(null);
+
+  function applyFaqs(next) {
+    setFaqs(next);
+    localStorage.setItem(FAQS_KEY, JSON.stringify(next));
+  }
+
+  const hasQuery = query && query.trim().length > 2;
+
+  const scored = faqs
+    .map(f => ({ ...f, score: scoreFaq(f, query) }))
+    .sort((a, b) => b.score - a.score);
+
+  const matchCount = scored.filter(f => f.score > 0).length;
+
+  return (
+    <div className="w-[300px] shrink-0 bg-white border-l border-gray-200 flex flex-col">
+      <div className="px-4 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+        <div>
+          <h3 className="text-sm font-bold text-gray-900">FAQ Reference</h3>
+          {hasQuery && matchCount > 0 ? (
+            <p className="text-xs text-brand mt-0.5">{matchCount} related answer{matchCount !== 1 ? 's' : ''}</p>
+          ) : (
+            <p className="text-xs text-gray-400 mt-0.5">Common questions &amp; answers</p>
+          )}
+        </div>
+        <button
+          onClick={() => setShowManager(true)}
+          className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-brand transition-colors"
+        >
+          <GearIcon /> Edit
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
+        {scored.map(faq => {
+          const isMatch = hasQuery && faq.score > 0;
+          const isOpen  = expanded === faq.id;
+          return (
+            <button
+              key={faq.id}
+              onClick={() => setExpanded(isOpen ? null : faq.id)}
+              className={`w-full text-left rounded-xl border p-3 transition-all
+                ${isMatch
+                  ? 'border-brand/40 bg-brand/5 shadow-sm'
+                  : 'border-gray-200 bg-white hover:border-gray-300'
+                }`}
+            >
+              <div className="flex items-start gap-2">
+                {isMatch && <span className="mt-1 shrink-0 w-1.5 h-1.5 rounded-full bg-brand" />}
+                <p className={`text-xs font-semibold leading-snug flex-1 ${isMatch ? 'text-brand' : 'text-gray-700'}`}>
+                  {faq.question}
+                </p>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
+                  className={`shrink-0 w-3.5 h-3.5 text-gray-400 transition-transform mt-0.5 ${isOpen ? 'rotate-180' : ''}`}>
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </div>
+              {isOpen && (
+                <p className="mt-2 text-xs text-gray-600 leading-relaxed border-t border-gray-100 pt-2 text-left">
+                  {faq.answer}
+                </p>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {showManager && (
+        <FaqManagerDrawer faqs={faqs} onChange={applyFaqs} onClose={() => setShowManager(false)} />
+      )}
+    </div>
+  );
+}
+
+// ── FAQ manager drawer ─────────────────────────────────────────────────────────
+function FaqManagerDrawer({ faqs, onChange, onClose }) {
+  const [items, setItems] = useState(() => faqs.map(f => ({ ...f })));
+
+  function updateItem(id, field, value) {
+    setItems(prev => prev.map(f => f.id === id ? { ...f, [field]: value } : f));
+  }
+
+  function deleteItem(id) {
+    setItems(prev => prev.filter(f => f.id !== id));
+  }
+
+  function addItem() {
+    setItems(prev => [...prev, { id: ++_nextId, question: '', answer: '' }]);
+  }
+
+  function handleSave() {
+    const clean = items.filter(f => f.question.trim() || f.answer.trim());
+    onChange(clean);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-[480px] h-full bg-white shadow-2xl flex flex-col">
+
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
+          <div>
+            <h3 className="text-base font-bold text-gray-900">Manage FAQs</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Changes save when you click Done</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          {items.map((f, i) => (
+            <div key={f.id} className="bg-gray-50 rounded-xl border border-gray-200 p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400 font-medium w-4 shrink-0 text-center">{i + 1}</span>
+                <input
+                  className="field text-sm font-medium flex-1"
+                  placeholder="Question (e.g. What are the park hours?)"
+                  value={f.question}
+                  onChange={e => updateItem(f.id, 'question', e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => deleteItem(f.id)}
+                  className="p-1.5 text-gray-300 hover:text-red-500 transition-colors shrink-0"
+                  title="Remove"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6l-1 14H6L5 6" />
+                    <path d="M10 11v6M14 11v6" />
+                    <path d="M9 6V4h6v2" />
+                  </svg>
+                </button>
+              </div>
+              <div className="pl-6">
+                <textarea
+                  className="field text-xs text-gray-500 resize-none"
+                  rows={2}
+                  placeholder="Answer guests receive when this is asked…"
+                  value={f.answer}
+                  onChange={e => updateItem(f.id, 'answer', e.target.value)}
+                />
+              </div>
+            </div>
+          ))}
+
+          <button
+            type="button"
+            onClick={addItem}
+            className="w-full py-3 text-sm text-brand border-2 border-dashed border-brand/30 rounded-xl hover:border-brand hover:bg-brand/5 transition-colors font-medium"
+          >
+            + Add FAQ
+          </button>
+        </div>
+
+        <div className="px-5 py-4 border-t border-gray-100 shrink-0 flex gap-3">
+          <button type="button" onClick={onClose} className="btn-ghost flex-1">Cancel</button>
+          <button type="button" onClick={handleSave} className="btn-primary flex-1">Done</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function PlusIcon() {
