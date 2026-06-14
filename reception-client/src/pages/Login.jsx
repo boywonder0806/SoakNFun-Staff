@@ -26,6 +26,13 @@ export default function Login() {
   const { login }               = useAuth();
   const navigate                = useNavigate();
 
+  // Pick up error reason passed via sessionStorage from the API interceptor
+  const [sessionError] = useState(() => {
+    const msg = sessionStorage.getItem('rc_session_error');
+    if (msg) sessionStorage.removeItem('rc_session_error');
+    return msg || null;
+  });
+
   function clearError() { setErrorType(null); setErrorMessage(''); }
 
   async function handleSubmit(e) {
@@ -65,6 +72,18 @@ export default function Login() {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="px-8 py-8 space-y-5">
+
+          {/* Session-terminated banner (deactivated / access revoked) */}
+          {sessionError && (
+            <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+              <BlockIcon className="text-red-500" />
+              <div>
+                <p className="text-sm font-semibold text-red-700">Session ended</p>
+                <p className="text-xs text-red-500 mt-0.5">{sessionError}</p>
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="label">Email</label>
             <input

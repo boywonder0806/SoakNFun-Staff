@@ -12,7 +12,10 @@ api.interceptors.response.use(
   res => res,
   err => {
     const isAuthEndpoint = err.config?.url?.startsWith('/auth/');
-    if (err.response?.status === 401 && !isAuthEndpoint) {
+    const status = err.response?.status;
+    if ((status === 401 || status === 403) && !isAuthEndpoint) {
+      const message = err.response?.data?.error;
+      if (message) sessionStorage.setItem('rc_session_error', message);
       localStorage.removeItem('rc_token');
       window.location.href = '/login';
     }

@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import pool from '../db/index.js';
 
 export function requireAuth(req, res, next) {
   const header = req.headers.authorization;
@@ -33,11 +34,26 @@ export function requireSysAdmin(req, res, next) {
 }
 
 export function requireReception(req, res, next) {
-  requireAuth(req, res, () => {
+  requireAuth(req, res, async () => {
     if (!req.user.hasReceptionAccess) {
       return res.status(403).json({ error: 'Reception portal access required' });
     }
-    next();
+    try {
+      const { rows } = await pool.query(
+        'SELECT is_active, has_reception_access FROM employees WHERE id = $1',
+        [req.user.id]
+      );
+      const emp = rows[0];
+      if (!emp || !emp.is_active) {
+        return res.status(401).json({ error: 'Your account has been deactivated. Please contact your administrator.' });
+      }
+      if (!emp.has_reception_access) {
+        return res.status(403).json({ error: 'Your reception portal access has been revoked. Please contact your administrator.' });
+      }
+      next();
+    } catch {
+      res.status(500).json({ error: 'Failed to verify account status' });
+    }
   });
 }
 
