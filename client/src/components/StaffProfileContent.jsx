@@ -244,11 +244,20 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
               )}
             </div>
             <p className="text-sm text-fog mt-1.5">{emp.position ?? 'No position set'}</p>
-            <span className={`inline-flex items-center gap-1.5 text-10 font-semibold mt-2
-              ${emp.isLocked ? 'text-amber-400' : emp.isActive ? 'text-green-400' : 'text-red-400'}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${emp.isLocked ? 'bg-amber-400' : emp.isActive ? 'bg-green-400' : 'bg-red-400'}`} />
-              {emp.isLocked ? 'Account Locked' : emp.isActive ? 'Active' : 'Inactive'}
-            </span>
+            <div className="flex items-center gap-3 mt-2 flex-wrap">
+              <span className={`inline-flex items-center gap-1.5 text-10 font-semibold
+                ${emp.isLocked ? 'text-amber-400' : emp.isActive ? 'text-green-400' : 'text-red-400'}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${emp.isLocked ? 'bg-amber-400' : emp.isActive ? 'bg-green-400' : 'bg-red-400'}`} />
+                {emp.isLocked ? 'Account Locked' : emp.isActive ? 'Active' : 'Inactive'}
+              </span>
+              {emp.hasReceptionAccess && (
+                <span className={`inline-flex items-center gap-1.5 text-10 font-semibold
+                  ${emp.isActive && !emp.isLocked ? 'text-cyan' : 'text-fog'}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${emp.isActive && !emp.isLocked ? 'bg-cyan' : 'bg-fog/50'}`} />
+                  Reception Portal {emp.isActive && !emp.isLocked ? '' : '(blocked)'}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -486,37 +495,85 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
               </div>
             </div>
 
-            {/* Reception access */}
-            {emp.role === 'crew_member' && (
-              <div>
-                <p className="label-xs mb-4">Portal Access</p>
-                <div className={`panel p-4 flex items-start justify-between ${emp.hasReceptionAccess ? 'border-cyan/30 bg-cyan/5' : ''}`}>
-                  <div>
-                    <p className="text-sm font-semibold text-ink">Reception Portal</p>
-                    <p className="text-10 text-fog mt-0.5">
-                      {emp.hasReceptionAccess
-                        ? 'This staff member can log in to the reception portal'
-                        : 'Grant access to the reception portal (call log, lost & found)'}
-                    </p>
-                    {emp.hasReceptionAccess && (
-                      <span className="inline-flex items-center gap-1.5 text-10 font-semibold text-cyan mt-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-cyan" /> Access enabled
-                      </span>
+            {/* Reception access — shown for all roles except sysadmin */}
+            {emp.role !== 'sysadmin' && (() => {
+              const blocked  = !emp.isActive || emp.isLocked;
+              const effectiveAccess = emp.hasReceptionAccess && !blocked;
+              const blockReason = !emp.isActive ? 'Account is deactivated'
+                                : emp.isLocked  ? 'Account is locked'
+                                : null;
+              return (
+                <div>
+                  <p className="label-xs mb-4">Portal Access</p>
+                  <div className={`panel p-4 ${
+                    effectiveAccess          ? 'border-cyan/30 bg-cyan/5'
+                    : blocked && emp.hasReceptionAccess ? 'border-amber-500/20 bg-amber-950/10'
+                    : ''
+                  }`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-ink">Reception Portal</p>
+                        <p className="text-10 text-fog mt-0.5">
+                          {emp.hasReceptionAccess
+                            ? 'This staff member is granted reception portal access'
+                            : 'Grant access to the reception portal (call log, lost & found)'}
+                        </p>
+
+                        {/* Effective access indicator */}
+                        {effectiveAccess && (
+                          <span className="inline-flex items-center gap-1.5 text-10 font-semibold text-cyan mt-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-cyan" /> Access active
+                          </span>
+                        )}
+                        {emp.hasReceptionAccess && blocked && (
+                          <span className="inline-flex items-center gap-1.5 text-10 font-semibold text-amber-400 mt-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Access granted but blocked
+                          </span>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={handleReceptionToggle}
+                        disabled={receptionSaving || blocked}
+                        title={blocked ? `${blockReason} — reactivate account first` : undefined}
+                        className={`rounded-md px-3 py-1.5 text-xs shrink-0 border font-semibold transition-colors
+                          ${blocked
+                            ? 'opacity-40 cursor-not-allowed border-rim/40 text-fog bg-shell/30'
+                            : emp.hasReceptionAccess
+                              ? 'bg-red-950/20 border-red-500/30 text-red-400 hover:bg-red-950/40'
+                              : 'bg-cyan/10 border-cyan/30 text-cyan hover:bg-cyan/20'
+                          }`}
+                      >
+                        {receptionSaving ? 'Saving…' : emp.hasReceptionAccess ? 'Revoke' : 'Grant Access'}
+                      </button>
+                    </div>
+
+                    {/* Blocked account warning */}
+                    {blocked && emp.hasReceptionAccess && (
+                      <div className="mt-3 pt-3 border-t border-amber-500/20 flex items-start gap-2">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5">
+                          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                          <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+                        </svg>
+                        <p className="text-10 text-amber-400 leading-relaxed">
+                          <span className="font-semibold">{blockReason}.</span> Portal login is blocked regardless of this setting. {!emp.isActive ? 'Reactivate' : 'Unlock'} the account to restore access.
+                        </p>
+                      </div>
+                    )}
+                    {blocked && !emp.hasReceptionAccess && (
+                      <div className="mt-3 pt-3 border-t border-rim/20 flex items-start gap-2">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5 text-fog shrink-0 mt-0.5">
+                          <circle cx="12" cy="12" r="10" /><line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+                        </svg>
+                        <p className="text-10 text-fog leading-relaxed">
+                          {blockReason}. Grant access will take effect once the account is {!emp.isActive ? 'reactivated' : 'unlocked'}.
+                        </p>
+                      </div>
                     )}
                   </div>
-                  <button
-                    onClick={handleReceptionToggle}
-                    disabled={receptionSaving}
-                    className={`rounded-md px-3 py-1.5 text-xs shrink-0 ml-3 border font-semibold transition-colors
-                      ${emp.hasReceptionAccess
-                        ? 'bg-red-950/20 border-red-500/30 text-red-400 hover:bg-red-950/40'
-                        : 'bg-cyan/10 border-cyan/30 text-cyan hover:bg-cyan/20'}`}
-                  >
-                    {receptionSaving ? 'Saving…' : emp.hasReceptionAccess ? 'Revoke' : 'Grant Access'}
-                  </button>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Security actions */}
             <div>

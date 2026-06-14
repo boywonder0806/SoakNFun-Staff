@@ -10,6 +10,8 @@ pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS photo_url TEXT').catc
 pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS force_password_reset BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
 pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS is_locked BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
 pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_reception_access BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
+pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS is_reception_manager BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
+pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_handle_callbacks BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
 pool.query(`CREATE TABLE IF NOT EXISTS employee_notes (
   id         SERIAL PRIMARY KEY,
   employee_id INT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
@@ -114,7 +116,8 @@ router.get('/employees', requireAdmin, async (_req, res) => {
               avatar, phone, hire_date AS "hireDate", is_active AS "isActive",
               photo_url AS "photoUrl", is_locked AS "isLocked",
               created_at AS "createdAt",
-              COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"
+              COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess",
+              COALESCE(is_reception_manager, FALSE) AS "isReceptionManager"
        FROM employees ORDER BY name`
     );
     res.json({ employees: rows });
@@ -303,7 +306,8 @@ router.patch('/staff/:id', requireAdmin, async (req, res) => {
        RETURNING id, name, email, role, department, departments, position, phone,
                  hire_date AS "hireDate", avatar, is_active AS "isActive",
                  is_locked AS "isLocked", photo_url AS "photoUrl",
-                 COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"`,
+                 COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess",
+                 COALESCE(is_reception_manager, FALSE) AS "isReceptionManager"`,
       [name||null, email||null, phone||null, position||null, department||null,
        hireDate||null, parseInt(req.params.id)]
     );
@@ -315,12 +319,29 @@ router.patch('/staff/:id', requireAdmin, async (req, res) => {
   }
 });
 
+router.patch('/staff/:id/reception-manager', requireAdmin, async (req, res) => {
+  const { isManager } = req.body;
+  const empId = parseInt(req.params.id);
+  try {
+    const { rows } = await pool.query(
+      `UPDATE employees SET is_reception_manager = $1 WHERE id = $2 AND role = 'crew_member'
+       RETURNING id, COALESCE(is_reception_manager, FALSE) AS "isReceptionManager"`,
+      [isManager === true, empId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Staff member not found.' });
+    logEvent(empId, isManager ? 'Reception manager role granted' : 'Reception manager role removed', {}, req.user.id, req.ip);
+    res.json({ employee: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update reception manager status.' });
+  }
+});
+
 router.patch('/staff/:id/reception-access', requireAdmin, async (req, res) => {
   const { hasAccess } = req.body;
   const empId = parseInt(req.params.id);
   try {
     const { rows } = await pool.query(
-      `UPDATE employees SET has_reception_access = $1 WHERE id = $2 AND role = 'crew_member'
+      `UPDATE employees SET has_reception_access = $1 WHERE id = $2 AND role != 'sysadmin'
        RETURNING id, COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"`,
       [hasAccess === true, empId]
     );
@@ -340,7 +361,8 @@ router.get('/staff/:id', requireAdmin, async (req, res) => {
               hire_date AS "hireDate", avatar, is_active AS "isActive",
               is_locked AS "isLocked", photo_url AS "photoUrl",
               created_at AS "createdAt",
-              COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"
+              COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess",
+              COALESCE(is_reception_manager, FALSE) AS "isReceptionManager"
        FROM employees WHERE id = $1 AND role = 'crew_member'`,
       [parseInt(req.params.id)]
     );

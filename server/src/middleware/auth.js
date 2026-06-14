@@ -67,3 +67,27 @@ export function requireManagement(req, res, next) {
     }
   });
 }
+
+export function requireReceptionManager(req, res, next) {
+  requireAuth(req, res, async () => {
+    try {
+      const { rows } = await pool.query(
+        'SELECT is_active, has_reception_access, is_reception_manager FROM employees WHERE id = $1',
+        [req.user.id]
+      );
+      const emp = rows[0];
+      if (!emp || !emp.is_active) {
+        return res.status(401).json({ error: 'Your account has been deactivated.' });
+      }
+      if (!emp.has_reception_access) {
+        return res.status(403).json({ error: 'Reception portal access required.' });
+      }
+      if (!emp.is_reception_manager) {
+        return res.status(403).json({ error: 'Reception Manager access required.' });
+      }
+      next();
+    } catch {
+      res.status(500).json({ error: 'Failed to verify account status' });
+    }
+  });
+}
