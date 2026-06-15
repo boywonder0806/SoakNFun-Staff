@@ -226,17 +226,14 @@ router.post('/calls', requireReception, async (req, res) => {
   const cbStatus    = needsCallback ? 'pending' : null;
   const autoResolve = !needsCallback;
   try {
-    const [fixedReason, fixedNotes] = await Promise.all([
-      fixGrammar(reason || null),
-      fixGrammar(notes  || null),
-    ]);
+    const fixedReason = await fixGrammar(reason || null);
     const { rows: [inserted] } = await pool.query(
       `INSERT INTO call_log
-         (logged_by, caller_name, caller_phone, call_direction, reason, notes,
+         (logged_by, caller_name, caller_phone, call_direction, reason,
           resolved, needs_callback, requested_staff_id, callback_status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
       [req.user.id, callerName || null, callerPhone || null, callDirection,
-       fixedReason, fixedNotes, autoResolve, needsCallback || false, cbStaffId, cbStatus]
+       fixedReason, autoResolve, needsCallback || false, cbStaffId, cbStatus]
     );
     const { rows } = await pool.query(`${CALLS_SELECT} WHERE cl.id = $1`, [inserted.id]);
     res.status(201).json({ call: rows[0] });
@@ -741,12 +738,10 @@ async function fixGrammar(text) {
   if (!anthropic || !text?.trim()) return text || null;
   try {
     const msg = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model:  'claude-haiku-4-5-20251001',
       max_tokens: 1024,
-      messages: [{
-        role: 'user',
-        content: `Fix grammar, spelling, and capitalization in the text below. Return ONLY the corrected text — no explanation, no quotes, no commentary.\n\n${text}`,
-      }],
+      system: 'Fix grammar, spelling, and capitalization in the user\'s text. Return ONLY the corrected text — no explanation, no quotes, no preamble.',
+      messages: [{ role: 'user', content: text }],
     });
     return msg.content[0]?.text?.trim() || text;
   } catch {
