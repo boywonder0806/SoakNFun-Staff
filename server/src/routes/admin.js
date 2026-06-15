@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import pool from '../db/index.js';
 import { requireAdmin, requireSysAdmin } from '../middleware/auth.js';
-import { sendWelcomeEmail, sendReceptionWelcomeEmail } from '../services/email.js';
+import { sendWelcomeEmail, sendReceptionWelcomeEmail, resendStaffWelcomeEmail } from '../services/email.js';
 
 const router = Router();
 
@@ -374,6 +374,22 @@ router.post('/staff/:id/resend-reception-invite', requireAdmin, async (req, res)
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to resend invite.' });
+  }
+});
+
+router.post('/staff/:id/resend-welcome', requireAdmin, async (req, res) => {
+  const empId = parseInt(req.params.id);
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name, email FROM employees WHERE id = $1 AND role != 'sysadmin'`,
+      [empId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Staff member not found.' });
+    await resendStaffWelcomeEmail({ toEmail: rows[0].email, toName: rows[0].name });
+    logEvent(empId, 'Welcome email resent', {}, req.user.id, req.ip);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to send welcome email.' });
   }
 });
 

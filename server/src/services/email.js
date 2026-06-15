@@ -33,6 +33,20 @@ export async function sendWelcomeEmail({ toEmail, toName, tempPassword }) {
   }
 }
 
+export async function resendStaffWelcomeEmail({ toEmail, toName }) {
+  if (!resend || !toEmail) return;
+  try {
+    await resend.emails.send({
+      from:    FROM,
+      to:      toEmail,
+      subject: 'Your Blue Bayou Staff Portal Account',
+      html:    buildStaffWelcomeResendEmail({ toName, toEmail, loginUrl: `${APP_URL}/login` }),
+    });
+  } catch (err) {
+    console.error('Staff welcome resend failed:', err.message);
+  }
+}
+
 export async function sendReceptionWelcomeEmail({ toEmail, toName }) {
   if (!resend || !toEmail) return;
   try {
@@ -79,6 +93,28 @@ function buildWelcomeEmail({ toName, toEmail, tempPassword, loginUrl }) {
           ${row('Password', `<span style="font-family:monospace;background:#f3f4f6;padding:2px 8px;border-radius:4px">${tempPassword}</span>`)}
         </table>
         <p style="color:#6b7280;font-size:13px;margin:0 0 20px">You will be asked to set a new password the first time you sign in.</p>
+        <a href="${loginUrl}" style="display:inline-block;background:#0077B6;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;font-size:14px">Sign In to Staff Portal</a>
+        <p style="margin:24px 0 0;color:#9ca3af;font-size:12px">Blue Bayou Water Park · Baton Rouge, LA</p>
+      </div>
+    </div>
+  `;
+}
+
+function buildStaffWelcomeResendEmail({ toName, toEmail, loginUrl }) {
+  return `
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto">
+      <div style="background:#0077B6;padding:24px 28px;border-radius:12px 12px 0 0">
+        <p style="color:#90e0ff;margin:0;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase">Blue Bayou Water Park</p>
+        <h1 style="color:#fff;margin:4px 0 0;font-size:20px">Staff Portal Access</h1>
+      </div>
+      <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
+        <p style="color:#374151;margin:0 0 16px">Hi ${toName || 'there'}, here are your Blue Bayou Staff Portal login details.</p>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+          <tr><td style="padding:8px 0;color:#9ca3af;font-size:13px;width:120px">Email</td>
+              <td style="padding:8px 0;color:#111827;font-weight:600">${toEmail}</td></tr>
+          <tr><td style="padding:8px 0;color:#9ca3af;font-size:13px">Password</td>
+              <td style="padding:8px 0;color:#6b7280;font-size:13px">Your existing password (use Forgot Password if needed)</td></tr>
+        </table>
         <a href="${loginUrl}" style="display:inline-block;background:#0077B6;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;font-size:14px">Sign In to Staff Portal</a>
         <p style="margin:24px 0 0;color:#9ca3af;font-size:12px">Blue Bayou Water Park · Baton Rouge, LA</p>
       </div>

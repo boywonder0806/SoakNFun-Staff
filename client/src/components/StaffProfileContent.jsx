@@ -73,8 +73,8 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
   const [resetPw, setResetPw]         = useState('');
   const [resetPwSaving, setResetPwSaving] = useState(false);
   const [resetPwError, setResetPwError]   = useState('');
-  const [forceSaving, setForceSaving]     = useState(false);
-  const [forceSuccess, setForceSuccess]   = useState(false);
+  const [welcomeSending, setWelcomeSending] = useState(false);
+  const [welcomeSent, setWelcomeSent]       = useState(false);
   const [lockSaving, setLockSaving]       = useState(false);
   const [statusSaving, setStatusSaving]   = useState(false);
   const [deactivateConfirm, setDeactivateConfirm] = useState(false);
@@ -173,15 +173,15 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
     } finally { setResetPwSaving(false); }
   }
 
-  async function handleForceReset() {
-    setForceSaving(true);
+  async function handleResendWelcome() {
+    setWelcomeSending(true);
     try {
-      await api.patch(`/admin/staff/${emp.id}/force-reset`);
-      setLogs(prev => [{ id: Date.now(), event: 'Password reset required', createdAt: new Date().toISOString(), actorName: currentUser?.name }, ...prev]);
-      setForceSuccess(true);
-      setTimeout(() => setForceSuccess(false), 3000);
+      await api.post(`/admin/staff/${emp.id}/resend-welcome`);
+      setLogs(prev => [{ id: Date.now(), event: 'Welcome email resent', createdAt: new Date().toISOString(), actorName: currentUser?.name }, ...prev]);
+      setWelcomeSent(true);
+      setTimeout(() => setWelcomeSent(false), 4000);
     } catch {}
-    finally { setForceSaving(false); }
+    finally { setWelcomeSending(false); }
   }
 
   async function handleLockToggle() {
@@ -692,16 +692,16 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
                   )}
                 </div>
 
-                {/* Force password reset */}
+                {/* Send welcome email */}
                 <div className="panel p-4 flex items-start justify-between">
                   <div>
-                    <p className="text-sm font-semibold text-ink">Require Password Change</p>
-                    <p className="text-10 text-fog mt-0.5">Prompt staff to change their password on next login</p>
-                    {forceSuccess && <p className="text-10 text-green-400 font-semibold mt-1.5">Done — will prompt on next login</p>}
+                    <p className="text-sm font-semibold text-ink">Send Welcome Email</p>
+                    <p className="text-10 text-fog mt-0.5">Email them their login link and account info</p>
+                    {welcomeSent && <p className="text-10 text-green-400 font-semibold mt-1.5">Sent — check their inbox</p>}
                   </div>
-                  <button onClick={handleForceReset} disabled={forceSaving}
+                  <button onClick={handleResendWelcome} disabled={welcomeSending}
                     className="btn-ghost border border-rim/60 rounded-md px-3 py-1.5 text-xs shrink-0 ml-3">
-                    {forceSaving ? 'Saving…' : 'Require'}
+                    {welcomeSending ? 'Sending…' : 'Send'}
                   </button>
                 </div>
 
