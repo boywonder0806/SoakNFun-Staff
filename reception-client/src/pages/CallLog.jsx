@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../lib/api.js';
+import { useAuth } from '../context/AuthContext.jsx';
 
 const todayStr = new Date().toDateString();
 
@@ -302,6 +303,9 @@ export default function CallLog({ onTodayCallsCount, onPendingCallbacksCount }) 
 
 // ── New call inline form ───────────────────────────────────────────────────────
 function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
+  const { user } = useAuth();
+  const firstName = user?.name?.split(' ')[0] || 'there';
+
   const [form, setForm] = useState({
     callerName: '', callerPhone: '', reason: '', notes: '',
     needsCallback: false, requestedStaffId: '',
@@ -342,6 +346,15 @@ function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
       {/* Scrollable form area */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto p-6 space-y-5">
+
+          <div className="bg-brand/10 border border-brand/25 rounded-xl px-5 py-4">
+            <p className="text-[10px] font-bold tracking-widest uppercase text-brand/60 mb-1">Intro Script</p>
+            <p className="text-sm text-gray-800 leading-relaxed">
+              "Thank you for calling Blue Bayou Water Park, this is{' '}
+              <span className="font-semibold text-brand">{firstName}</span>
+              , how can I help you today?"
+            </p>
+          </div>
 
           <div className="bg-white rounded-xl border border-gray-200 p-5">
             <h3 className="text-lg font-bold text-gray-900">New Inbound Call</h3>

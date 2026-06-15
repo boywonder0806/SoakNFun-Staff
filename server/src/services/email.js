@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import pool from '../db/index.js';
 
 const resend        = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const FROM          = process.env.RESEND_FROM_EMAIL
@@ -7,29 +8,37 @@ const FROM          = process.env.RESEND_FROM_EMAIL
 const APP_URL       = process.env.CLIENT_URL       || 'http://localhost:5173';
 const RECEPTION_URL = process.env.RECEPTION_URL    || 'http://localhost:5174';
 
-export async function sendCallbackDigestEmail({ toEmail, toName, pendingCount, callbacks, digestUrl }) {
-  if (!resend || !toEmail) return;
+async function logEmail({ type, toEmail, toName, subject, htmlBody, triggeredBy }) {
   try {
-    await resend.emails.send({
-      from:    FROM,
-      to:      toEmail,
-      subject: `You have ${pendingCount} pending callback${pendingCount === 1 ? '' : 's'} — Blue Bayou`,
-      html:    buildCallbackDigestEmail({ toName, pendingCount, callbacks, digestUrl }),
-    });
+    await pool.query(
+      `INSERT INTO reception_email_log (type, to_email, to_name, subject, html_body, triggered_by)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [type, toEmail, toName || null, subject, htmlBody || null, triggeredBy || null]
+    );
+  } catch (e) {
+    console.error('Email log insert failed:', e.message);
+  }
+}
+
+export async function sendCallbackDigestEmail({ toEmail, toName, pendingCount, callbacks, digestUrl, triggeredBy }) {
+  if (!resend || !toEmail) return;
+  const subject = `You have ${pendingCount} pending callback${pendingCount === 1 ? '' : 's'} — Blue Bayou`;
+  const html    = buildCallbackDigestEmail({ toName, pendingCount, callbacks, digestUrl });
+  try {
+    await resend.emails.send({ from: FROM, to: toEmail, subject, html });
+    logEmail({ type: 'callback_digest', toEmail, toName, subject, htmlBody: html, triggeredBy });
   } catch (err) {
     console.error('Callback digest email failed:', err.message);
   }
 }
 
-export async function sendCallbackNotification({ toEmail, toName, callerName, callerPhone, reason, notes, loggedBy }) {
+export async function sendCallbackNotification({ toEmail, toName, callerName, callerPhone, reason, notes, loggedBy, triggeredBy }) {
   if (!resend || !toEmail) return;
+  const subject = `Callback Request — ${callerName}`;
+  const html    = buildCallbackEmail({ toName, callerName, callerPhone, reason, notes, loggedBy });
   try {
-    await resend.emails.send({
-      from:    FROM,
-      to:      toEmail,
-      subject: `Callback Request — ${callerName}`,
-      html:    buildCallbackEmail({ toName, callerName, callerPhone, reason, notes, loggedBy }),
-    });
+    await resend.emails.send({ from: FROM, to: toEmail, subject, html });
+    logEmail({ type: 'callback_notification', toEmail, toName, subject, htmlBody: html, triggeredBy });
   } catch (err) {
     console.error('Email notification failed:', err.message);
   }
@@ -63,15 +72,13 @@ export async function resendStaffWelcomeEmail({ toEmail, toName }) {
   }
 }
 
-export async function sendReceptionWelcomeEmail({ toEmail, toName }) {
+export async function sendReceptionWelcomeEmail({ toEmail, toName, triggeredBy }) {
   if (!resend || !toEmail) return;
+  const subject = 'You now have access to the Blue Bayou Reception Portal';
+  const html    = buildReceptionWelcomeEmail({ toName, loginUrl: `${RECEPTION_URL}/login` });
   try {
-    await resend.emails.send({
-      from:    FROM,
-      to:      toEmail,
-      subject: 'You now have access to the Blue Bayou Reception Portal',
-      html:    buildReceptionWelcomeEmail({ toName, loginUrl: `${RECEPTION_URL}/login` }),
-    });
+    await resend.emails.send({ from: FROM, to: toEmail, subject, html });
+    logEmail({ type: 'reception_welcome', toEmail, toName, subject, htmlBody: html, triggeredBy });
   } catch (err) {
     console.error('Reception welcome email failed:', err.message);
   }

@@ -280,14 +280,30 @@ function FaqTab() {
 /* ─── Callback Handlers Tab ─── */
 
 function HandlersTab() {
-  const [staff, setStaff]     = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [staff, setStaff]       = useState([]);
+  const [loading, setLoading]   = useState(true);
   const [toggling, setToggling] = useState(null);
-  const [toast, setToast]     = useState(null);
+  const [sending, setSending]   = useState(false);
+  const [sentResult, setSentResult] = useState(null);
+  const [toast, setToast]       = useState(null);
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const sendDigests = async () => {
+    setSending(true);
+    setSentResult(null);
+    try {
+      const r = await api.post('/reception/config/send-callback-digests');
+      setSentResult(r.data.sent ?? 0);
+      setTimeout(() => setSentResult(null), 5000);
+    } catch {
+      showToast('Failed to send digest emails.', 'error');
+    } finally {
+      setSending(false);
+    }
   };
 
   useEffect(() => {
@@ -321,16 +337,42 @@ function HandlersTab() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-4">
-      <div className="bg-white rounded-xl border border-gray-200 p-4">
-        <h3 className="text-sm font-semibold text-gray-900 mb-0.5">Callback Handlers</h3>
-        <p className="text-xs text-gray-500">
-          Toggle which employees can be selected as the requested callback handler when logging a call.
-          {enabled.length === 0 && (
-            <span className="block mt-1 text-amber-600 font-medium">
-              No handlers enabled — all active staff will appear in the dropdown as a fallback.
-            </span>
-          )}
-        </p>
+      <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-0.5">Callback Handlers</h3>
+            <p className="text-xs text-gray-500">
+              Toggle which employees can be selected as the requested callback handler when logging a call.
+              {enabled.length === 0 && (
+                <span className="block mt-1 text-amber-600 font-medium">
+                  No handlers enabled — all active staff will appear in the dropdown as a fallback.
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+
+        <div className="pt-3 border-t border-gray-100 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold text-gray-700">Send Callback Digest</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {sentResult !== null
+                ? sentResult === 0
+                  ? 'No pending callbacks found — no emails sent.'
+                  : `Digest sent to ${sentResult} staff member${sentResult !== 1 ? 's' : ''}.`
+                : 'Manually email all assigned handlers a list of their pending callbacks with a magic link to update statuses.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={sendDigests}
+            disabled={sending}
+            className="px-4 py-2 text-xs font-semibold text-white bg-brand rounded-lg hover:bg-brand-dark transition-colors shrink-0 disabled:opacity-50 flex items-center gap-1.5"
+          >
+            <EmailIcon />
+            {sending ? 'Sending…' : sentResult !== null ? 'Sent ✓' : 'Send Now'}
+          </button>
+        </div>
       </div>
 
       {enabled.length > 0 && (
@@ -440,6 +482,15 @@ function TrashIcon() {
       <path d="M19 6l-1 14H6L5 6" />
       <path d="M10 11v6M14 11v6" />
       <path d="M9 6V4h6v2" />
+    </svg>
+  );
+}
+
+function EmailIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+      <polyline points="22,6 12,13 2,6" />
     </svg>
   );
 }

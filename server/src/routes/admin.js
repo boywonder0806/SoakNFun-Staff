@@ -374,7 +374,7 @@ router.patch('/staff/:id/reception-access', requireAdmin, async (req, res) => {
     if (!rows[0]) return res.status(404).json({ error: 'Staff member not found.' });
     logEvent(empId, hasAccess ? 'Reception access granted' : 'Reception access revoked', {}, req.user.id, req.ip);
     if (hasAccess === true) {
-      sendReceptionWelcomeEmail({ toEmail: rows[0].email, toName: rows[0].name });
+      sendReceptionWelcomeEmail({ toEmail: rows[0].email, toName: rows[0].name, triggeredBy: req.user.id });
     }
     const { name, email, ...employee } = rows[0];
     res.json({ employee });
@@ -393,7 +393,7 @@ router.post('/staff/:id/resend-reception-invite', requireAdmin, async (req, res)
     );
     if (!rows[0]) return res.status(404).json({ error: 'Staff member not found.' });
     if (!rows[0].hasReceptionAccess) return res.status(400).json({ error: 'Staff member does not have reception access.' });
-    await sendReceptionWelcomeEmail({ toEmail: rows[0].email, toName: rows[0].name });
+    await sendReceptionWelcomeEmail({ toEmail: rows[0].email, toName: rows[0].name, triggeredBy: req.user.id });
     logEvent(empId, 'Reception portal invite resent', {}, req.user.id, req.ip);
     res.json({ ok: true });
   } catch (err) {

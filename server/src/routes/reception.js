@@ -2,6 +2,7 @@ import { Router } from 'express';
 import pool from '../db/index.js';
 import { requireReception, requireReceptionManager, requireSysAdmin } from '../middleware/auth.js';
 import { sendCallbackNotification } from '../services/email.js';
+import { runCallbackDigestNow } from '../cron/callbackDigest.js';
 
 const router = Router();
 
@@ -9,6 +10,16 @@ const router = Router();
 pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_reception_access BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
 pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS is_reception_manager BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
 pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_handle_callbacks BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
+pool.query(`CREATE TABLE IF NOT EXISTS reception_email_log (
+  id           SERIAL PRIMARY KEY,
+  type         VARCHAR(60) NOT NULL,
+  to_email     TEXT NOT NULL,
+  to_name      TEXT,
+  subject      TEXT NOT NULL,
+  html_body    TEXT,
+  triggered_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  sent_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`).catch(e => console.error('reception_email_log migration:', e.message));
 
 pool.query(`CREATE TABLE IF NOT EXISTS call_log (
   id             SERIAL PRIMARY KEY,
@@ -212,6 +223,7 @@ router.post('/calls', requireReception, async (req, res) => {
     res.status(201).json({ call: rows[0] });
 
     if (needsCallback && cbStaffId && rows[0]?.requestedStaffName) {
+      const actorId = req.user.id;
       pool.query('SELECT email FROM employees WHERE id = $1', [cbStaffId])
         .then(({ rows: staff }) => {
           if (staff[0]?.email) {
@@ -223,6 +235,7 @@ router.post('/calls', requireReception, async (req, res) => {
               reason:      rows[0].reason,
               notes:       rows[0].notes,
               loggedBy:    rows[0].loggedByName || req.user.name,
+              triggeredBy: actorId,
             });
           }
         })
@@ -429,6 +442,7 @@ router.post('/callbacks', requireReception, async (req, res) => {
 
     // Fire-and-forget email to requested staff
     if (requestedStaffId && rows[0]?.requestedStaffName) {
+      const actorId = req.user.id;
       pool.query('SELECT email FROM employees WHERE id = $1', [requestedStaffId])
         .then(({ rows: staff }) => {
           if (staff[0]?.email) {
@@ -440,6 +454,7 @@ router.post('/callbacks', requireReception, async (req, res) => {
               reason:      rows[0].reason,
               notes:       rows[0].notes,
               loggedBy:    rows[0].loggedByName || req.user.name,
+              triggeredBy: actorId,
             });
           }
         })
@@ -679,6 +694,36 @@ router.post('/config/reset-faqs', requireReceptionManager, async (_req, res) => 
     res.status(500).json({ error: 'Failed to reset FAQs' });
   } finally {
     client.release();
+  }
+});
+
+router.post('/config/send-callback-digests', requireReceptionManager, async (req, res) => {
+  try {
+    const count = await runCallbackDigestNow(req.user.id);
+    res.json({ ok: true, sent: count });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to send callback digests.' });
+  }
+});
+
+router.get('/config/email-log', requireReceptionManager, async (req, res) => {
+  const limit  = Math.min(parseInt(req.query.limit  || 50), 100);
+  const offset = parseInt(req.query.offset || 0);
+  try {
+    const { rows } = await pool.query(
+      `SELECT l.id, l.type, l.to_email AS "toEmail", l.to_name AS "toName",
+              l.subject, l.html_body AS "htmlBody", l.sent_at AS "sentAt",
+              e.name AS "triggeredByName"
+       FROM reception_email_log l
+       LEFT JOIN employees e ON l.triggered_by = e.id
+       ORDER BY l.sent_at DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+    const { rows: [{ count }] } = await pool.query('SELECT COUNT(*) FROM reception_email_log');
+    res.json({ emails: rows, total: parseInt(count) });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch email log' });
   }
 });
 

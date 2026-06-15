@@ -21,7 +21,7 @@ async function getOrCreateToken(employeeId) {
   return token;
 }
 
-async function sendDigests() {
+async function sendDigests(triggeredBy = null) {
   try {
     const baseUrl = process.env.CLIENT_URL || 'http://localhost:3001';
 
@@ -57,12 +57,15 @@ async function sendDigests() {
         pendingCount: parseInt(staff.pendingCount),
         callbacks:    staff.callbacks,
         digestUrl,
+        triggeredBy,
       });
     }
 
     console.log(`[Callback digest] Sent digests to ${rows.length} staff member(s)`);
+    return rows.length;
   } catch (err) {
     console.error('[Callback digest] Error:', err.message);
+    return 0;
   }
 }
 
@@ -72,4 +75,6 @@ export function startCallbackDigestCron() {
   console.log('[Callback digest] Scheduled for 11:00 AM and 6:00 PM Central');
 }
 
-export { sendDigests as runCallbackDigestNow };
+export function runCallbackDigestNow(triggeredBy = null) {
+  return sendDigests(triggeredBy);
+}
