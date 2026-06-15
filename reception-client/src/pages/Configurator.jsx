@@ -304,7 +304,7 @@ function HandlersTab() {
         canHandle: !current,
       });
       setStaff(prev => prev.map(s => s.id === id
-        ? { ...s, canHandleCallbacks: r.data.canHandleCallbacks }
+        ? { ...s, canHandleCallbacks: r.data.employee.canHandleCallbacks }
         : s
       ));
     } catch {
