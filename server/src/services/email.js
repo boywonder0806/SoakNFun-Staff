@@ -1,7 +1,7 @@
 import { Resend } from 'resend';
 
 const resend        = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-const FROM          = process.env.RESEND_FROM_EMAIL || 'reception@bluebayoustaff.com';
+const FROM          = process.env.RESEND_FROM_EMAIL || 'system@bluebayoustaff.com';
 const APP_URL       = process.env.CLIENT_URL       || 'http://localhost:5173';
 const RECEPTION_URL = process.env.RECEPTION_URL    || 'http://localhost:5174';
 
