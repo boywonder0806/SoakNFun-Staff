@@ -5,6 +5,7 @@ const SUB_TABS = [
   { id: 'templates', label: 'Templates' },
   { id: 'faq',       label: 'FAQ' },
   { id: 'handlers',  label: 'Callback Handlers' },
+  { id: 'logs',      label: 'Logs' },
 ];
 
 export default function Configurator() {
@@ -35,6 +36,7 @@ export default function Configurator() {
         {sub === 'templates' && <TemplatesTab />}
         {sub === 'faq'       && <FaqTab />}
         {sub === 'handlers'  && <HandlersTab />}
+        {sub === 'logs'      && <LogsTab />}
       </div>
     </div>
   );
@@ -67,11 +69,11 @@ function TemplatesTab() {
     setTemplates(prev => prev.filter(t => t.id !== id));
 
   const addTemplate = () =>
-    setTemplates(prev => [...prev, { id: `new_${Date.now()}`, label: '', body: '' }]);
+    setTemplates(prev => [...prev, { id: `new_${Date.now()}`, label: '', reason: '', notes: '' }]);
 
   const save = async () => {
-    const invalid = templates.filter(t => !t.label?.trim() || !t.body?.trim());
-    if (invalid.length) return showToast('All templates must have a label and body.', 'error');
+    const invalid = templates.filter(t => !t.label?.trim() || !t.reason?.trim());
+    if (invalid.length) return showToast('All templates must have a label and reason.', 'error');
     setSaving(true);
     try {
       await api.put('/reception/config/templates', { templates });
@@ -129,13 +131,19 @@ function TemplatesTab() {
                 <TrashIcon />
               </button>
             </div>
-            <div className="pl-7">
+            <div className="pl-7 space-y-2">
+              <input
+                className="field text-sm text-gray-600"
+                placeholder="Reason / subject (e.g. Ticket pricing inquiry)"
+                value={t.reason || ''}
+                onChange={e => updateTemplate(t.id, 'reason', e.target.value)}
+              />
               <textarea
-                className="field text-sm text-gray-600 resize-none"
+                className="field text-sm text-gray-500 resize-none"
                 rows={2}
-                placeholder="Message body…"
-                value={t.body || ''}
-                onChange={e => updateTemplate(t.id, 'body', e.target.value)}
+                placeholder="Pre-filled notes (optional — e.g. Directed to bluebayouwaterpark.com)"
+                value={t.notes || ''}
+                onChange={e => updateTemplate(t.id, 'notes', e.target.value)}
               />
             </div>
           </div>
@@ -423,6 +431,260 @@ function StaffRow({ staff: s, onToggle, toggling }) {
       >
         {toggling ? '…' : s.canHandleCallbacks ? 'Remove' : 'Enable'}
       </button>
+    </div>
+  );
+}
+
+/* ─── Logs Tab ─── */
+
+const EVENT_STYLES = {
+  'Call logged':                    { dot: 'bg-blue-400',   text: 'text-blue-700'   },
+  'Call marked resolved':           { dot: 'bg-gray-400',   text: 'text-gray-600'   },
+  'Call reopened':                  { dot: 'bg-gray-400',   text: 'text-gray-600'   },
+  'Callback marked completed':      { dot: 'bg-green-500',  text: 'text-green-700'  },
+  'Callback marked unable to reach':{ dot: 'bg-red-400',    text: 'text-red-600'    },
+  'Templates saved':                { dot: 'bg-brand',      text: 'text-brand'      },
+  'FAQs saved':                     { dot: 'bg-brand',      text: 'text-brand'      },
+  'Templates reset to defaults':    { dot: 'bg-amber-400',  text: 'text-amber-600'  },
+  'FAQs reset to defaults':         { dot: 'bg-amber-400',  text: 'text-amber-600'  },
+  'Callback handler enabled':       { dot: 'bg-cyan-500',   text: 'text-cyan-700'   },
+  'Callback handler disabled':      { dot: 'bg-orange-400', text: 'text-orange-600' },
+  'Callback digest sent':           { dot: 'bg-violet-500', text: 'text-violet-700' },
+  'Reception access granted':       { dot: 'bg-cyan-500',   text: 'text-cyan-700'   },
+  'Reception access revoked':       { dot: 'bg-red-400',    text: 'text-red-600'    },
+  'Reception manager role granted': { dot: 'bg-violet-500', text: 'text-violet-700' },
+  'Reception manager role removed': { dot: 'bg-orange-400', text: 'text-orange-600' },
+  'Reception portal invite resent': { dot: 'bg-blue-400',   text: 'text-blue-700'   },
+};
+
+const EMAIL_TYPE_STYLES = {
+  reception_welcome:     { label: 'Portal Welcome',   bg: 'bg-cyan-100',   text: 'text-cyan-700'   },
+  callback_notification: { label: 'Callback Alert',   bg: 'bg-blue-100',   text: 'text-blue-700'   },
+  callback_digest:       { label: 'Callback Digest',  bg: 'bg-violet-100', text: 'text-violet-700' },
+};
+
+function timeAgo(iso) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1)  return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7)  return `${d}d ago`;
+  return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function fullDate(iso) {
+  return new Date(iso).toLocaleString([], {
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  });
+}
+
+function LogsTab() {
+  const [panel, setPanel] = useState('activity');
+  return (
+    <div className="max-w-3xl mx-auto space-y-4">
+      <div className="flex items-center gap-1 bg-gray-200 rounded-lg p-1 w-fit">
+        {[['activity', 'Activity Log'], ['emails', 'Email Log']].map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setPanel(id)}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors
+              ${panel === id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {panel === 'activity' && <ActivityLogPanel />}
+      {panel === 'emails'   && <EmailLogPanel />}
+    </div>
+  );
+}
+
+function ActivityLogPanel() {
+  const [logs, setLogs]       = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [total, setTotal]     = useState(0);
+
+  const load = async (offset = 0) => {
+    setLoading(true);
+    try {
+      const r = await api.get(`/reception/config/activity-log?limit=100&offset=${offset}`);
+      setLogs(r.data.logs || []);
+      setTotal(r.data.total || 0);
+    } catch {}
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  if (loading) return <LoadingSpinner />;
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold text-gray-900">Activity Log</p>
+          <p className="text-xs text-gray-500 mt-0.5">All reception portal actions — {total} total</p>
+        </div>
+        <button onClick={() => load()} className="text-xs text-brand hover:underline">Refresh</button>
+      </div>
+
+      {logs.length === 0 ? (
+        <div className="py-12 text-center text-gray-400 text-sm">No activity yet.</div>
+      ) : (
+        <div className="divide-y divide-gray-50">
+          {logs.map(log => {
+            const style = EVENT_STYLES[log.event] || { dot: 'bg-gray-300', text: 'text-gray-600' };
+            return (
+              <div key={log.id} className="flex items-start gap-3 px-4 py-3">
+                <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${style.dot}`} />
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-medium ${style.text}`}>{log.event}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {log.actorName && <span className="font-medium text-gray-700">{log.actorName}</span>}
+                    {log.actorName && log.employeeName && log.actorName !== log.employeeName && (
+                      <span> → <span className="font-medium text-gray-700">{log.employeeName}</span></span>
+                    )}
+                    {!log.actorName && log.employeeName && <span className="font-medium text-gray-700">{log.employeeName}</span>}
+                    {log.details && Object.keys(log.details).length > 0 && (
+                      <span className="text-gray-400">
+                        {' · '}
+                        {Object.entries(log.details)
+                          .filter(([, v]) => v !== null && v !== false)
+                          .map(([k, v]) => `${k}: ${v}`)
+                          .join(', ')}
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <span className="text-xs text-gray-400 shrink-0 mt-0.5" title={fullDate(log.createdAt)}>
+                  {timeAgo(log.createdAt)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmailLogPanel() {
+  const [emails, setEmails]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [total, setTotal]     = useState(0);
+  const [preview, setPreview] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get('/reception/config/email-log?limit=100');
+      setEmails(r.data.emails || []);
+      setTotal(r.data.total || 0);
+    } catch {}
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  if (loading) return <LoadingSpinner />;
+
+  return (
+    <>
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-gray-900">Email Log</p>
+            <p className="text-xs text-gray-500 mt-0.5">All reception emails sent by the system — {total} total</p>
+          </div>
+          <button onClick={load} className="text-xs text-brand hover:underline">Refresh</button>
+        </div>
+
+        {emails.length === 0 ? (
+          <div className="py-12 text-center text-gray-400 text-sm">No emails sent yet.</div>
+        ) : (
+          <div className="divide-y divide-gray-50">
+            {emails.map(e => {
+              const style = EMAIL_TYPE_STYLES[e.type] || { label: e.type, bg: 'bg-gray-100', text: 'text-gray-600' };
+              return (
+                <button
+                  key={e.id}
+                  onClick={() => setPreview(e)}
+                  className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+                >
+                  <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 mt-0.5 ${style.bg} ${style.text}`}>
+                    {style.label}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{e.toName || e.toEmail}</p>
+                    <p className="text-xs text-gray-500 truncate">{e.subject}</p>
+                    {e.triggeredByName && (
+                      <p className="text-xs text-gray-400 mt-0.5">by {e.triggeredByName}</p>
+                    )}
+                  </div>
+                  <span className="text-xs text-gray-400 shrink-0 mt-0.5" title={fullDate(e.sentAt)}>
+                    {timeAgo(e.sentAt)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {preview && <EmailPreviewModal email={preview} onClose={() => setPreview(null)} />}
+    </>
+  );
+}
+
+function EmailPreviewModal({ email, onClose }) {
+  const style = EMAIL_TYPE_STYLES[email.type] || { label: email.type, bg: 'bg-gray-100', text: 'text-gray-600' };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-gray-100 shrink-0">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${style.bg} ${style.text}`}>
+                {style.label}
+              </span>
+              <span className="text-xs text-gray-400">{fullDate(email.sentAt)}</span>
+            </div>
+            <p className="text-sm font-semibold text-gray-900 truncate">{email.subject}</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              To: <span className="font-medium">{email.toName || ''}</span>
+              {email.toName && email.toEmail && ` <${email.toEmail}>`}
+              {!email.toName && email.toEmail}
+              {email.triggeredByName && <span className="ml-2 text-gray-400">· sent by {email.triggeredByName}</span>}
+            </p>
+          </div>
+          <button onClick={onClose} className="shrink-0 p-1.5 text-gray-400 hover:text-gray-600 transition-colors">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <div className="flex-1 overflow-hidden rounded-b-2xl">
+          {email.htmlBody ? (
+            <iframe
+              srcDoc={email.htmlBody}
+              sandbox="allow-same-origin"
+              className="w-full h-full border-0"
+              style={{ minHeight: '420px' }}
+              title="Email preview"
+            />
+          ) : (
+            <div className="flex items-center justify-center h-40 text-sm text-gray-400">
+              No preview available.
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

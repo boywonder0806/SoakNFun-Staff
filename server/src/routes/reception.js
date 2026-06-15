@@ -6,10 +6,21 @@ import { runCallbackDigestNow } from '../cron/callbackDigest.js';
 
 const router = Router();
 
+async function logReceptionEvent(employeeId, event, details = {}, actorId = null, ip = null) {
+  try {
+    await pool.query(
+      `INSERT INTO activity_logs (employee_id, event, details, actor_id, ip_address, category)
+       VALUES ($1, $2, $3, $4, $5, 'reception')`,
+      [employeeId || null, event, JSON.stringify(details), actorId || null, ip || null]
+    );
+  } catch {}
+}
+
 // Idempotent migrations
 pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_reception_access BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
 pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS is_reception_manager BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
 pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_handle_callbacks BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
+pool.query('ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS category VARCHAR(50)').catch(() => {});
 pool.query(`CREATE TABLE IF NOT EXISTS reception_email_log (
   id           SERIAL PRIMARY KEY,
   type         VARCHAR(60) NOT NULL,
@@ -79,18 +90,18 @@ pool.query(`CREATE TABLE IF NOT EXISTS callback_requests (
 )`).catch(e => console.error('callback_requests migration:', e.message));
 
 const DEFAULT_TEMPLATES = [
-  { label: 'General Park Question', reason: 'General park question',          sort_order: 0  },
-  { label: 'Ticket Pricing',        reason: 'Ticket pricing inquiry',         sort_order: 1  },
-  { label: 'Operating Hours',       reason: 'Operating hours inquiry',        sort_order: 2  },
-  { label: 'Group / Event Rates',   reason: 'Group rates or event inquiry',   sort_order: 3  },
-  { label: 'Birthday Party',        reason: 'Birthday party booking inquiry', sort_order: 4  },
-  { label: 'Season Passes',         reason: 'Season pass inquiry',            sort_order: 5  },
-  { label: 'Accessibility',         reason: 'Accessibility or ADA inquiry',   sort_order: 6  },
-  { label: 'Lost Item',             reason: 'Lost item report',               sort_order: 7  },
-  { label: 'Food & Dining',         reason: 'Food and dining inquiry',        sort_order: 8  },
-  { label: 'Employment',            reason: 'Employment inquiry',             sort_order: 9  },
-  { label: 'Complaint',             reason: 'Guest complaint',                sort_order: 10 },
-  { label: 'Directions / Parking',  reason: 'Directions or parking inquiry',  sort_order: 11 },
+  { label: 'General Park Question', reason: 'General park question',          notes: 'Caller had a general question about the park. Information provided.',                                          sort_order: 0  },
+  { label: 'Ticket Pricing',        reason: 'Ticket pricing inquiry',         notes: 'Caller asked about admission/ticket prices. Directed to bluebayouwaterpark.com or quoted current rates.',       sort_order: 1  },
+  { label: 'Operating Hours',       reason: 'Operating hours inquiry',        notes: 'Caller asked about park hours. Advised to check bluebayouwaterpark.com as hours vary seasonally.',              sort_order: 2  },
+  { label: 'Group / Event Rates',   reason: 'Group rates or event inquiry',   notes: 'Caller requested info on group pricing or event packages. Directed to group sales.',                           sort_order: 3  },
+  { label: 'Birthday Party',        reason: 'Birthday party booking inquiry', notes: 'Caller inquired about birthday party packages. Directed to events team or bluebayouwaterpark.com.',             sort_order: 4  },
+  { label: 'Season Passes',         reason: 'Season pass inquiry',            notes: 'Caller asked about season pass options and pricing. Information provided.',                                      sort_order: 5  },
+  { label: 'Accessibility',         reason: 'Accessibility or ADA inquiry',   notes: 'Caller inquired about ADA accommodations or accessibility options.',                                            sort_order: 6  },
+  { label: 'Lost Item',             reason: 'Lost item report',               notes: 'Caller reported a lost item. Description and contact details noted for lost & found.',                          sort_order: 7  },
+  { label: 'Food & Dining',         reason: 'Food and dining inquiry',        notes: 'Caller asked about dining options. No outside food or coolers permitted; on-site dining available.',            sort_order: 8  },
+  { label: 'Employment',            reason: 'Employment inquiry',             notes: 'Caller asked about job opportunities. Directed to careers page on bluebayouwaterpark.com.',                     sort_order: 9  },
+  { label: 'Complaint',             reason: 'Guest complaint',                notes: 'Guest filed a complaint. Details recorded and flagged for management follow-up.',                               sort_order: 10 },
+  { label: 'Directions / Parking',  reason: 'Directions or parking inquiry',  notes: 'Caller asked for directions or parking info. Address: 18200 Perkins Road East, Baton Rouge, LA 70810.',        sort_order: 11 },
 ];
 
 const DEFAULT_FAQS = [
@@ -116,9 +127,11 @@ async function seedConfigTables() {
       id         SERIAL PRIMARY KEY,
       label      VARCHAR(255) NOT NULL,
       reason     TEXT NOT NULL,
+      notes      TEXT NOT NULL DEFAULT '',
       sort_order INT NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
+    await pool.query(`ALTER TABLE reception_templates ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''`);
     await pool.query(`CREATE TABLE IF NOT EXISTS reception_faqs (
       id         SERIAL PRIMARY KEY,
       question   TEXT NOT NULL,
@@ -131,8 +144,8 @@ async function seedConfigTables() {
     if (parseInt(tc.count) === 0) {
       for (const t of DEFAULT_TEMPLATES) {
         await pool.query(
-          `INSERT INTO reception_templates (label, reason, sort_order) VALUES ($1, $2, $3)`,
-          [t.label, t.reason, t.sort_order]
+          `INSERT INTO reception_templates (label, reason, notes, sort_order) VALUES ($1, $2, $3, $4)`,
+          [t.label, t.reason, t.notes || '', t.sort_order]
         );
       }
     }
@@ -222,6 +235,11 @@ router.post('/calls', requireReception, async (req, res) => {
     const { rows } = await pool.query(`${CALLS_SELECT} WHERE cl.id = $1`, [inserted.id]);
     res.status(201).json({ call: rows[0] });
 
+    logReceptionEvent(null, 'Call logged', {
+      callerName: callerName || null, callerPhone: callerPhone || null,
+      needsCallback: needsCallback || false,
+    }, req.user.id, req.ip);
+
     if (needsCallback && cbStaffId && rows[0]?.requestedStaffName) {
       const actorId = req.user.id;
       pool.query('SELECT email FROM employees WHERE id = $1', [cbStaffId])
@@ -290,6 +308,15 @@ router.patch('/calls/:id', requireReception, async (req, res) => {
     if (!rowCount) return res.status(404).json({ error: 'Call not found' });
     const { rows } = await pool.query(`${CALLS_SELECT} WHERE cl.id = $1`, [parseInt(req.params.id)]);
     res.json({ call: rows[0] });
+
+    if (callbackStatus !== undefined) {
+      const label = callbackStatus === 'completed' ? 'Callback marked completed'
+                  : callbackStatus === 'unable_to_reach' ? 'Callback marked unable to reach'
+                  : `Callback status set to ${callbackStatus}`;
+      logReceptionEvent(null, label, { callId: parseInt(req.params.id) }, req.user.id, req.ip);
+    } else if (resolved !== undefined) {
+      logReceptionEvent(null, resolved ? 'Call marked resolved' : 'Call reopened', { callId: parseInt(req.params.id) }, req.user.id, req.ip);
+    }
   } catch (err) {
     res.status(500).json({ error: 'Failed to update call' });
   }
@@ -544,7 +571,7 @@ router.get('/staff', requireReception, async (_req, res) => {
 router.get('/config/templates', requireReception, async (_req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, label, reason, sort_order AS "sortOrder" FROM reception_templates ORDER BY sort_order, id`
+      `SELECT id, label, reason, notes, sort_order AS "sortOrder" FROM reception_templates ORDER BY sort_order, id`
     );
     res.json({ templates: rows });
   } catch (err) {
@@ -563,15 +590,16 @@ router.put('/config/templates', requireReceptionManager, async (req, res) => {
       const t = templates[i];
       if (!t.label?.trim() && !t.reason?.trim()) continue;
       await client.query(
-        `INSERT INTO reception_templates (label, reason, sort_order) VALUES ($1, $2, $3)`,
-        [t.label?.trim() || '', t.reason?.trim() || '', i]
+        `INSERT INTO reception_templates (label, reason, notes, sort_order) VALUES ($1, $2, $3, $4)`,
+        [t.label?.trim() || '', t.reason?.trim() || '', t.notes?.trim() || '', i]
       );
     }
     await client.query('COMMIT');
     const { rows } = await client.query(
-      `SELECT id, label, reason, sort_order AS "sortOrder" FROM reception_templates ORDER BY sort_order, id`
+      `SELECT id, label, reason, notes, sort_order AS "sortOrder" FROM reception_templates ORDER BY sort_order, id`
     );
     res.json({ templates: rows });
+    logReceptionEvent(null, 'Templates saved', { count: rows.length }, req.user.id, req.ip);
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: 'Failed to save templates' });
@@ -611,6 +639,7 @@ router.put('/config/faqs', requireReceptionManager, async (req, res) => {
       `SELECT id, question, answer, tags, sort_order AS "sortOrder" FROM reception_faqs ORDER BY sort_order, id`
     );
     res.json({ faqs: rows });
+    logReceptionEvent(null, 'FAQs saved', { count: rows.length }, req.user.id, req.ip);
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: 'Failed to save FAQs' });
@@ -642,12 +671,13 @@ router.patch('/config/staff/:id/callback-handler', requireReceptionManager, asyn
     );
     if (!rows[0]) return res.status(404).json({ error: 'Employee not found' });
     res.json({ employee: rows[0] });
+    logReceptionEvent(parseInt(req.params.id), canHandle ? 'Callback handler enabled' : 'Callback handler disabled', {}, req.user.id, req.ip);
   } catch (err) {
     res.status(500).json({ error: 'Failed to update callback handler status' });
   }
 });
 
-router.post('/config/reset-templates', requireReceptionManager, async (_req, res) => {
+router.post('/config/reset-templates', requireReceptionManager, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -655,15 +685,16 @@ router.post('/config/reset-templates', requireReceptionManager, async (_req, res
     for (let i = 0; i < DEFAULT_TEMPLATES.length; i++) {
       const t = DEFAULT_TEMPLATES[i];
       await client.query(
-        `INSERT INTO reception_templates (label, reason, sort_order) VALUES ($1, $2, $3)`,
-        [t.label, t.reason, i]
+        `INSERT INTO reception_templates (label, reason, notes, sort_order) VALUES ($1, $2, $3, $4)`,
+        [t.label, t.reason, t.notes || '', i]
       );
     }
     await client.query('COMMIT');
     const { rows } = await client.query(
-      `SELECT id, label, reason, sort_order AS "sortOrder" FROM reception_templates ORDER BY sort_order, id`
+      `SELECT id, label, reason, notes, sort_order AS "sortOrder" FROM reception_templates ORDER BY sort_order, id`
     );
     res.json({ templates: rows });
+    logReceptionEvent(null, 'Templates reset to defaults', {}, req.user.id, req.ip);
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: 'Failed to reset templates' });
@@ -672,7 +703,7 @@ router.post('/config/reset-templates', requireReceptionManager, async (_req, res
   }
 });
 
-router.post('/config/reset-faqs', requireReceptionManager, async (_req, res) => {
+router.post('/config/reset-faqs', requireReceptionManager, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -689,6 +720,7 @@ router.post('/config/reset-faqs', requireReceptionManager, async (_req, res) => 
       `SELECT id, question, answer, tags, sort_order AS "sortOrder" FROM reception_faqs ORDER BY sort_order, id`
     );
     res.json({ faqs: rows });
+    logReceptionEvent(null, 'FAQs reset to defaults', {}, req.user.id, req.ip);
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: 'Failed to reset FAQs' });
@@ -701,8 +733,35 @@ router.post('/config/send-callback-digests', requireReceptionManager, async (req
   try {
     const count = await runCallbackDigestNow(req.user.id);
     res.json({ ok: true, sent: count });
+    logReceptionEvent(null, 'Callback digest sent', { recipients: count }, req.user.id, req.ip);
   } catch (err) {
     res.status(500).json({ error: 'Failed to send callback digests.' });
+  }
+});
+
+router.get('/config/activity-log', requireReceptionManager, async (req, res) => {
+  const limit  = Math.min(parseInt(req.query.limit || 100), 200);
+  const offset = parseInt(req.query.offset || 0);
+  try {
+    const { rows } = await pool.query(
+      `SELECT al.id, al.event, al.details, al.created_at AS "createdAt",
+              emp.name AS "employeeName",
+              actor.name AS "actorName"
+       FROM activity_logs al
+       LEFT JOIN employees emp   ON al.employee_id = emp.id
+       LEFT JOIN employees actor ON al.actor_id    = actor.id
+       WHERE al.category = 'reception'
+          OR al.event ILIKE 'Reception%'
+       ORDER BY al.created_at DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+    const { rows: [{ count }] } = await pool.query(
+      `SELECT COUNT(*) FROM activity_logs WHERE category = 'reception' OR event ILIKE 'Reception%'`
+    );
+    res.json({ logs: rows, total: parseInt(count) });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch activity log' });
   }
 });
 

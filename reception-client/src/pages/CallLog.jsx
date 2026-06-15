@@ -28,6 +28,17 @@ function stem(w) {
     .replace(/ly$/, '');
 }
 
+function toTitleCase(str) {
+  return str.trim().toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase());
+}
+
+function formatPhone(val) {
+  const digits = val.replace(/\D/g, '').slice(0, 10);
+  if (digits.length < 4) return digits;
+  if (digits.length < 7) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
 function tokenize(text) {
   return text.toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
@@ -370,7 +381,7 @@ function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
                     className="field"
                     placeholder="(225) 555-0100"
                     value={form.callerPhone}
-                    onChange={set('callerPhone')}
+                    onChange={e => setForm(p => ({ ...p, callerPhone: formatPhone(e.target.value) }))}
                     autoFocus
                   />
                 </div>
@@ -381,6 +392,10 @@ function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
                     placeholder="John Smith"
                     value={form.callerName}
                     onChange={set('callerName')}
+                    onBlur={e => {
+                      const fixed = toTitleCase(e.target.value);
+                      if (fixed !== form.callerName) setForm(p => ({ ...p, callerName: fixed }));
+                    }}
                   />
                 </div>
               </div>
@@ -445,24 +460,26 @@ function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
 
       {/* Template bar — pinned to bottom */}
       {templates.length > 0 && (
-        <div className="shrink-0 bg-white border-t border-gray-200 px-4 py-2.5 flex items-center gap-2">
+        <div className="shrink-0 bg-white border-t border-gray-200 px-4 py-2.5 flex items-center gap-2 min-w-0">
           <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 shrink-0">Templates</span>
           <div className="w-px h-4 bg-gray-200 shrink-0" />
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-            {templates.map(t => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setForm(p => ({ ...p, reason: t.reason }))}
-                className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
-                  ${form.reason === t.reason
-                    ? 'bg-brand text-white border-brand'
-                    : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-brand hover:text-brand'
-                  }`}
-              >
-                {t.label}
-              </button>
-            ))}
+          <div className="flex-1 min-w-0 overflow-x-auto no-scrollbar">
+            <div className="flex items-center gap-1.5">
+              {templates.map(t => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setForm(p => ({ ...p, reason: t.reason, notes: t.notes || p.notes }))}
+                  className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                    ${form.reason === t.reason
+                      ? 'bg-brand text-white border-brand'
+                      : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-brand hover:text-brand'
+                    }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
