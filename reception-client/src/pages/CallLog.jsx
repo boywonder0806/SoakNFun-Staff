@@ -247,7 +247,7 @@ export default function CallLog({ onTodayCallsCount, onPendingCallbacksCount }) 
       </div>
 
       {/* Middle: Detail / New-call Panel */}
-      <div className="flex-1 overflow-y-auto bg-gray-50">
+      <div className={`flex-1 min-h-0 ${showNew ? 'overflow-hidden' : 'overflow-y-auto'} bg-gray-50`}>
         {showNew ? (
           <NewCallPanel
             staff={staff}
@@ -324,114 +324,122 @@ function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
   }
 
   return (
-    <div className="relative max-w-2xl mx-auto p-6 space-y-5">
+    <div className="h-full flex flex-col">
 
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <h3 className="text-lg font-bold text-gray-900">New Inbound Call</h3>
-        <p className="text-xs text-gray-400 mt-0.5">Phone number is required</p>
-      </div>
+      {/* Scrollable form area */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-2xl mx-auto p-6 space-y-5">
 
-      {/* Quick templates */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <div className="mb-3">
-          <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Quick Templates</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {templates.map(t => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setForm(p => ({ ...p, reason: t.reason }))}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
-                ${form.reason === t.reason
-                  ? 'bg-brand text-white border-brand'
-                  : 'bg-white text-gray-600 border-gray-200 hover:border-brand hover:text-brand'
-                }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label">Phone Number *</label>
-              <input
-                className="field"
-                placeholder="(225) 555-0100"
-                value={form.callerPhone}
-                onChange={set('callerPhone')}
-                autoFocus
-              />
-            </div>
-            <div>
-              <label className="label">Caller Name</label>
-              <input
-                className="field"
-                placeholder="John Smith"
-                value={form.callerName}
-                onChange={set('callerName')}
-              />
-            </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <h3 className="text-lg font-bold text-gray-900">New Inbound Call</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Phone number is required</p>
           </div>
 
-          <div>
-            <label className="label">Reason / Subject</label>
-            <input
-              className="field"
-              placeholder="What was the call about?"
-              value={form.reason}
-              onChange={set('reason')}
-            />
-          </div>
-
-          <div>
-            <label className="label">Notes</label>
-            <textarea
-              className="field resize-none"
-              rows={3}
-              placeholder="Additional details…"
-              value={form.notes}
-              onChange={set('notes')}
-            />
-          </div>
-
-          <div className="border border-gray-200 rounded-xl p-4 space-y-3">
-            <label className="flex items-center gap-3 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                className="w-4 h-4 accent-brand"
-                checked={form.needsCallback}
-                onChange={e => setForm(p => ({ ...p, needsCallback: e.target.checked }))}
-              />
-              <span className="text-sm font-medium text-gray-900">Needs Callback</span>
-            </label>
-            {form.needsCallback && (
-              <div>
-                <label className="label">Requested Staff Member</label>
-                <select className="field" value={form.requestedStaffId} onChange={set('requestedStaffId')}>
-                  <option value="">— Not specified —</option>
-                  {staff.map(s => (
-                    <option key={s.id} value={s.id}>{s.name}{s.position ? ` (${s.position})` : ''}</option>
-                  ))}
-                </select>
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <form id="new-call-form" onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Phone Number *</label>
+                  <input
+                    className="field"
+                    placeholder="(225) 555-0100"
+                    value={form.callerPhone}
+                    onChange={set('callerPhone')}
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="label">Caller Name</label>
+                  <input
+                    className="field"
+                    placeholder="John Smith"
+                    value={form.callerName}
+                    onChange={set('callerName')}
+                  />
+                </div>
               </div>
-            )}
+
+              <div>
+                <label className="label">Reason / Subject</label>
+                <input
+                  className="field"
+                  placeholder="What was the call about?"
+                  value={form.reason}
+                  onChange={set('reason')}
+                />
+              </div>
+
+              <div>
+                <label className="label">Notes</label>
+                <textarea
+                  className="field resize-none"
+                  rows={3}
+                  placeholder="Additional details…"
+                  value={form.notes}
+                  onChange={set('notes')}
+                />
+              </div>
+
+              <div className="border border-gray-200 rounded-xl p-4 space-y-3">
+                <label className="flex items-center gap-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 accent-brand"
+                    checked={form.needsCallback}
+                    onChange={e => setForm(p => ({ ...p, needsCallback: e.target.checked }))}
+                  />
+                  <span className="text-sm font-medium text-gray-900">Needs Callback</span>
+                </label>
+                {form.needsCallback && (
+                  <div>
+                    <label className="label">Requested Staff Member</label>
+                    <select className="field" value={form.requestedStaffId} onChange={set('requestedStaffId')}>
+                      <option value="">— Not specified —</option>
+                      {staff.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}{s.position ? ` (${s.position})` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {error && <p className="text-sm text-red-600">{error}</p>}
+
+              <div className="flex gap-3 pt-1">
+                <button type="button" onClick={onCancel} className="btn-ghost flex-1">Cancel</button>
+                <button type="submit" disabled={saving} className="btn-primary flex-1">
+                  {saving ? <><Spinner /> Saving…</> : 'Save Call'}
+                </button>
+              </div>
+            </form>
           </div>
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
-
-          <div className="flex gap-3 pt-1">
-            <button type="button" onClick={onCancel} className="btn-ghost flex-1">Cancel</button>
-            <button type="submit" disabled={saving} className="btn-primary flex-1">
-              {saving ? <><Spinner /> Saving…</> : 'Save Call'}
-            </button>
-          </div>
-        </form>
+        </div>
       </div>
+
+      {/* Template bar — pinned to bottom */}
+      {templates.length > 0 && (
+        <div className="shrink-0 bg-white border-t border-gray-200 px-4 py-2.5 flex items-center gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 shrink-0">Templates</span>
+          <div className="w-px h-4 bg-gray-200 shrink-0" />
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+            {templates.map(t => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setForm(p => ({ ...p, reason: t.reason }))}
+                className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                  ${form.reason === t.reason
+                    ? 'bg-brand text-white border-brand'
+                    : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-brand hover:text-brand'
+                  }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
     </div>
   );
