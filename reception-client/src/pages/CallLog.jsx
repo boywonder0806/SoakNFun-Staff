@@ -1,7 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import api from '../lib/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
-import { useGrammarFix } from '../lib/useGrammarFix.js';
 
 const todayStr = new Date().toDateString();
 
@@ -563,13 +562,30 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
   const [saving, setSaving]             = useState(false);
   const [saved, setSaved]               = useState(false);
   const [statusSaving, setStatusSaving] = useState(false);
+  const [fixing, setFixing]             = useState(false);
+  const [justFixed, setJustFixed]       = useState(false);
 
   function set(f) { return e => setForm(p => ({ ...p, [f]: e.target.value })); }
 
-  const setReason = useCallback(v => setForm(p => ({ ...p, reason: v })), []);
-  const setNotes  = useCallback(v => setForm(p => ({ ...p, notes: v })), []);
-  const reasonFix = useGrammarFix(form.reason, setReason);
-  const notesFix  = useGrammarFix(form.notes, setNotes);
+  async function handleFixGrammar() {
+    setFixing(true);
+    try {
+      const [fixedName, fixedReason, fixedNotes] = await Promise.all([
+        form.callerName.trim() ? api.post('/reception/fix-grammar', { text: form.callerName }) : null,
+        form.reason.trim()     ? api.post('/reception/fix-grammar', { text: form.reason })     : null,
+        form.notes.trim()      ? api.post('/reception/fix-grammar', { text: form.notes })      : null,
+      ]);
+      setForm(p => ({
+        ...p,
+        callerName: fixedName?.data.corrected   ?? p.callerName,
+        reason:     fixedReason?.data.corrected ?? p.reason,
+        notes:      fixedNotes?.data.corrected  ?? p.notes,
+      }));
+      setJustFixed(true);
+      setTimeout(() => setJustFixed(false), 2500);
+    } catch {}
+    finally { setFixing(false); }
+  }
 
   async function handleSave(e) {
     e.preventDefault();
@@ -631,18 +647,12 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="label !mb-0">Reason / Subject</label>
-              <GrammarFixButton {...reasonFix} disabled={!form.reason.trim()} />
-            </div>
+            <label className="label">Reason / Subject</label>
             <input className="field" placeholder="What was the call about?" value={form.reason} onChange={set('reason')} />
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="label !mb-0">Notes</label>
-              <GrammarFixButton {...notesFix} disabled={!form.notes.trim()} />
-            </div>
+            <label className="label">Notes</label>
             <textarea className="field resize-none" rows={3} value={form.notes} onChange={set('notes')} />
           </div>
 
@@ -669,7 +679,24 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
             )}
           </div>
 
-          <div className="flex justify-end">
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={handleFixGrammar}
+              disabled={fixing || (!form.callerName.trim() && !form.reason.trim() && !form.notes.trim())}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border transition-all disabled:opacity-30 disabled:cursor-not-allowed
+                ${justFixed
+                  ? 'text-green-600 bg-green-50 border-green-200'
+                  : 'text-gray-500 bg-white border-gray-200 hover:text-brand hover:border-brand hover:bg-brand/5'
+                }`}
+            >
+              {fixing
+                ? <><span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />Fixing…</>
+                : justFixed
+                  ? <>✓ Fixed</>
+                  : <><SparkleIcon />Fix Grammar</>
+              }
+            </button>
             <button type="submit" disabled={saving} className="btn-primary min-w-[130px]">
               {saving ? <><Spinner /> Saving…</> : saved ? '✓ Saved' : 'Save Changes'}
             </button>
