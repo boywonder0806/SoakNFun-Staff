@@ -356,11 +356,6 @@ function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState('');
 
-  const setReason = useCallback(v => setForm(p => ({ ...p, reason: v })), []);
-  const setNotes  = useCallback(v => setForm(p => ({ ...p, notes: v })), []);
-  const reasonFix = useGrammarFix(form.reason, setReason);
-  const notesFix  = useGrammarFix(form.notes, setNotes);
-
   useEffect(() => {
     onQueryChange?.([form.reason, form.notes].filter(Boolean).join(' '));
   }, [form.reason, form.notes]);
@@ -438,10 +433,7 @@ function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="label !mb-0">Reason / Subject</label>
-                  <GrammarFixButton {...reasonFix} disabled={!form.reason.trim()} />
-                </div>
+                <label className="label">Reason / Subject</label>
                 <input
                   className="field"
                   placeholder="What was the call about?"
@@ -451,10 +443,7 @@ function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="label !mb-0">Notes</label>
-                  <GrammarFixButton {...notesFix} disabled={!form.notes.trim()} />
-                </div>
+                <label className="label">Notes</label>
                 <textarea
                   className="field resize-none"
                   rows={3}

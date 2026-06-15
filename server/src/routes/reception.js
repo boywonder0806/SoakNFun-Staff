@@ -222,17 +222,21 @@ router.get('/calls', requireReception, async (_req, res) => {
 
 router.post('/calls', requireReception, async (req, res) => {
   const { callerName, callerPhone, callDirection = 'inbound', reason, notes, needsCallback, requestedStaffId } = req.body;
-  const cbStaffId  = needsCallback && requestedStaffId ? requestedStaffId : null;
-  const cbStatus   = needsCallback ? 'pending' : null;
+  const cbStaffId   = needsCallback && requestedStaffId ? requestedStaffId : null;
+  const cbStatus    = needsCallback ? 'pending' : null;
   const autoResolve = !needsCallback;
   try {
+    const [fixedReason, fixedNotes] = await Promise.all([
+      fixGrammar(reason || null),
+      fixGrammar(notes  || null),
+    ]);
     const { rows: [inserted] } = await pool.query(
       `INSERT INTO call_log
          (logged_by, caller_name, caller_phone, call_direction, reason, notes,
           resolved, needs_callback, requested_staff_id, callback_status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
       [req.user.id, callerName || null, callerPhone || null, callDirection,
-       reason || null, notes || null, autoResolve, needsCallback || false, cbStaffId, cbStatus]
+       fixedReason, fixedNotes, autoResolve, needsCallback || false, cbStaffId, cbStatus]
     );
     const { rows } = await pool.query(`${CALLS_SELECT} WHERE cl.id = $1`, [inserted.id]);
     res.status(201).json({ call: rows[0] });
@@ -733,10 +737,8 @@ router.post('/config/reset-faqs', requireReceptionManager, async (req, res) => {
 
 const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
 
-router.post('/fix-grammar', requireReception, async (req, res) => {
-  const { text } = req.body;
-  if (!text || !text.trim()) return res.json({ corrected: text });
-  if (!anthropic) return res.status(503).json({ error: 'AI not configured' });
+async function fixGrammar(text) {
+  if (!anthropic || !text?.trim()) return text || null;
   try {
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
@@ -746,10 +748,19 @@ router.post('/fix-grammar', requireReception, async (req, res) => {
         content: `Fix grammar, spelling, and capitalization in the text below. Return ONLY the corrected text — no explanation, no quotes, no commentary.\n\n${text}`,
       }],
     });
-    res.json({ corrected: msg.content[0]?.text?.trim() || text });
-  } catch (err) {
-    res.status(500).json({ error: 'Grammar fix failed' });
+    return msg.content[0]?.text?.trim() || text;
+  } catch {
+    return text;
   }
+}
+
+router.post('/fix-grammar', requireReception, async (req, res) => {
+  const { text } = req.body;
+  if (!text || !text.trim()) return res.json({ corrected: text });
+  if (!anthropic) return res.status(503).json({ error: 'AI not configured' });
+  const corrected = await fixGrammar(text);
+  if (corrected === text) return res.json({ corrected: text });
+  res.json({ corrected });
 });
 
 router.post('/config/send-callback-digests', requireReceptionManager, async (req, res) => {
