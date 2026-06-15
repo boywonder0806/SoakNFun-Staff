@@ -221,16 +221,17 @@ router.get('/calls', requireReception, async (_req, res) => {
 
 router.post('/calls', requireReception, async (req, res) => {
   const { callerName, callerPhone, callDirection = 'inbound', reason, notes, needsCallback, requestedStaffId } = req.body;
-  const cbStaffId = needsCallback && requestedStaffId ? requestedStaffId : null;
-  const cbStatus  = needsCallback ? 'pending' : null;
+  const cbStaffId  = needsCallback && requestedStaffId ? requestedStaffId : null;
+  const cbStatus   = needsCallback ? 'pending' : null;
+  const autoResolve = !needsCallback;
   try {
     const { rows: [inserted] } = await pool.query(
       `INSERT INTO call_log
          (logged_by, caller_name, caller_phone, call_direction, reason, notes,
-          needs_callback, requested_staff_id, callback_status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+          resolved, needs_callback, requested_staff_id, callback_status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
       [req.user.id, callerName || null, callerPhone || null, callDirection,
-       reason || null, notes || null, needsCallback || false, cbStaffId, cbStatus]
+       reason || null, notes || null, autoResolve, needsCallback || false, cbStaffId, cbStatus]
     );
     const { rows } = await pool.query(`${CALLS_SELECT} WHERE cl.id = $1`, [inserted.id]);
     res.status(201).json({ call: rows[0] });
