@@ -324,8 +324,11 @@ function UserModal({ user, isSelf, onClose, onRoleUpdate, onUserUpdate, onLockUp
     setReceptionSaving(true);
     try {
       const next = !user.hasReceptionAccess;
-      await api.patch(`/reception/access/${user.id}`, { access: next });
-      onReceptionUpdate(user.id, next);
+      const { data } = await api.patch(`/reception/access/${user.id}`, { access: next });
+      onReceptionUpdate(user.id, data.user.hasReceptionAccess);
+      if (data.user.isReceptionManager !== undefined) {
+        onUserUpdate(user.id, { isReceptionManager: data.user.isReceptionManager });
+      }
     } catch (err) {
       console.error(err);
     } finally {

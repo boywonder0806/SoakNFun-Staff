@@ -143,11 +143,24 @@ seedConfigTables();
 // ── Access management (sysadmin only) ─────────────────────────────────────────
 router.patch('/access/:id', requireSysAdmin, async (req, res) => {
   const { access } = req.body;
+  const empId = parseInt(req.params.id);
   try {
+    // For non-crew_member roles, granting access also grants reception manager
+    const { rows: empRows } = await pool.query(
+      `SELECT role FROM employees WHERE id = $1`, [empId]
+    );
+    const isAdmin = empRows[0] && empRows[0].role !== 'crew_member';
+    const grantManager = access === true && isAdmin;
+
     const { rows } = await pool.query(
-      `UPDATE employees SET has_reception_access = $1 WHERE id = $2
-       RETURNING id, has_reception_access AS "hasReceptionAccess"`,
-      [access === true, parseInt(req.params.id)]
+      `UPDATE employees
+       SET has_reception_access = $1,
+           is_reception_manager = CASE WHEN $2 THEN TRUE ELSE is_reception_manager END
+       WHERE id = $3
+       RETURNING id,
+                 has_reception_access AS "hasReceptionAccess",
+                 COALESCE(is_reception_manager, FALSE) AS "isReceptionManager"`,
+      [access === true, grantManager, empId]
     );
     if (!rows[0]) return res.status(404).json({ error: 'User not found' });
     res.json({ user: rows[0] });
