@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '../lib/api.js';
+import { useGrammarFix } from '../lib/useGrammarFix.js';
 
 const SUB_TABS = [
   { id: 'templates', label: 'Templates' },

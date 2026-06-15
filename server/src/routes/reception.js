@@ -3,6 +3,7 @@ import pool from '../db/index.js';
 import { requireReception, requireReceptionManager, requireSysAdmin } from '../middleware/auth.js';
 import { sendCallbackNotification } from '../services/email.js';
 import { runCallbackDigestNow } from '../cron/callbackDigest.js';
+import Anthropic from '@anthropic-ai/sdk';
 
 const router = Router();
 
@@ -727,6 +728,27 @@ router.post('/config/reset-faqs', requireReceptionManager, async (req, res) => {
     res.status(500).json({ error: 'Failed to reset FAQs' });
   } finally {
     client.release();
+  }
+});
+
+const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
+
+router.post('/fix-grammar', requireReception, async (req, res) => {
+  const { text } = req.body;
+  if (!text || !text.trim()) return res.json({ corrected: text });
+  if (!anthropic) return res.status(503).json({ error: 'AI not configured' });
+  try {
+    const msg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      messages: [{
+        role: 'user',
+        content: `Fix grammar, spelling, and capitalization in the text below. Return ONLY the corrected text — no explanation, no quotes, no commentary.\n\n${text}`,
+      }],
+    });
+    res.json({ corrected: msg.content[0]?.text?.trim() || text });
+  } catch (err) {
+    res.status(500).json({ error: 'Grammar fix failed' });
   }
 });
 

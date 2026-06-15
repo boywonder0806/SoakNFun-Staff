@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from '../lib/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import { useGrammarFix } from '../lib/useGrammarFix.js';
 
 const todayStr = new Date().toDateString();
 
@@ -312,6 +313,37 @@ export default function CallLog({ onTodayCallsCount, onPendingCallbacksCount }) 
   );
 }
 
+// ── Grammar fix button ────────────────────────────────────────────────────────
+function GrammarFixButton({ fix, fixing, justFixed, disabled }) {
+  return (
+    <button
+      type="button"
+      onClick={fix}
+      disabled={disabled || fixing}
+      className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded transition-all
+        ${justFixed
+          ? 'text-green-600 bg-green-50 border border-green-200'
+          : 'text-gray-400 hover:text-brand hover:bg-brand/5 border border-transparent disabled:opacity-30 disabled:cursor-not-allowed'
+        }`}
+    >
+      {fixing
+        ? <><span className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin" />Fixing…</>
+        : justFixed
+          ? <>✓ Fixed</>
+          : <><SparkleIcon />Fix</>
+      }
+    </button>
+  );
+}
+
+function SparkleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
+      <path d="M12 2l2.09 6.26L20 10l-5.91 1.74L12 18l-2.09-6.26L4 10l5.91-1.74Z" />
+    </svg>
+  );
+}
+
 // ── New call inline form ───────────────────────────────────────────────────────
 function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
   const { user } = useAuth();
@@ -323,6 +355,11 @@ function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState('');
+
+  const setReason = useCallback(v => setForm(p => ({ ...p, reason: v })), []);
+  const setNotes  = useCallback(v => setForm(p => ({ ...p, notes: v })), []);
+  const reasonFix = useGrammarFix(form.reason, setReason);
+  const notesFix  = useGrammarFix(form.notes, setNotes);
 
   useEffect(() => {
     onQueryChange?.([form.reason, form.notes].filter(Boolean).join(' '));
@@ -401,7 +438,10 @@ function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
               </div>
 
               <div>
-                <label className="label">Reason / Subject</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="label !mb-0">Reason / Subject</label>
+                  <GrammarFixButton {...reasonFix} disabled={!form.reason.trim()} />
+                </div>
                 <input
                   className="field"
                   placeholder="What was the call about?"
@@ -411,7 +451,10 @@ function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
               </div>
 
               <div>
-                <label className="label">Notes</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="label !mb-0">Notes</label>
+                  <GrammarFixButton {...notesFix} disabled={!form.notes.trim()} />
+                </div>
                 <textarea
                   className="field resize-none"
                   rows={3}
@@ -534,6 +577,11 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
 
   function set(f) { return e => setForm(p => ({ ...p, [f]: e.target.value })); }
 
+  const setReason = useCallback(v => setForm(p => ({ ...p, reason: v })), []);
+  const setNotes  = useCallback(v => setForm(p => ({ ...p, notes: v })), []);
+  const reasonFix = useGrammarFix(form.reason, setReason);
+  const notesFix  = useGrammarFix(form.notes, setNotes);
+
   async function handleSave(e) {
     e.preventDefault();
     setSaving(true);
@@ -594,12 +642,18 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
           </div>
 
           <div>
-            <label className="label">Reason / Subject</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="label !mb-0">Reason / Subject</label>
+              <GrammarFixButton {...reasonFix} disabled={!form.reason.trim()} />
+            </div>
             <input className="field" placeholder="What was the call about?" value={form.reason} onChange={set('reason')} />
           </div>
 
           <div>
-            <label className="label">Notes</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="label !mb-0">Notes</label>
+              <GrammarFixButton {...notesFix} disabled={!form.notes.trim()} />
+            </div>
             <textarea className="field resize-none" rows={3} value={form.notes} onChange={set('notes')} />
           </div>
 
