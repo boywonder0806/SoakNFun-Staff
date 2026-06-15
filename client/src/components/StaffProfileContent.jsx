@@ -80,6 +80,8 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
   const [deactivateConfirm, setDeactivateConfirm] = useState(false);
   const [receptionSaving, setReceptionSaving] = useState(false);
   const [receptionManagerSaving, setReceptionManagerSaving] = useState(false);
+  const [inviteSending, setInviteSending] = useState(false);
+  const [inviteSent, setInviteSent] = useState(false);
 
   const color     = DEPT_COLOR[emp.department];
   const pillStyle = DEPT_PILL[emp.department] ?? 'bg-rim/20 border-rim/40 text-fog';
@@ -218,6 +220,17 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
       onUpdated({ ...emp, hasReceptionAccess: newAccess, isReceptionManager: newAccess ? emp.isReceptionManager : false });
     } catch {}
     finally { setReceptionSaving(false); }
+  }
+
+  async function handleResendInvite() {
+    setInviteSending(true);
+    setInviteSent(false);
+    try {
+      await api.post(`/admin/staff/${emp.id}/resend-reception-invite`);
+      setInviteSent(true);
+      setTimeout(() => setInviteSent(false), 4000);
+    } catch {}
+    finally { setInviteSending(false); }
   }
 
   async function handleReceptionManagerToggle() {
@@ -559,6 +572,22 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
                         {receptionSaving ? 'Saving…' : emp.hasReceptionAccess ? 'Revoke' : 'Grant Access'}
                       </button>
                     </div>
+
+                    {/* Resend invite */}
+                    {emp.hasReceptionAccess && !blocked && (
+                      <div className="mt-3 pt-3 border-t border-rim/20 flex items-center justify-between gap-3">
+                        <p className="text-10 text-fog">
+                          {inviteSent ? 'Invite sent to their email.' : 'Send portal login instructions to their email.'}
+                        </p>
+                        <button
+                          onClick={handleResendInvite}
+                          disabled={inviteSending}
+                          className="text-10 font-semibold text-cyan hover:text-cyan/70 transition-colors shrink-0 disabled:opacity-50"
+                        >
+                          {inviteSending ? 'Sending…' : inviteSent ? 'Sent ✓' : 'Resend Invite'}
+                        </button>
+                      </div>
+                    )}
 
                     {/* Blocked account warning */}
                     {blocked && emp.hasReceptionAccess && (

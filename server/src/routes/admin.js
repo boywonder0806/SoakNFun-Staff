@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import pool from '../db/index.js';
 import { requireAdmin, requireSysAdmin } from '../middleware/auth.js';
-import { sendWelcomeEmail } from '../services/email.js';
+import { sendWelcomeEmail, sendReceptionWelcomeEmail } from '../services/email.js';
 
 const router = Router();
 
@@ -344,14 +344,36 @@ router.patch('/staff/:id/reception-access', requireAdmin, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `UPDATE employees SET has_reception_access = $1 WHERE id = $2 AND role != 'sysadmin'
-       RETURNING id, COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"`,
+       RETURNING id, name, email, COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"`,
       [hasAccess === true, empId]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Staff member not found.' });
     logEvent(empId, hasAccess ? 'Reception access granted' : 'Reception access revoked', {}, req.user.id, req.ip);
-    res.json({ employee: rows[0] });
+    if (hasAccess === true) {
+      sendReceptionWelcomeEmail({ toEmail: rows[0].email, toName: rows[0].name });
+    }
+    const { name, email, ...employee } = rows[0];
+    res.json({ employee });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update reception access.' });
+  }
+});
+
+router.post('/staff/:id/resend-reception-invite', requireAdmin, async (req, res) => {
+  const empId = parseInt(req.params.id);
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name, email, COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"
+       FROM employees WHERE id = $1 AND role != 'sysadmin'`,
+      [empId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Staff member not found.' });
+    if (!rows[0].hasReceptionAccess) return res.status(400).json({ error: 'Staff member does not have reception access.' });
+    await sendReceptionWelcomeEmail({ toEmail: rows[0].email, toName: rows[0].name });
+    logEvent(empId, 'Reception portal invite resent', {}, req.user.id, req.ip);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to resend invite.' });
   }
 });
 
