@@ -180,7 +180,7 @@ function buildPasswordResetEmail({ toName, resetUrl }) {
       <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
         <p style="color:#374151;margin:0 0 20px">Hi ${toName || 'there'}, we received a request to reset your Staff Portal password. Click the button below to set a new one.</p>
         <a href="${resetUrl}" style="display:inline-block;background:#0077B6;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;font-size:14px">Reset Password</a>
-        <p style="color:#6b7280;font-size:13px;margin:20px 0 0">This link expires in <strong>1 hour</strong>. If you didn't request a password reset, you can safely ignore this email.</p>
+        <p style="color:#6b7280;font-size:13px;margin:20px 0 0">This link expires in <strong>24 hours</strong>. If you weren't expecting this email, you can safely ignore it.</p>
         <p style="margin:24px 0 0;color:#9ca3af;font-size:12px">Blue Bayou Water Park · Baton Rouge, LA</p>
       </div>
     </div>

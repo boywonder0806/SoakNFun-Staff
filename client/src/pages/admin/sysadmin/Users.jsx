@@ -200,10 +200,8 @@ function UserModal({ user, isSelf, onClose, onRoleUpdate, onUserUpdate, onLockUp
   const [saving, setSaving]                 = useState(false);
   const [deptSaving, setDeptSaving]         = useState(false);
   const [activeDepts, setActiveDepts]       = useState(user.departments ?? [user.department]);
-  const [pwMode, setPwMode]                 = useState(false);
-  const [newPassword, setNewPassword]       = useState('');
-  const [pwError, setPwError]               = useState('');
-  const [pwSuccess, setPwSuccess]           = useState(false);
+  const [resetEmailSending, setResetEmailSending] = useState(false);
+  const [resetEmailSent, setResetEmailSent]       = useState(false);
   const [deactivateStep, setDeactivateStep] = useState(false);
 
   const [editMode, setEditMode]   = useState(false);
@@ -258,19 +256,16 @@ function UserModal({ user, isSelf, onClose, onRoleUpdate, onUserUpdate, onLockUp
     }
   }
 
-  async function handlePasswordReset() {
-    setPwError('');
-    if (newPassword.length < 6) { setPwError('Minimum 6 characters.'); return; }
-    setSaving(true);
+  async function handleSendPasswordReset() {
+    setResetEmailSending(true);
     try {
-      await api.patch(`/admin/employees/${user.id}/password`, { password: newPassword });
-      setPwSuccess(true);
-      setNewPassword('');
-      setTimeout(() => { setPwSuccess(false); setPwMode(false); }, 2000);
+      await api.post(`/admin/employees/${user.id}/send-password-reset`);
+      setResetEmailSent(true);
+      setTimeout(() => setResetEmailSent(false), 4000);
     } catch (err) {
-      setPwError(err.response?.data?.error || 'Failed to reset password.');
+      console.error(err);
     } finally {
-      setSaving(false);
+      setResetEmailSending(false);
     }
   }
 
@@ -608,32 +603,20 @@ function UserModal({ user, isSelf, onClose, onRoleUpdate, onUserUpdate, onLockUp
           <div>
             <p className="label-xs mb-3">Account Actions</p>
             <div className="grid grid-cols-2 gap-3">
-              <div className="bg-shell/40 border border-rim/40 rounded-xl p-4">
-                <p className="text-xs font-semibold text-ink mb-1">Reset Password</p>
-                <p className="text-10 text-fog mb-3">Set a new temporary password for this account.</p>
-                {!pwMode ? (
-                  <button onClick={() => { setPwMode(true); setPwSuccess(false); setPwError(''); }}
-                    className="btn-ghost border border-rim/60 rounded-md w-full text-xs">
-                    Reset Password
-                  </button>
-                ) : (
-                  <div className="space-y-2">
-                    <input type="password" className="field text-xs" placeholder="New password (min 6 chars)"
-                      value={newPassword} onChange={e => setNewPassword(e.target.value)} autoFocus />
-                    {pwError   && <p className="text-10 text-red-400 font-semibold">{pwError}</p>}
-                    {pwSuccess && <p className="text-10 text-green-400 font-semibold">Password updated.</p>}
-                    <div className="flex gap-2">
-                      <button onClick={handlePasswordReset} disabled={saving}
-                        className="btn-primary flex-1 text-xs py-2">
-                        {saving ? 'Saving…' : 'Confirm'}
-                      </button>
-                      <button onClick={() => { setPwMode(false); setNewPassword(''); setPwError(''); }}
-                        className="btn-ghost border border-rim/60 rounded-md flex-1 text-xs">
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
+              <div className="bg-shell/40 border border-rim/40 rounded-xl p-4 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold text-ink mb-1">Reset Password</p>
+                  <p className="text-10 text-fog">
+                    {resetEmailSent ? 'Reset link sent — check their inbox.' : 'Send them an email with a link to set a new password.'}
+                  </p>
+                </div>
+                <button
+                  onClick={handleSendPasswordReset}
+                  disabled={resetEmailSending}
+                  className="btn-ghost border border-rim/60 rounded-md px-3 py-1.5 text-xs shrink-0 disabled:opacity-50"
+                >
+                  {resetEmailSending ? 'Sending…' : resetEmailSent ? 'Sent ✓' : 'Send Email'}
+                </button>
               </div>
 
               <div className="bg-shell/40 border border-rim/40 rounded-xl p-4 flex flex-col gap-2">

@@ -69,10 +69,8 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
   const [logs, setLogs]               = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsLoaded, setLogsLoaded]   = useState(false);
-  const [resetPwOpen, setResetPwOpen] = useState(false);
-  const [resetPw, setResetPw]         = useState('');
-  const [resetPwSaving, setResetPwSaving] = useState(false);
-  const [resetPwError, setResetPwError]   = useState('');
+  const [resetEmailSending, setResetEmailSending] = useState(false);
+  const [resetEmailSent, setResetEmailSent]       = useState(false);
   const [welcomeSending, setWelcomeSending] = useState(false);
   const [welcomeSent, setWelcomeSent]       = useState(false);
   const [lockSaving, setLockSaving]       = useState(false);
@@ -161,16 +159,15 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
     finally { setNotesSaving(false); }
   }
 
-  async function handleResetPassword() {
-    if (resetPw.length < 6) { setResetPwError('Must be at least 6 characters.'); return; }
-    setResetPwSaving(true); setResetPwError('');
+  async function handleSendPasswordReset() {
+    setResetEmailSending(true);
     try {
-      await api.patch(`/admin/employees/${emp.id}/password`, { password: resetPw, forceReset: true });
-      setLogs(prev => [{ id: Date.now(), event: 'Password reset', createdAt: new Date().toISOString(), actorName: currentUser?.name }, ...prev]);
-      setResetPwOpen(false); setResetPw('');
-    } catch (err) {
-      setResetPwError(err.response?.data?.error || 'Failed to reset password.');
-    } finally { setResetPwSaving(false); }
+      await api.post(`/admin/employees/${emp.id}/send-password-reset`);
+      setLogs(prev => [{ id: Date.now(), event: 'Password reset email sent', createdAt: new Date().toISOString(), actorName: currentUser?.name }, ...prev]);
+      setResetEmailSent(true);
+      setTimeout(() => setResetEmailSent(false), 4000);
+    } catch {}
+    finally { setResetEmailSending(false); }
   }
 
   async function handleResendWelcome() {
@@ -654,42 +651,20 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
               <div className="grid grid-cols-2 gap-4">
 
                 {/* Reset password */}
-                <div className="panel p-4 space-y-3">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-ink">Reset Password</p>
-                      <p className="text-10 text-fog mt-0.5">Set a temporary password — staff must change on next login</p>
-                    </div>
-                    {!resetPwOpen && (
-                      <button onClick={() => { setResetPwOpen(true); setResetPwError(''); setResetPw(''); }}
-                        className="btn-ghost border border-rim/60 rounded-md px-3 py-1.5 text-xs shrink-0 ml-3">
-                        Reset
-                      </button>
-                    )}
+                <div className="panel p-4 flex items-start justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-ink">Reset Password</p>
+                    <p className="text-10 text-fog mt-0.5">
+                      {resetEmailSent ? 'Reset link sent — check their inbox.' : 'Send them an email with a link to set a new password'}
+                    </p>
                   </div>
-                  {resetPwOpen && (
-                    <div className="space-y-2 pt-1 border-t border-rim/30">
-                      <input
-                        type="password"
-                        className="field text-sm w-full"
-                        placeholder="New temporary password"
-                        value={resetPw}
-                        onChange={e => setResetPw(e.target.value)}
-                        autoFocus
-                      />
-                      {resetPwError && <p className="text-10 text-red-400 font-semibold">{resetPwError}</p>}
-                      <div className="flex gap-2">
-                        <button onClick={handleResetPassword} disabled={resetPwSaving}
-                          className="btn-primary flex-1 text-xs py-1.5">
-                          {resetPwSaving ? 'Saving…' : 'Save'}
-                        </button>
-                        <button onClick={() => { setResetPwOpen(false); setResetPwError(''); setResetPw(''); }}
-                          className="btn-ghost border border-rim/60 rounded-md flex-1 text-xs py-1.5">
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                  <button
+                    onClick={handleSendPasswordReset}
+                    disabled={resetEmailSending}
+                    className="btn-ghost border border-rim/60 rounded-md px-3 py-1.5 text-xs shrink-0 ml-3 disabled:opacity-50"
+                  >
+                    {resetEmailSending ? 'Sending…' : resetEmailSent ? 'Sent ✓' : 'Send Email'}
+                  </button>
                 </div>
 
                 {/* Send welcome email */}

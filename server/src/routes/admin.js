@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import pool from '../db/index.js';
 import { requireAdmin, requireSysAdmin } from '../middleware/auth.js';
-import { sendWelcomeEmail, sendReceptionWelcomeEmail, resendStaffWelcomeEmail } from '../services/email.js';
+import { sendWelcomeEmail, sendReceptionWelcomeEmail, resendStaffWelcomeEmail, sendPasswordResetEmail } from '../services/email.js';
 
 const router = Router();
 
@@ -144,6 +145,29 @@ router.patch('/employees/:id/password', requireAdmin, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update password' });
+  }
+});
+
+router.post('/employees/:id/send-password-reset', requireAdmin, async (req, res) => {
+  const empId = parseInt(req.params.id);
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name, email FROM employees WHERE id = $1 AND is_active = TRUE`,
+      [empId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'User not found or inactive.' });
+    const token     = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    await pool.query(
+      `INSERT INTO password_reset_tokens (employee_id, token_hash, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '24 hours')`,
+      [empId, tokenHash]
+    );
+    await sendPasswordResetEmail({ toEmail: rows[0].email, toName: rows[0].name, resetToken: token });
+    logEvent(empId, 'Password reset email sent', {}, req.user.id, req.ip);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to send password reset email.' });
   }
 });
 
