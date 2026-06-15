@@ -23,6 +23,14 @@ pool.query(`CREATE TABLE IF NOT EXISTS call_log (
 )`).catch(e => console.error('call_log migration:', e.message));
 
 // Callback columns added to call_log to unify call log + callbacks into one table
+pool.query(`CREATE TABLE IF NOT EXISTS callback_digest_tokens (
+  id          SERIAL PRIMARY KEY,
+  employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+  token       VARCHAR(64) NOT NULL UNIQUE,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`).catch(e => console.error('callback_digest_tokens migration:', e.message));
+
 pool.query('ALTER TABLE call_log ADD COLUMN IF NOT EXISTS needs_callback BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
 pool.query('ALTER TABLE call_log ADD COLUMN IF NOT EXISTS requested_staff_id INTEGER REFERENCES employees(id) ON DELETE SET NULL').catch(() => {});
 pool.query("ALTER TABLE call_log ADD COLUMN IF NOT EXISTS callback_status VARCHAR(20) DEFAULT NULL").catch(() => {});
@@ -660,5 +668,124 @@ router.post('/config/reset-faqs', requireReceptionManager, async (_req, res) => 
     client.release();
   }
 });
+
+// ── Callback Digest (magic link, no auth required) ───────────────────────────
+
+router.get('/callback-digest/:token', async (req, res) => {
+  try {
+    const { rows: tr } = await pool.query(
+      `SELECT t.employee_id, t.expires_at, e.name
+       FROM callback_digest_tokens t
+       JOIN employees e ON t.employee_id = e.id
+       WHERE t.token = $1`,
+      [req.params.token]
+    );
+    if (!tr[0])                             return res.send(digestPage({ error: 'This link is invalid.' }));
+    if (new Date(tr[0].expires_at) < new Date()) return res.send(digestPage({ error: 'This link has expired. You will receive a new one at the next scheduled time.' }));
+
+    const { employee_id: empId, name } = tr[0];
+    const updated = req.query.updated === '1';
+
+    const { rows: callbacks } = await pool.query(
+      `SELECT id, caller_name AS "callerName", caller_phone AS "callerPhone",
+              reason, notes, created_at AS "createdAt"
+       FROM call_log
+       WHERE requested_staff_id = $1 AND needs_callback = TRUE AND callback_status = 'pending'
+       ORDER BY created_at ASC`,
+      [empId]
+    );
+
+    res.send(digestPage({ name, callbacks, token: req.params.token, updated }));
+  } catch (err) {
+    res.status(500).send(digestPage({ error: 'Something went wrong. Please try again.' }));
+  }
+});
+
+router.post('/callback-digest/:token/:callId', async (req, res) => {
+  const { status } = req.body;
+  if (!['completed', 'unable_to_reach'].includes(status)) return res.status(400).end();
+  try {
+    const { rows: tr } = await pool.query(
+      `SELECT employee_id, expires_at FROM callback_digest_tokens WHERE token = $1`,
+      [req.params.token]
+    );
+    if (!tr[0] || new Date(tr[0].expires_at) < new Date())
+      return res.redirect(`/api/reception/callback-digest/${req.params.token}`);
+
+    await pool.query(
+      `UPDATE call_log
+       SET callback_status = $1, callback_completed_at = NOW(), callback_completed_by = $2
+       WHERE id = $3 AND requested_staff_id = $2 AND needs_callback = TRUE AND callback_status = 'pending'`,
+      [status, tr[0].employee_id, parseInt(req.params.callId)]
+    );
+    res.redirect(`/api/reception/callback-digest/${req.params.token}?updated=1`);
+  } catch {
+    res.redirect(`/api/reception/callback-digest/${req.params.token}?updated=1`);
+  }
+});
+
+function digestPage({ name, callbacks = [], token, error, updated }) {
+  const fmt = iso => new Date(iso).toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+  });
+
+  if (error) return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Callbacks — Blue Bayou</title>
+    <style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f9fafb;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}</style>
+    </head><body><div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:32px;max-width:480px;width:100%;text-align:center">
+      <p style="font-size:32px;margin:0 0 12px">⚠️</p>
+      <h2 style="margin:0 0 8px;color:#111827">Link Problem</h2>
+      <p style="color:#6b7280;margin:0">${error}</p>
+    </div></body></html>`;
+
+  const cards = callbacks.map(c => `
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:12px">
+      <div style="margin-bottom:14px">
+        <p style="margin:0;font-size:16px;font-weight:700;color:#111827">${c.callerName || 'Unknown caller'}</p>
+        <p style="margin:3px 0 0;color:#0077B6;font-weight:600">${c.callerPhone || '—'}</p>
+        ${c.reason ? `<p style="margin:6px 0 0;color:#374151;font-size:14px">${c.reason}</p>` : ''}
+        ${c.notes  ? `<p style="margin:4px 0 0;color:#6b7280;font-size:13px;font-style:italic">${c.notes}</p>` : ''}
+        <p style="margin:6px 0 0;color:#9ca3af;font-size:12px">Logged ${fmt(c.createdAt)}</p>
+      </div>
+      <div style="display:flex;gap:8px">
+        <form method="POST" action="/api/reception/callback-digest/${token}/${c.id}" style="flex:1">
+          <input type="hidden" name="status" value="completed">
+          <button type="submit" style="width:100%;padding:10px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">✓ Completed</button>
+        </form>
+        <form method="POST" action="/api/reception/callback-digest/${token}/${c.id}" style="flex:1">
+          <input type="hidden" name="status" value="unable_to_reach">
+          <button type="submit" style="width:100%;padding:10px;background:#f59e0b;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">Unable to Reach</button>
+        </form>
+      </div>
+    </div>`).join('');
+
+  const empty = `<div style="text-align:center;padding:40px 0">
+    <p style="font-size:40px;margin:0 0 12px">✅</p>
+    <p style="color:#374151;font-size:16px;font-weight:600;margin:0">All caught up!</p>
+    <p style="color:#6b7280;margin:6px 0 0">No pending callbacks assigned to you.</p>
+  </div>`;
+
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>My Callbacks — Blue Bayou</title>
+    <style>*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f3f4f6;padding:24px 16px}
+    .container{max-width:520px;margin:0 auto}</style>
+    </head><body><div class="container">
+      <div style="background:#0077B6;border-radius:12px 12px 0 0;padding:20px 24px;margin-bottom:0">
+        <p style="color:#90e0ff;margin:0;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase">Blue Bayou Water Park</p>
+        <h1 style="color:#fff;margin:4px 0 0;font-size:22px">My Callbacks</h1>
+        ${name ? `<p style="color:#bae6fd;margin:4px 0 0;font-size:14px">${name}</p>` : ''}
+      </div>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;padding:20px 24px 24px;margin-bottom:16px">
+        ${callbacks.length > 0
+          ? `<p style="margin:0 0 16px;color:#374151;font-size:14px"><strong>${callbacks.length}</strong> pending callback${callbacks.length === 1 ? '' : 's'} assigned to you</p>`
+          : ''}
+        ${updated ? `<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:8px;padding:10px 14px;margin-bottom:16px;color:#065f46;font-size:14px">✓ Callback updated successfully.</div>` : ''}
+        ${callbacks.length > 0 ? cards : empty}
+      </div>
+      <p style="text-align:center;color:#9ca3af;font-size:12px;margin:0">Blue Bayou Water Park · Baton Rouge, LA</p>
+    </div></body></html>`;
+}
 
 export default router;

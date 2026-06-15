@@ -15,6 +15,7 @@ import netchexRouter from './routes/netchex.js';
 import receptionRouter from './routes/reception.js';
 import reportsRouter from './routes/reports.js';
 import operationsRouter from './routes/operations.js';
+import { startCallbackDigestCron } from './cron/callbackDigest.js';
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -33,6 +34,7 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
 app.use('/api/auth',          authRouter);
 app.use('/api/schedule',      scheduleRouter);
@@ -74,4 +76,7 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-app.listen(PORT, () => console.log(`Blue Bayou Staff API running on http://localhost:${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Blue Bayou Staff API running on http://localhost:${PORT}`);
+  startCallbackDigestCron();
+});

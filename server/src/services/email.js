@@ -7,6 +7,20 @@ const FROM          = process.env.RESEND_FROM_EMAIL
 const APP_URL       = process.env.CLIENT_URL       || 'http://localhost:5173';
 const RECEPTION_URL = process.env.RECEPTION_URL    || 'http://localhost:5174';
 
+export async function sendCallbackDigestEmail({ toEmail, toName, pendingCount, callbacks, digestUrl }) {
+  if (!resend || !toEmail) return;
+  try {
+    await resend.emails.send({
+      from:    FROM,
+      to:      toEmail,
+      subject: `You have ${pendingCount} pending callback${pendingCount === 1 ? '' : 's'} — Blue Bayou`,
+      html:    buildCallbackDigestEmail({ toName, pendingCount, callbacks, digestUrl }),
+    });
+  } catch (err) {
+    console.error('Callback digest email failed:', err.message);
+  }
+}
+
 export async function sendCallbackNotification({ toEmail, toName, callerName, callerPhone, reason, notes, loggedBy }) {
   if (!resend || !toEmail) return;
   try {
@@ -97,6 +111,38 @@ function buildWelcomeEmail({ toName, toEmail, tempPassword, loginUrl }) {
         <p style="color:#6b7280;font-size:13px;margin:0 0 20px">You will be asked to set a new password the first time you sign in.</p>
         <a href="${loginUrl}" style="display:inline-block;background:#0077B6;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;font-size:14px">Sign In to Staff Portal</a>
         <p style="margin:24px 0 0;color:#9ca3af;font-size:12px">Blue Bayou Water Park · Baton Rouge, LA</p>
+      </div>
+    </div>
+  `;
+}
+
+function buildCallbackDigestEmail({ toName, pendingCount, callbacks, digestUrl }) {
+  const fmt = iso => {
+    const d = new Date(iso);
+    return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+  };
+  const rows = callbacks.map(c => `
+    <tr style="border-bottom:1px solid #f3f4f6">
+      <td style="padding:12px 0">
+        <p style="margin:0;font-weight:600;color:#111827">${c.callerName || 'Unknown caller'}</p>
+        <p style="margin:2px 0 0;color:#6b7280;font-size:13px">${c.callerPhone || '—'}</p>
+        ${c.reason ? `<p style="margin:4px 0 0;color:#374151;font-size:13px">${c.reason}</p>` : ''}
+        <p style="margin:4px 0 0;color:#9ca3af;font-size:11px">${fmt(c.createdAt)}</p>
+      </td>
+    </tr>`).join('');
+
+  return `
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:0 auto">
+      <div style="background:#0077B6;padding:24px 28px;border-radius:12px 12px 0 0">
+        <p style="color:#90e0ff;margin:0;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase">Blue Bayou Water Park</p>
+        <h1 style="color:#fff;margin:4px 0 0;font-size:20px">Pending Callbacks</h1>
+      </div>
+      <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
+        <p style="color:#374151;margin:0 0 4px">Hi ${toName || 'there'},</p>
+        <p style="color:#374151;margin:0 0 20px">You have <strong>${pendingCount} pending callback${pendingCount === 1 ? '' : 's'}</strong> that require your attention.</p>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:24px">${rows}</table>
+        <a href="${digestUrl}" style="display:inline-block;background:#0077B6;color:#fff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:14px">View &amp; Update Callbacks</a>
+        <p style="margin:20px 0 0;color:#9ca3af;font-size:12px">This link expires in 48 hours. Blue Bayou Water Park · Baton Rouge, LA</p>
       </div>
     </div>
   `;
