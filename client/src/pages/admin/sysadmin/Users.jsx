@@ -214,6 +214,8 @@ function UserModal({ user, isSelf, onClose, onRoleUpdate, onUserUpdate, onLockUp
   const [photoUploading, setPhotoUploading]       = useState(false);
   const [lockSaving, setLockSaving]               = useState(false);
   const [receptionSaving, setReceptionSaving]     = useState(false);
+  const [welcomeSending, setWelcomeSending]       = useState(false);
+  const [welcomeSent, setWelcomeSent]             = useState(false);
 
   const role = ROLES.find(r => r.value === user.role) ?? ROLES[0];
 
@@ -328,6 +330,19 @@ function UserModal({ user, isSelf, onClose, onRoleUpdate, onUserUpdate, onLockUp
       console.error(err);
     } finally {
       setReceptionSaving(false);
+    }
+  }
+
+  async function handleResendWelcome() {
+    setWelcomeSending(true);
+    try {
+      await api.post(`/admin/sysadmin/users/${user.id}/resend-welcome`);
+      setWelcomeSent(true);
+      setTimeout(() => setWelcomeSent(false), 4000);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setWelcomeSending(false);
     }
   }
 
@@ -624,12 +639,13 @@ function UserModal({ user, isSelf, onClose, onRoleUpdate, onUserUpdate, onLockUp
                   className="btn-ghost border border-rim/60 rounded-md w-full text-xs text-left px-3">
                   Send Message
                 </button>
-                {user.role === 'crew_member' && (
-                  <button onClick={() => navigate('/schedule')}
-                    className="btn-ghost border border-rim/60 rounded-md w-full text-xs text-left px-3">
-                    View Schedule
-                  </button>
-                )}
+                <button
+                  onClick={handleResendWelcome}
+                  disabled={welcomeSending}
+                  className="btn-ghost border border-rim/60 rounded-md w-full text-xs text-left px-3 disabled:opacity-50"
+                >
+                  {welcomeSending ? 'Sending…' : welcomeSent ? '✓ Welcome email sent' : 'Send Welcome Email'}
+                </button>
               </div>
             </div>
 

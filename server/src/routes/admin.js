@@ -843,10 +843,27 @@ router.post('/sysadmin/users', requireSysAdmin, async (req, res) => {
       [email.toLowerCase().trim(), hash, name, role||'crew_member',
        department||null, departments||[], position||null, avatar||null, phone||null, hireDate||null]
     );
+    sendWelcomeEmail({ toEmail: rows[0].email, toName: rows[0].name, tempPassword: password });
     res.status(201).json({ user: rows[0] });
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Email already exists.' });
     res.status(500).json({ error: 'Failed to create user' });
+  }
+});
+
+router.post('/sysadmin/users/:id/resend-welcome', requireSysAdmin, async (req, res) => {
+  const empId = parseInt(req.params.id);
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name, email FROM employees WHERE id = $1 AND role != 'crew_member'`,
+      [empId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'User not found.' });
+    await resendStaffWelcomeEmail({ toEmail: rows[0].email, toName: rows[0].name });
+    logEvent(empId, 'Welcome email resent', {}, req.user.id, req.ip);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to send welcome email.' });
   }
 });
 
