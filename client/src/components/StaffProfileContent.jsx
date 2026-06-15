@@ -79,6 +79,7 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
   const [statusSaving, setStatusSaving]   = useState(false);
   const [deactivateConfirm, setDeactivateConfirm] = useState(false);
   const [receptionSaving, setReceptionSaving] = useState(false);
+  const [receptionManagerSaving, setReceptionManagerSaving] = useState(false);
 
   const color     = DEPT_COLOR[emp.department];
   const pillStyle = DEPT_PILL[emp.department] ?? 'bg-rim/20 border-rim/40 text-fog';
@@ -214,9 +215,20 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
     try {
       await api.patch(`/admin/staff/${emp.id}/reception-access`, { hasAccess: newAccess });
       setLogs(prev => [{ id: Date.now(), event: newAccess ? 'Reception access granted' : 'Reception access revoked', createdAt: new Date().toISOString(), actorName: currentUser?.name }, ...prev]);
-      onUpdated({ ...emp, hasReceptionAccess: newAccess });
+      onUpdated({ ...emp, hasReceptionAccess: newAccess, isReceptionManager: newAccess ? emp.isReceptionManager : false });
     } catch {}
     finally { setReceptionSaving(false); }
+  }
+
+  async function handleReceptionManagerToggle() {
+    setReceptionManagerSaving(true);
+    const newVal = !emp.isReceptionManager;
+    try {
+      await api.patch(`/admin/staff/${emp.id}/reception-manager`, { isManager: newVal });
+      setLogs(prev => [{ id: Date.now(), event: newVal ? 'Reception manager role granted' : 'Reception manager role removed', createdAt: new Date().toISOString(), actorName: currentUser?.name }, ...prev]);
+      onUpdated({ ...emp, isReceptionManager: newVal });
+    } catch {}
+    finally { setReceptionManagerSaving(false); }
   }
 
   return (
@@ -571,6 +583,38 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
                       </div>
                     )}
                   </div>
+
+                  {/* Reception Manager sub-toggle — only when access is granted */}
+                  {emp.hasReceptionAccess && (
+                    <div className={`mt-3 pt-3 border-t border-rim/30 flex items-start justify-between gap-3`}>
+                      <div>
+                        <p className="text-xs font-semibold text-ink">Reception Manager</p>
+                        <p className="text-10 text-fog mt-0.5">
+                          {emp.isReceptionManager
+                            ? 'Can access the Configurator tab to manage templates, FAQs, and callback handlers'
+                            : 'Grant configurator access to manage templates, FAQs, and callback handlers'}
+                        </p>
+                        {emp.isReceptionManager && (
+                          <span className="inline-flex items-center gap-1.5 text-10 font-semibold text-violet-400 mt-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-violet-400" /> Manager role active
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={handleReceptionManagerToggle}
+                        disabled={receptionManagerSaving || blocked}
+                        className={`rounded-md px-3 py-1.5 text-xs shrink-0 border font-semibold transition-colors
+                          ${blocked
+                            ? 'opacity-40 cursor-not-allowed border-rim/40 text-fog bg-shell/30'
+                            : emp.isReceptionManager
+                              ? 'bg-red-950/20 border-red-500/30 text-red-400 hover:bg-red-950/40'
+                              : 'bg-violet-950/20 border-violet-500/30 text-violet-400 hover:bg-violet-950/40'
+                          }`}
+                      >
+                        {receptionManagerSaving ? 'Saving…' : emp.isReceptionManager ? 'Remove' : 'Make Manager'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })()}

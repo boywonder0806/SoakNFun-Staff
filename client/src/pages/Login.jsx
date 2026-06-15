@@ -33,6 +33,10 @@ export default function Login() {
   const [attempts, setAttempts]   = useState(0);
   const [loading, setLoading]     = useState(false);
   const [sunshine, setSunshine]   = useState([]);
+  const [mode, setMode]           = useState('login'); // 'login' | 'forgot' | 'sent'
+  const [forgotEmail, setForgotEmail]     = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError]     = useState('');
   const { login } = useAuth();
   const navigate  = useNavigate();
 
@@ -83,6 +87,21 @@ export default function Login() {
     }
   }
 
+  async function handleForgot(e) {
+    e.preventDefault();
+    if (!forgotEmail.trim()) return;
+    setForgotLoading(true);
+    setForgotError('');
+    try {
+      await api.post('/auth/forgot-password', { email: forgotEmail.trim() });
+      setMode('sent');
+    } catch {
+      setForgotError('Something went wrong. Please try again.');
+    } finally {
+      setForgotLoading(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-void flex flex-col items-center justify-center px-4 relative overflow-hidden">
 
@@ -99,81 +118,130 @@ export default function Login() {
       </div>
 
       {/* Form */}
-      <form onSubmit={handleSubmit} className="w-full max-w-sm relative z-10" noValidate>
-        <div className="panel p-8 space-y-5">
+      <div className="w-full max-w-sm relative z-10">
+        <div className="panel p-8">
 
-          {/* Email */}
-          <div>
-            <label className="label-xs block mb-2">Email</label>
-            <input
-              type="email"
-              className={`field transition-colors ${emailErr ? 'border-red-500/70 focus:border-red-500' : ''}`}
-              placeholder="you@soaknfun.com"
-              value={email}
-              onChange={e => { setEmail(e.target.value); if (emailErr) setEmailErr(''); if (serverError) { setServerError(''); setLocked(false); } }}
-              autoComplete="email"
-              autoFocus
-            />
-            {emailErr && (
-              <p className="text-red-400 text-10 font-semibold mt-1.5 flex items-center gap-1">
-                <AlertSmIcon /> {emailErr}
+          {mode === 'sent' ? (
+            <div className="space-y-4 text-center">
+              <div className="w-12 h-12 mx-auto flex items-center justify-center rounded-full bg-green-500/15 border border-green-500/25">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-6 h-6 text-green-400">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
+              <p className="font-bold text-ink">Check your email</p>
+              <p className="text-sm text-fog leading-relaxed">
+                If an account exists for <span className="text-fog-hi">{forgotEmail}</span>, you'll receive a password reset link shortly.
               </p>
-            )}
-          </div>
-
-          {/* Password */}
-          <div>
-            <label className="label-xs block mb-2">Password</label>
-            <input
-              type="password"
-              className={`field transition-colors ${passwordErr ? 'border-red-500/70 focus:border-red-500' : ''}`}
-              placeholder="••••••••"
-              value={password}
-              onChange={e => { setPassword(e.target.value); if (passwordErr) setPasswordErr(''); if (serverError) { setServerError(''); setLocked(false); } }}
-              autoComplete="current-password"
-            />
-            {passwordErr && (
-              <p className="text-red-400 text-10 font-semibold mt-1.5 flex items-center gap-1">
-                <AlertSmIcon /> {passwordErr}
-              </p>
-            )}
-          </div>
-
-          {/* Server error banner */}
-          {serverError && (
-            <div className={`flex items-start gap-3 px-4 py-3 rounded-lg border text-xs font-semibold
-              ${locked
-                ? 'bg-amber-950/50 border-amber-500/30 text-amber-300'
-                : 'bg-red-950/50 border-red-500/30 text-red-400'
-              }`}>
-              <span className="shrink-0 mt-0.5">
-                {locked ? <LockIcon /> : <AlertIcon />}
-              </span>
-              <span className="leading-relaxed">{serverError}</span>
+              <button onClick={() => { setMode('login'); setForgotEmail(''); }} className="text-xs text-cyan hover:underline">
+                Back to sign in
+              </button>
             </div>
-          )}
+          ) : mode === 'forgot' ? (
+            <form onSubmit={handleForgot} className="space-y-5" noValidate>
+              <div>
+                <p className="font-bold text-ink mb-1">Forgot your password?</p>
+                <p className="text-xs text-fog">Enter your work email and we'll send you a reset link.</p>
+              </div>
+              <div>
+                <label className="label-xs block mb-2">Email</label>
+                <input
+                  type="email"
+                  className="field"
+                  placeholder="you@soaknfun.com"
+                  value={forgotEmail}
+                  onChange={e => { setForgotEmail(e.target.value); setForgotError(''); }}
+                  autoComplete="email"
+                  autoFocus
+                />
+              </div>
+              {forgotError && <p className="text-red-400 text-xs font-semibold">{forgotError}</p>}
+              <button type="submit" disabled={forgotLoading} className="btn-primary w-full flex items-center justify-center gap-2">
+                {forgotLoading ? (
+                  <><span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Sending…</>
+                ) : 'Send Reset Link'}
+              </button>
+              <div className="text-center">
+                <button type="button" onClick={() => setMode('login')} className="text-xs text-fog hover:text-fog-hi transition-colors">
+                  Back to sign in
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-5" noValidate>
 
-          {/* Hint after multiple failed attempts */}
-          {attempts >= 3 && !locked && (
-            <p className="text-10 text-fog text-center leading-relaxed">
-              Having trouble? Contact your system administrator to reset your password.
-            </p>
-          )}
+              {/* Email */}
+              <div>
+                <label className="label-xs block mb-2">Email</label>
+                <input
+                  type="email"
+                  className={`field transition-colors ${emailErr ? 'border-red-500/70 focus:border-red-500' : ''}`}
+                  placeholder="you@soaknfun.com"
+                  value={email}
+                  onChange={e => { setEmail(e.target.value); if (emailErr) setEmailErr(''); if (serverError) { setServerError(''); setLocked(false); } }}
+                  autoComplete="email"
+                  autoFocus
+                />
+                {emailErr && (
+                  <p className="text-red-400 text-10 font-semibold mt-1.5 flex items-center gap-1">
+                    <AlertSmIcon /> {emailErr}
+                  </p>
+                )}
+              </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="btn-primary w-full mt-2 flex items-center justify-center gap-2"
-          >
-            {loading ? (
-              <>
-                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Signing in…
-              </>
-            ) : 'Sign In'}
-          </button>
+              {/* Password */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="label-xs">Password</label>
+                  <button type="button" onClick={() => { setMode('forgot'); setForgotEmail(email); }}
+                    className="text-10 text-fog hover:text-cyan transition-colors">
+                    Forgot password?
+                  </button>
+                </div>
+                <input
+                  type="password"
+                  className={`field transition-colors ${passwordErr ? 'border-red-500/70 focus:border-red-500' : ''}`}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={e => { setPassword(e.target.value); if (passwordErr) setPasswordErr(''); if (serverError) { setServerError(''); setLocked(false); } }}
+                  autoComplete="current-password"
+                />
+                {passwordErr && (
+                  <p className="text-red-400 text-10 font-semibold mt-1.5 flex items-center gap-1">
+                    <AlertSmIcon /> {passwordErr}
+                  </p>
+                )}
+              </div>
+
+              {/* Server error banner */}
+              {serverError && (
+                <div className={`flex items-start gap-3 px-4 py-3 rounded-lg border text-xs font-semibold
+                  ${locked
+                    ? 'bg-amber-950/50 border-amber-500/30 text-amber-300'
+                    : 'bg-red-950/50 border-red-500/30 text-red-400'
+                  }`}>
+                  <span className="shrink-0 mt-0.5">
+                    {locked ? <LockIcon /> : <AlertIcon />}
+                  </span>
+                  <span className="leading-relaxed">{serverError}</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="btn-primary w-full flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Signing in…
+                  </>
+                ) : 'Sign In'}
+              </button>
+            </form>
+          )}
         </div>
-      </form>
+      </div>
 
       {/* Sunshine Days quick-view */}
       {sunshine.length > 0 && (

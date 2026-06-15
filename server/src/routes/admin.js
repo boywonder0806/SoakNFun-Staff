@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import pool from '../db/index.js';
 import { requireAdmin, requireSysAdmin } from '../middleware/auth.js';
+import { sendWelcomeEmail } from '../services/email.js';
 
 const router = Router();
 
@@ -281,6 +282,7 @@ router.post('/staff', requireAdmin, async (req, res) => {
       );
     }
     await client.query('COMMIT');
+    sendWelcomeEmail({ toEmail: emp.email, toName: emp.name, tempPassword: password });
     res.status(201).json({ employee: emp });
   } catch (err) {
     await client.query('ROLLBACK');

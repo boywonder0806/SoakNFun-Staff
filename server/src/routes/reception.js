@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import pool from '../db/index.js';
-import { requireReception, requireSysAdmin } from '../middleware/auth.js';
+import { requireReception, requireReceptionManager, requireSysAdmin } from '../middleware/auth.js';
 import { sendCallbackNotification } from '../services/email.js';
 
 const router = Router();
 
 // Idempotent migrations
 pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_reception_access BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
+pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS is_reception_manager BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
+pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS can_handle_callbacks BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
 
 pool.query(`CREATE TABLE IF NOT EXISTS call_log (
   id             SERIAL PRIMARY KEY,
@@ -56,6 +58,79 @@ pool.query(`CREATE TABLE IF NOT EXISTS callback_requests (
   completed_at       TIMESTAMPTZ,
   completed_by       INTEGER REFERENCES employees(id) ON DELETE SET NULL
 )`).catch(e => console.error('callback_requests migration:', e.message));
+
+const DEFAULT_TEMPLATES = [
+  { label: 'General Park Question', reason: 'General park question',          sort_order: 0  },
+  { label: 'Ticket Pricing',        reason: 'Ticket pricing inquiry',         sort_order: 1  },
+  { label: 'Operating Hours',       reason: 'Operating hours inquiry',        sort_order: 2  },
+  { label: 'Group / Event Rates',   reason: 'Group rates or event inquiry',   sort_order: 3  },
+  { label: 'Birthday Party',        reason: 'Birthday party booking inquiry', sort_order: 4  },
+  { label: 'Season Passes',         reason: 'Season pass inquiry',            sort_order: 5  },
+  { label: 'Accessibility',         reason: 'Accessibility or ADA inquiry',   sort_order: 6  },
+  { label: 'Lost Item',             reason: 'Lost item report',               sort_order: 7  },
+  { label: 'Food & Dining',         reason: 'Food and dining inquiry',        sort_order: 8  },
+  { label: 'Employment',            reason: 'Employment inquiry',             sort_order: 9  },
+  { label: 'Complaint',             reason: 'Guest complaint',                sort_order: 10 },
+  { label: 'Directions / Parking',  reason: 'Directions or parking inquiry',  sort_order: 11 },
+];
+
+const DEFAULT_FAQS = [
+  { question: 'Where is the park and how do I get there?', answer: 'GPS address: 18200 Perkins Road East, Baton Rouge, LA 70810. From I-10, take Exit 162A and head eastbound on Perkins Road — follow the signs to the park.', tags: ['location','directions','address','navigate','find','i10','highway','perkins','baton rouge','map'], sort_order: 0 },
+  { question: 'What are the operating hours?', answer: 'Hours vary by date — the park runs 10am–6pm, 10am–5pm, or 2:30pm–6pm depending on the day. Always check bluebayouwaterpark.com or call (225) 753-3333 before visiting, as the schedule changes seasonally.', tags: ['hours','open','close','schedule','time','when','days','weekend','holiday','season'], sort_order: 1 },
+  { question: 'What do season passes cost?', answer: 'Single Park Pass: $54.99 · 2-Park Pass (Blue Bayou + Gulf Islands): $64.99 · Premium 2-Park Pass: $74.99 (adds early Saturday entry, a bring-a-friend voucher, and 10% food discount). All passes include unlimited fountain drinks.', tags: ['season pass','annual pass','membership','price','cost','how much','2 park','gulf islands','premium','discount','drinks'], sort_order: 2 },
+  { question: 'Do all guests need to pay admission even if not swimming?', answer: 'Yes. Every guest entering the park must pay admission, regardless of whether they plan to use the water attractions.', tags: ['admission','pay','ticket','entrance','spectator','watching','not swimming','supervising'], sort_order: 3 },
+  { question: 'Can guests bring their own food or drinks?', answer: "No outside food, beverages, or coolers are allowed inside the park. On-site dining includes T. Joe's Po-Boys & Grill, Fuel Dock, pizza, Bayou Treats Stand (ice cream), and The Thirsty Cypress (beverages including alcohol). Fountain drinks are included with admission.", tags: ['food','drink','cooler','outside','bring','eat','dining','restaurant','lunch','snack','alcohol','beverage','menu'], sort_order: 4 },
+  { question: 'What are the height requirements for rides?', answer: 'Attractions have height requirements of 36", 42", or 48" depending on the ride. Staff at each attraction can confirm the exact requirement. Children below the minimum for a specific ride cannot board for safety.', tags: ['height','requirement','restriction','ride','slide','tall','inch','children','kids','minimum','safety','36','42','48'], sort_order: 5 },
+  { question: 'Can guests re-enter the park after leaving?', answer: 'Yes, re-entry is allowed on the same day with an unaltered wristband or stamp. Note: the park can reach maximum capacity on peak days (weekends and holidays) — guests who leave during a capacity hold may not be readmitted right away.', tags: ['re-entry','reentry','leave','come back','wristband','stamp','exit','capacity','full','return'], sort_order: 6 },
+  { question: 'What swimwear is required?', answer: 'Appropriate swimwear is required and subject to park approval. Not permitted: visible undergarments, jeans, denim, thongs, long pants, belts, or cut-off shorts. Swim diapers are mandatory for children not yet potty-trained.', tags: ['swimwear','clothes','attire','dress code','diapers','shorts','jeans','outfit','what to wear'], sort_order: 7 },
+  { question: 'Can guests bring their own life jackets or floats?', answer: 'Life jackets and tubes are provided free of charge. Guests may bring their own U.S. Coast Guard-approved life jackets. Not permitted inside the park: rafts, arm floaties, fun noodles, swim boards, or swim rings.', tags: ['life jacket','float','tube','raft','noodle','floaties','safety vest','coast guard','flotation','arm bands','swim ring'], sort_order: 8 },
+  { question: 'Are pets or service animals allowed?', answer: 'No pets are allowed in the park. Only trained service animals are permitted — emotional support animals do not qualify. Service animals must remain leashed at all times and may not enter pools or water attractions.', tags: ['pet','dog','animal','service animal','emotional support','esa','leash','pool','allowed'], sort_order: 9 },
+  { question: 'Is the park smoke-free?', answer: 'Yes. Blue Bayou Waterpark is a completely smoke-free facility. Smoking, vaping, and tobacco use are not permitted anywhere on park grounds.', tags: ['smoke','smoking','cigarette','vape','vaping','tobacco','e-cigarette','nicotine'], sort_order: 10 },
+  { question: 'Are lockers and cabanas available?', answer: 'Yes. Lockers are available on a first-come basis using facial recognition (Snap-N-Lock) or PIN technology. Cabanas can be rented until sold out and include shaded seating; cabana guests can order food for delivery to their rental.', tags: ['locker','cabana','shade','storage','rent','valuables','belongings','secure','key','umbrella'], sort_order: 11 },
+  { question: 'What forms of payment are accepted?', answer: 'Cash, Visa, MasterCard, and Discover are accepted. Checks are only accepted for group event deposits or with advance arrangements.', tags: ['payment','pay','cash','credit card','visa','mastercard','discover','check','method'], sort_order: 12 },
+  { question: 'Is there a gift shop if guests need something they forgot?', answer: "Yes. The gift shop carries towels, sunscreen, flip flops, swim diapers, earplugs, hats, cover-ups, and T-shirts, plus souvenirs. It's located near the main entrance.", tags: ['gift shop','store','buy','sunscreen','towel','flip flops','diaper','forgot','purchase','souvenir','shop'], sort_order: 13 },
+];
+
+async function seedConfigTables() {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS reception_templates (
+      id         SERIAL PRIMARY KEY,
+      label      VARCHAR(255) NOT NULL,
+      reason     TEXT NOT NULL,
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS reception_faqs (
+      id         SERIAL PRIMARY KEY,
+      question   TEXT NOT NULL,
+      answer     TEXT NOT NULL,
+      tags       TEXT[] DEFAULT '{}',
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    const { rows: [tc] } = await pool.query('SELECT COUNT(*) FROM reception_templates');
+    if (parseInt(tc.count) === 0) {
+      for (const t of DEFAULT_TEMPLATES) {
+        await pool.query(
+          `INSERT INTO reception_templates (label, reason, sort_order) VALUES ($1, $2, $3)`,
+          [t.label, t.reason, t.sort_order]
+        );
+      }
+    }
+    const { rows: [fc] } = await pool.query('SELECT COUNT(*) FROM reception_faqs');
+    if (parseInt(fc.count) === 0) {
+      for (const f of DEFAULT_FAQS) {
+        await pool.query(
+          `INSERT INTO reception_faqs (question, answer, tags, sort_order) VALUES ($1, $2, $3, $4)`,
+          [f.question, f.answer, f.tags, f.sort_order]
+        );
+      }
+    }
+  } catch (e) {
+    console.error('Reception config seed error:', e.message);
+  }
+}
+seedConfigTables();
 
 // ── Access management (sysadmin only) ─────────────────────────────────────────
 router.patch('/access/:id', requireSysAdmin, async (req, res) => {
@@ -410,15 +485,179 @@ router.delete('/callbacks/:id', requireReception, async (req, res) => {
   }
 });
 
-// Staff list for callback "requested staff" dropdown
+// Staff list for callback "requested staff" dropdown — only flagged handlers, fallback to all
 router.get('/staff', requireReception, async (_req, res) => {
   try {
+    const { rows: flagged } = await pool.query(
+      `SELECT id, name, position, department FROM employees WHERE is_active = TRUE AND can_handle_callbacks = TRUE ORDER BY name`
+    );
+    if (flagged.length > 0) {
+      return res.json({ staff: flagged });
+    }
     const { rows } = await pool.query(
       `SELECT id, name, position, department FROM employees WHERE is_active = TRUE ORDER BY name`
     );
     res.json({ staff: rows });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch staff' });
+  }
+});
+
+// ── Configurator (Reception Manager only) ────────────────────────────────────
+
+router.get('/config/templates', requireReception, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, label, reason, sort_order AS "sortOrder" FROM reception_templates ORDER BY sort_order, id`
+    );
+    res.json({ templates: rows });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch templates' });
+  }
+});
+
+router.put('/config/templates', requireReceptionManager, async (req, res) => {
+  const { templates } = req.body;
+  if (!Array.isArray(templates)) return res.status(400).json({ error: 'templates must be an array' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM reception_templates');
+    for (let i = 0; i < templates.length; i++) {
+      const t = templates[i];
+      if (!t.label?.trim() && !t.reason?.trim()) continue;
+      await client.query(
+        `INSERT INTO reception_templates (label, reason, sort_order) VALUES ($1, $2, $3)`,
+        [t.label?.trim() || '', t.reason?.trim() || '', i]
+      );
+    }
+    await client.query('COMMIT');
+    const { rows } = await client.query(
+      `SELECT id, label, reason, sort_order AS "sortOrder" FROM reception_templates ORDER BY sort_order, id`
+    );
+    res.json({ templates: rows });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Failed to save templates' });
+  } finally {
+    client.release();
+  }
+});
+
+router.get('/config/faqs', requireReception, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, question, answer, tags, sort_order AS "sortOrder" FROM reception_faqs ORDER BY sort_order, id`
+    );
+    res.json({ faqs: rows });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch FAQs' });
+  }
+});
+
+router.put('/config/faqs', requireReceptionManager, async (req, res) => {
+  const { faqs } = req.body;
+  if (!Array.isArray(faqs)) return res.status(400).json({ error: 'faqs must be an array' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM reception_faqs');
+    for (let i = 0; i < faqs.length; i++) {
+      const f = faqs[i];
+      if (!f.question?.trim() && !f.answer?.trim()) continue;
+      await client.query(
+        `INSERT INTO reception_faqs (question, answer, tags, sort_order) VALUES ($1, $2, $3, $4)`,
+        [f.question?.trim() || '', f.answer?.trim() || '', f.tags || [], i]
+      );
+    }
+    await client.query('COMMIT');
+    const { rows } = await client.query(
+      `SELECT id, question, answer, tags, sort_order AS "sortOrder" FROM reception_faqs ORDER BY sort_order, id`
+    );
+    res.json({ faqs: rows });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Failed to save FAQs' });
+  } finally {
+    client.release();
+  }
+});
+
+router.get('/config/staff', requireReceptionManager, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name, position, department,
+              COALESCE(can_handle_callbacks, FALSE) AS "canHandleCallbacks"
+       FROM employees WHERE is_active = TRUE ORDER BY name`
+    );
+    res.json({ staff: rows });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch staff' });
+  }
+});
+
+router.patch('/config/staff/:id/callback-handler', requireReceptionManager, async (req, res) => {
+  const { canHandle } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `UPDATE employees SET can_handle_callbacks = $1 WHERE id = $2 AND is_active = TRUE
+       RETURNING id, COALESCE(can_handle_callbacks, FALSE) AS "canHandleCallbacks"`,
+      [canHandle === true, parseInt(req.params.id)]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Employee not found' });
+    res.json({ employee: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update callback handler status' });
+  }
+});
+
+router.post('/config/reset-templates', requireReceptionManager, async (_req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM reception_templates');
+    for (let i = 0; i < DEFAULT_TEMPLATES.length; i++) {
+      const t = DEFAULT_TEMPLATES[i];
+      await client.query(
+        `INSERT INTO reception_templates (label, reason, sort_order) VALUES ($1, $2, $3)`,
+        [t.label, t.reason, i]
+      );
+    }
+    await client.query('COMMIT');
+    const { rows } = await client.query(
+      `SELECT id, label, reason, sort_order AS "sortOrder" FROM reception_templates ORDER BY sort_order, id`
+    );
+    res.json({ templates: rows });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Failed to reset templates' });
+  } finally {
+    client.release();
+  }
+});
+
+router.post('/config/reset-faqs', requireReceptionManager, async (_req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM reception_faqs');
+    for (let i = 0; i < DEFAULT_FAQS.length; i++) {
+      const f = DEFAULT_FAQS[i];
+      await client.query(
+        `INSERT INTO reception_faqs (question, answer, tags, sort_order) VALUES ($1, $2, $3, $4)`,
+        [f.question, f.answer, f.tags, i]
+      );
+    }
+    await client.query('COMMIT');
+    const { rows } = await client.query(
+      `SELECT id, question, answer, tags, sort_order AS "sortOrder" FROM reception_faqs ORDER BY sort_order, id`
+    );
+    res.json({ faqs: rows });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Failed to reset FAQs' });
+  } finally {
+    client.release();
   }
 });
 

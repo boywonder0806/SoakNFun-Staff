@@ -22,6 +22,7 @@ import StaffProfile from './pages/admin/staff/StaffProfile.jsx';
 import TimeOff from './pages/TimeOff.jsx';
 import ShiftBoard from './pages/ShiftBoard.jsx';
 import ChangePassword from './pages/ChangePassword.jsx';
+import ResetPassword from './pages/ResetPassword.jsx';
 import Reports from './pages/Reports.jsx';
 import Operations from './pages/Operations.jsx';
 
@@ -43,6 +44,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/home" replace /> : <Login />} />
       <Route path="/change-password" element={<ChangePassword />} />
+      <Route path="/reset-password"  element={<ResetPassword />} />
       <Route
         path="/staff/profile/:id"
         element={

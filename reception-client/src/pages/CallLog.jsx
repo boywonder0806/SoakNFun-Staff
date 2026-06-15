@@ -3,106 +3,6 @@ import api from '../lib/api.js';
 
 const todayStr = new Date().toDateString();
 
-const TEMPLATES_KEY = 'bayou_call_templates';
-
-const DEFAULT_TEMPLATES = [
-  { id: 1,  label: 'General Park Question', reason: 'General park question'           },
-  { id: 2,  label: 'Ticket Pricing',        reason: 'Ticket pricing inquiry'           },
-  { id: 3,  label: 'Operating Hours',       reason: 'Operating hours inquiry'          },
-  { id: 4,  label: 'Group / Event Rates',   reason: 'Group rates or event inquiry'     },
-  { id: 5,  label: 'Birthday Party',        reason: 'Birthday party booking inquiry'   },
-  { id: 6,  label: 'Season Passes',         reason: 'Season pass inquiry'              },
-  { id: 7,  label: 'Accessibility',         reason: 'Accessibility or ADA inquiry'     },
-  { id: 8,  label: 'Lost Item',             reason: 'Lost item report'                 },
-  { id: 9,  label: 'Food & Dining',         reason: 'Food and dining inquiry'          },
-  { id: 10, label: 'Employment',            reason: 'Employment inquiry'               },
-  { id: 11, label: 'Complaint',             reason: 'Guest complaint'                  },
-  { id: 12, label: 'Directions / Parking',  reason: 'Directions or parking inquiry'    },
-];
-
-function loadTemplates() {
-  try {
-    const raw = localStorage.getItem(TEMPLATES_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return DEFAULT_TEMPLATES;
-}
-
-function saveTemplates(tpls) {
-  localStorage.setItem(TEMPLATES_KEY, JSON.stringify(tpls));
-}
-
-let _nextId = Date.now();
-
-const FAQS_KEY = 'bayou_call_faqs';
-
-const DEFAULT_FAQS = [
-  { id: 101,
-    question: 'Where is the park and how do I get there?',
-    answer:   'GPS address: 18200 Perkins Road East, Baton Rouge, LA 70810. From I-10, take Exit 162A and head eastbound on Perkins Road — follow the signs to the park.',
-    tags:     ['location','directions','address','navigate','find','i10','highway','perkins','baton rouge','map'] },
-  { id: 102,
-    question: 'What are the operating hours?',
-    answer:   'Hours vary by date — the park runs 10am–6pm, 10am–5pm, or 2:30pm–6pm depending on the day. Always check bluebayouwaterpark.com or call (225) 753-3333 before visiting, as the schedule changes seasonally.',
-    tags:     ['hours','open','close','schedule','time','when','days','weekend','holiday','season'] },
-  { id: 103,
-    question: 'What do season passes cost?',
-    answer:   'Single Park Pass: $54.99 · 2-Park Pass (Blue Bayou + Gulf Islands): $64.99 · Premium 2-Park Pass: $74.99 (adds early Saturday entry, a bring-a-friend voucher, and 10% food discount). All passes include unlimited fountain drinks.',
-    tags:     ['season pass','annual pass','membership','price','cost','how much','2 park','gulf islands','premium','discount','drinks'] },
-  { id: 104,
-    question: 'Do all guests need to pay admission even if not swimming?',
-    answer:   'Yes. Every guest entering the park must pay admission, regardless of whether they plan to use the water attractions.',
-    tags:     ['admission','pay','ticket','entrance','spectator','watching','not swimming','supervising'] },
-  { id: 105,
-    question: 'Can guests bring their own food or drinks?',
-    answer:   'No outside food, beverages, or coolers are allowed inside the park. On-site dining includes T. Joe\'s Po-Boys & Grill, Fuel Dock, pizza, Bayou Treats Stand (ice cream), and The Thirsty Cypress (beverages including alcohol). Fountain drinks are included with admission.',
-    tags:     ['food','drink','cooler','outside','bring','eat','dining','restaurant','lunch','snack','alcohol','beverage','menu'] },
-  { id: 106,
-    question: 'What are the height requirements for rides?',
-    answer:   'Attractions have height requirements of 36", 42", or 48" depending on the ride. Staff at each attraction can confirm the exact requirement. Children below the minimum for a specific ride cannot board for safety.',
-    tags:     ['height','requirement','restriction','ride','slide','tall','inch','children','kids','minimum','safety','36','42','48'] },
-  { id: 107,
-    question: 'Can guests re-enter the park after leaving?',
-    answer:   'Yes, re-entry is allowed on the same day with an unaltered wristband or stamp. Note: the park can reach maximum capacity on peak days (weekends and holidays) — guests who leave during a capacity hold may not be readmitted right away.',
-    tags:     ['re-entry','reentry','leave','come back','wristband','stamp','exit','capacity','full','return'] },
-  { id: 108,
-    question: 'What swimwear is required?',
-    answer:   'Appropriate swimwear is required and subject to park approval. Not permitted: visible undergarments, jeans, denim, thongs, long pants, belts, or cut-off shorts. Swim diapers are mandatory for children not yet potty-trained.',
-    tags:     ['swimwear','clothes','attire','dress code','diapers','shorts','jeans','outfit','what to wear'] },
-  { id: 109,
-    question: 'Can guests bring their own life jackets or floats?',
-    answer:   'Life jackets and tubes are provided free of charge. Guests may bring their own U.S. Coast Guard-approved life jackets. Not permitted inside the park: rafts, arm floaties, fun noodles, swim boards, or swim rings.',
-    tags:     ['life jacket','float','tube','raft','noodle','floaties','safety vest','coast guard','flotation','arm bands','swim ring'] },
-  { id: 110,
-    question: 'Are pets or service animals allowed?',
-    answer:   'No pets are allowed in the park. Only trained service animals are permitted — emotional support animals do not qualify. Service animals must remain leashed at all times and may not enter pools or water attractions.',
-    tags:     ['pet','dog','animal','service animal','emotional support','esa','leash','pool','allowed'] },
-  { id: 111,
-    question: 'Is the park smoke-free?',
-    answer:   'Yes. Blue Bayou Waterpark is a completely smoke-free facility. Smoking, vaping, and tobacco use are not permitted anywhere on park grounds.',
-    tags:     ['smoke','smoking','cigarette','vape','vaping','tobacco','e-cigarette','nicotine'] },
-  { id: 112,
-    question: 'Are lockers and cabanas available?',
-    answer:   'Yes. Lockers are available on a first-come basis using facial recognition (Snap-N-Lock) or PIN technology. Cabanas can be rented until sold out and include shaded seating; cabana guests can order food for delivery to their rental.',
-    tags:     ['locker','cabana','shade','storage','rent','valuables','belongings','secure','key','umbrella'] },
-  { id: 113,
-    question: 'What forms of payment are accepted?',
-    answer:   'Cash, Visa, MasterCard, and Discover are accepted. Checks are only accepted for group event deposits or with advance arrangements.',
-    tags:     ['payment','pay','cash','credit card','visa','mastercard','discover','check','method'] },
-  { id: 114,
-    question: 'Is there a gift shop if guests need something they forgot?',
-    answer:   'Yes. The gift shop carries towels, sunscreen, flip flops, swim diapers, earplugs, hats, cover-ups, and T-shirts, plus souvenirs. It\'s located near the main entrance.',
-    tags:     ['gift shop','store','buy','sunscreen','towel','flip flops','diaper','forgot','purchase','souvenir','shop'] },
-];
-
-function loadFaqs() {
-  try {
-    const raw = localStorage.getItem(FAQS_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return DEFAULT_FAQS;
-}
-
 const STOP_WORDS = new Set([
   'the','a','an','is','are','was','were','be','been','being','i','me','my',
   'we','our','you','your','it','its','this','that','these','those','do','does',
@@ -164,14 +64,16 @@ function isPendingCallback(call) {
 }
 
 export default function CallLog({ onTodayCallsCount, onPendingCallbacksCount }) {
-  const [calls, setCalls]       = useState([]);
-  const [staff, setStaff]       = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [selected, setSelected] = useState(null);
-  const [showNew, setShowNew]   = useState(false);
-  const [filter, setFilter]     = useState('all');
-  const [search, setSearch]     = useState('');
-  const [faqQuery, setFaqQuery] = useState('');
+  const [calls, setCalls]         = useState([]);
+  const [staff, setStaff]         = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [faqs, setFaqs]           = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [selected, setSelected]   = useState(null);
+  const [showNew, setShowNew]     = useState(false);
+  const [filter, setFilter]       = useState('all');
+  const [search, setSearch]       = useState('');
+  const [faqQuery, setFaqQuery]   = useState('');
 
   useEffect(() => {
     if (selected && !showNew) setFaqQuery(selected.reason || '');
@@ -188,12 +90,16 @@ export default function CallLog({ onTodayCallsCount, onPendingCallbacksCount }) 
   async function fetchData() {
     setLoading(true);
     try {
-      const [callsRes, staffRes] = await Promise.all([
+      const [callsRes, staffRes, tplRes, faqRes] = await Promise.all([
         api.get('/reception/calls'),
         api.get('/reception/staff'),
+        api.get('/reception/config/templates'),
+        api.get('/reception/config/faqs'),
       ]);
       setCalls(callsRes.data.calls);
       setStaff(staffRes.data.staff);
+      setTemplates(tplRes.data.templates || []);
+      setFaqs(faqRes.data.faqs || []);
       updateCounts(callsRes.data.calls);
     } catch {}
     setLoading(false);
@@ -345,6 +251,7 @@ export default function CallLog({ onTodayCallsCount, onPendingCallbacksCount }) 
         {showNew ? (
           <NewCallPanel
             staff={staff}
+            templates={templates}
             onSave={handleCreated}
             onCancel={() => setShowNew(false)}
             onQueryChange={setFaqQuery}
@@ -375,32 +282,25 @@ export default function CallLog({ onTodayCallsCount, onPendingCallbacksCount }) 
       </div>
 
       {/* Right: FAQ Panel */}
-      <FaqPanel query={faqQuery} />
+      <FaqPanel query={faqQuery} faqs={faqs} />
     </div>
   );
 }
 
 // ── New call inline form ───────────────────────────────────────────────────────
-function NewCallPanel({ staff, onSave, onCancel, onQueryChange }) {
+function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
   const [form, setForm] = useState({
     callerName: '', callerPhone: '', reason: '', notes: '',
     needsCallback: false, requestedStaffId: '',
   });
-  const [saving, setSaving]           = useState(false);
-  const [error, setError]             = useState('');
-  const [templates, setTemplates]     = useState(loadTemplates);
-  const [showManager, setShowManager] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState('');
 
   useEffect(() => {
     onQueryChange?.([form.reason, form.notes].filter(Boolean).join(' '));
   }, [form.reason, form.notes]);
 
   function set(f) { return e => setForm(p => ({ ...p, [f]: e.target.value })); }
-
-  function applyTemplates(next) {
-    setTemplates(next);
-    saveTemplates(next);
-  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -433,15 +333,8 @@ function NewCallPanel({ staff, onSave, onCancel, onQueryChange }) {
 
       {/* Quick templates */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <div className="flex items-center justify-between mb-3">
+        <div className="mb-3">
           <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Quick Templates</p>
-          <button
-            type="button"
-            onClick={() => setShowManager(true)}
-            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-brand transition-colors"
-          >
-            <GearIcon /> Edit
-          </button>
         </div>
         <div className="flex flex-wrap gap-2">
           {templates.map(t => (
@@ -540,129 +433,7 @@ function NewCallPanel({ staff, onSave, onCancel, onQueryChange }) {
         </form>
       </div>
 
-      {/* Template manager drawer */}
-      {showManager && (
-        <TemplateManagerDrawer
-          templates={templates}
-          onChange={applyTemplates}
-          onClose={() => setShowManager(false)}
-        />
-      )}
     </div>
-  );
-}
-
-// ── Template manager side drawer ───────────────────────────────────────────────
-function TemplateManagerDrawer({ templates, onChange, onClose }) {
-  const [items, setItems] = useState(() => templates.map(t => ({ ...t })));
-
-  function updateItem(id, field, value) {
-    setItems(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t));
-  }
-
-  function deleteItem(id) {
-    setItems(prev => prev.filter(t => t.id !== id));
-  }
-
-  function addItem() {
-    setItems(prev => [...prev, { id: ++_nextId, label: '', reason: '' }]);
-  }
-
-  function handleSave() {
-    const clean = items.filter(t => t.label.trim() || t.reason.trim());
-    onChange(clean);
-    onClose();
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-[420px] h-full bg-white shadow-2xl flex flex-col">
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
-          <div>
-            <h3 className="text-base font-bold text-gray-900">Manage Templates</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Changes save when you click Done</p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
-              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Template list */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-          {items.map((t, i) => (
-            <div key={t.id} className="bg-gray-50 rounded-xl border border-gray-200 p-3 space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-400 font-medium w-4 shrink-0 text-center">{i + 1}</span>
-                <input
-                  className="field text-sm font-medium flex-1"
-                  placeholder="Button label (e.g. Ticket Pricing)"
-                  value={t.label}
-                  onChange={e => updateItem(t.id, 'label', e.target.value)}
-                />
-                <button
-                  type="button"
-                  onClick={() => deleteItem(t.id)}
-                  className="p-1.5 text-gray-300 hover:text-red-500 transition-colors shrink-0"
-                  title="Remove"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
-                    <polyline points="3 6 5 6 21 6" />
-                    <path d="M19 6l-1 14H6L5 6" />
-                    <path d="M10 11v6M14 11v6" />
-                    <path d="M9 6V4h6v2" />
-                  </svg>
-                </button>
-              </div>
-              <div className="pl-6">
-                <input
-                  className="field text-xs text-gray-500"
-                  placeholder="Reason text pre-filled in form (e.g. Ticket pricing inquiry)"
-                  value={t.reason}
-                  onChange={e => updateItem(t.id, 'reason', e.target.value)}
-                />
-              </div>
-            </div>
-          ))}
-
-          <button
-            type="button"
-            onClick={addItem}
-            className="w-full py-3 text-sm text-brand border-2 border-dashed border-brand/30 rounded-xl hover:border-brand hover:bg-brand/5 transition-colors font-medium"
-          >
-            + Add Template
-          </button>
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 py-4 border-t border-gray-100 shrink-0 space-y-2">
-          <div className="flex gap-3">
-            <button type="button" onClick={onClose} className="btn-ghost flex-1">Cancel</button>
-            <button type="button" onClick={handleSave} className="btn-primary flex-1">Done</button>
-          </div>
-          <button
-            type="button"
-            onClick={() => { if (window.confirm('Reset all FAQs to the built-in defaults?')) setItems(DEFAULT_FAQS.map(f => ({ ...f }))); }}
-            className="w-full text-xs text-gray-400 hover:text-red-500 transition-colors py-1"
-          >
-            Reset to defaults
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function GearIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </svg>
   );
 }
 
@@ -896,19 +667,12 @@ function fmtTime(iso) {
 }
 
 // ── FAQ right panel ────────────────────────────────────────────────────────────
-function FaqPanel({ query }) {
-  const [faqs, setFaqs]         = useState(loadFaqs);
-  const [showManager, setShowManager] = useState(false);
+function FaqPanel({ query, faqs }) {
   const [expanded, setExpanded] = useState(null);
-
-  function applyFaqs(next) {
-    setFaqs(next);
-    localStorage.setItem(FAQS_KEY, JSON.stringify(next));
-  }
 
   const hasQuery = query && query.trim().length > 2;
 
-  const scored = faqs
+  const scored = (faqs || [])
     .map(f => ({ ...f, score: scoreFaq(f, query) }))
     .sort((a, b) => b.score - a.score);
 
@@ -916,21 +680,13 @@ function FaqPanel({ query }) {
 
   return (
     <div className="w-[300px] shrink-0 bg-white border-l border-gray-200 flex flex-col">
-      <div className="px-4 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
-        <div>
-          <h3 className="text-sm font-bold text-gray-900">FAQ Reference</h3>
-          {hasQuery && matchCount > 0 ? (
-            <p className="text-xs text-brand mt-0.5">{matchCount} related answer{matchCount !== 1 ? 's' : ''}</p>
-          ) : (
-            <p className="text-xs text-gray-400 mt-0.5">Common questions &amp; answers</p>
-          )}
-        </div>
-        <button
-          onClick={() => setShowManager(true)}
-          className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-brand transition-colors"
-        >
-          <GearIcon /> Edit
-        </button>
+      <div className="px-4 py-4 border-b border-gray-100 shrink-0">
+        <h3 className="text-sm font-bold text-gray-900">FAQ Reference</h3>
+        {hasQuery && matchCount > 0 ? (
+          <p className="text-xs text-brand mt-0.5">{matchCount} related answer{matchCount !== 1 ? 's' : ''}</p>
+        ) : (
+          <p className="text-xs text-gray-400 mt-0.5">Common questions &amp; answers</p>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
@@ -965,108 +721,14 @@ function FaqPanel({ query }) {
             </button>
           );
         })}
-      </div>
-
-      {showManager && (
-        <FaqManagerDrawer faqs={faqs} onChange={applyFaqs} onClose={() => setShowManager(false)} />
-      )}
-    </div>
-  );
-}
-
-// ── FAQ manager drawer ─────────────────────────────────────────────────────────
-function FaqManagerDrawer({ faqs, onChange, onClose }) {
-  const [items, setItems] = useState(() => faqs.map(f => ({ ...f })));
-
-  function updateItem(id, field, value) {
-    setItems(prev => prev.map(f => f.id === id ? { ...f, [field]: value } : f));
-  }
-
-  function deleteItem(id) {
-    setItems(prev => prev.filter(f => f.id !== id));
-  }
-
-  function addItem() {
-    setItems(prev => [...prev, { id: ++_nextId, question: '', answer: '' }]);
-  }
-
-  function handleSave() {
-    const clean = items.filter(f => f.question.trim() || f.answer.trim());
-    onChange(clean);
-    onClose();
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-[480px] h-full bg-white shadow-2xl flex flex-col">
-
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
-          <div>
-            <h3 className="text-base font-bold text-gray-900">Manage FAQs</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Changes save when you click Done</p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
-              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-          {items.map((f, i) => (
-            <div key={f.id} className="bg-gray-50 rounded-xl border border-gray-200 p-3 space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-400 font-medium w-4 shrink-0 text-center">{i + 1}</span>
-                <input
-                  className="field text-sm font-medium flex-1"
-                  placeholder="Question (e.g. What are the park hours?)"
-                  value={f.question}
-                  onChange={e => updateItem(f.id, 'question', e.target.value)}
-                />
-                <button
-                  type="button"
-                  onClick={() => deleteItem(f.id)}
-                  className="p-1.5 text-gray-300 hover:text-red-500 transition-colors shrink-0"
-                  title="Remove"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
-                    <polyline points="3 6 5 6 21 6" />
-                    <path d="M19 6l-1 14H6L5 6" />
-                    <path d="M10 11v6M14 11v6" />
-                    <path d="M9 6V4h6v2" />
-                  </svg>
-                </button>
-              </div>
-              <div className="pl-6">
-                <textarea
-                  className="field text-xs text-gray-500 resize-none"
-                  rows={2}
-                  placeholder="Answer guests receive when this is asked…"
-                  value={f.answer}
-                  onChange={e => updateItem(f.id, 'answer', e.target.value)}
-                />
-              </div>
-            </div>
-          ))}
-
-          <button
-            type="button"
-            onClick={addItem}
-            className="w-full py-3 text-sm text-brand border-2 border-dashed border-brand/30 rounded-xl hover:border-brand hover:bg-brand/5 transition-colors font-medium"
-          >
-            + Add FAQ
-          </button>
-        </div>
-
-        <div className="px-5 py-4 border-t border-gray-100 shrink-0 flex gap-3">
-          <button type="button" onClick={onClose} className="btn-ghost flex-1">Cancel</button>
-          <button type="button" onClick={handleSave} className="btn-primary flex-1">Done</button>
-        </div>
+        {scored.length === 0 && (
+          <p className="text-xs text-gray-400 text-center py-8">No FAQs loaded.</p>
+        )}
       </div>
     </div>
   );
 }
+
 
 function PlusIcon() {
   return (

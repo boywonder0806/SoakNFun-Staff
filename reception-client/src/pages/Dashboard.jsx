@@ -2,10 +2,14 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import CallLog from './CallLog.jsx';
 import LostFound from './LostFound.jsx';
+import Configurator from './Configurator.jsx';
 
-const TABS = [
+const BASE_TABS = [
   { id: 'calls',     label: 'Calls',        icon: PhoneIcon },
   { id: 'lostfound', label: 'Lost & Found', icon: TagIcon   },
+];
+const MANAGER_TABS = [
+  { id: 'configurator', label: 'Configurator', icon: GearIcon },
 ];
 
 function useClock() {
@@ -20,6 +24,7 @@ function useClock() {
 export default function Dashboard() {
   const { user, logout } = useAuth();
   const [tab, setTab]    = useState('calls');
+  const TABS = user?.isReceptionManager ? [...BASE_TABS, ...MANAGER_TABS] : BASE_TABS;
   const [counts, setCounts] = useState({ pendingCallbacks: 0, unclaimed: 0, todayCalls: 0 });
   const now = useClock();
 
@@ -127,6 +132,7 @@ export default function Dashboard() {
         {tab === 'lostfound' && (
           <LostFound onUnclaimedCount={n => setCounts(c => ({ ...c, unclaimed: n }))} />
         )}
+        {tab === 'configurator' && <Configurator />}
       </main>
     </div>
   );
@@ -155,6 +161,15 @@ function LogoutIcon() {
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
       <polyline points="16 17 21 12 16 7" />
       <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 shrink-0">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }
