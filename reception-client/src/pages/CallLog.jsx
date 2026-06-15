@@ -27,24 +27,37 @@ function stem(w) {
     .replace(/ly$/, '');
 }
 
+function tokenize(text) {
+  return text.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .map(stem)
+    .filter(w => w.length > 2);
+}
+
+function prefixMatch(a, b) {
+  return a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a));
+}
+
 function scoreFaq(faq, query) {
   if (!query || !query.trim()) return 0;
   const queryWords = query.toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter(w => w.length > 2 && !STOP_WORDS.has(w))
-    .map(stem);
+    .map(stem)
+    .filter(w => w.length > 2);
   if (queryWords.length === 0) return 0;
 
-  const qStemmed   = faq.question.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).map(stem);
-  const aStemmed   = faq.answer.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).map(stem);
-  const tagTokens  = (faq.tags || []).join(' ').toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+  const qStemmed  = tokenize(faq.question);
+  const aStemmed  = tokenize(faq.answer);
+  const tagWords  = tokenize((faq.tags || []).join(' '));
 
   let score = 0;
   for (const w of queryWords) {
-    if (qStemmed.some(t => t === w || t.startsWith(w) || w.startsWith(t)))  score += 4;
-    else if (tagTokens.includes(w))                                           score += 3;
-    else if (aStemmed.some(t => t === w || t.startsWith(w) || w.startsWith(t))) score += 1;
+    if (qStemmed.some(t => t === w || prefixMatch(t, w)))        score += 4;
+    else if (tagWords.some(t => t === w || prefixMatch(t, w)))   score += 3;
+    else if (aStemmed.some(t => t === w || prefixMatch(t, w)))   score += 1;
   }
   return score;
 }
@@ -684,7 +697,7 @@ function FaqPanel({ query, faqs }) {
     .map(f => ({ ...f, score: scoreFaq(f, query) }))
     .sort((a, b) => b.score - a.score);
 
-  const matchCount = scored.filter(f => f.score > 0).length;
+  const matchCount = scored.filter(f => f.score >= 3).length;
 
   return (
     <div className="w-[300px] shrink-0 bg-white border-l border-gray-200 flex flex-col">
@@ -699,7 +712,7 @@ function FaqPanel({ query, faqs }) {
 
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
         {scored.map(faq => {
-          const isMatch = hasQuery && faq.score > 0;
+          const isMatch = hasQuery && faq.score >= 3;
           const isOpen  = expanded === faq.id;
           return (
             <button
