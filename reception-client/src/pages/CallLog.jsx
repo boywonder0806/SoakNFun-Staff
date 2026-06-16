@@ -349,15 +349,15 @@ function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
   const firstName = user?.name?.split(' ')[0] || 'there';
 
   const [form, setForm] = useState({
-    callerName: '', callerPhone: '', reason: '',
+    callerName: '', callerPhone: '', reason: '', notes: '',
     needsCallback: false, requestedStaffId: '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState('');
 
   useEffect(() => {
-    onQueryChange?.(form.reason);
-  }, [form.reason]);
+    onQueryChange?.([form.reason, form.notes].filter(Boolean).join(' '));
+  }, [form.reason, form.notes]);
 
   function set(f) { return e => setForm(p => ({ ...p, [f]: e.target.value })); }
 
@@ -371,6 +371,7 @@ function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
         callerPhone:      form.callerPhone.trim(),
         callDirection:    'inbound',
         reason:           form.reason      || null,
+        notes:            form.notes       || null,
         needsCallback:    form.needsCallback,
         requestedStaffId: form.needsCallback && form.requestedStaffId
           ? parseInt(form.requestedStaffId) : null,
@@ -431,13 +432,23 @@ function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
               </div>
 
               <div>
+                <label className="label">Reason / Subject</label>
+                <input
+                  className="field"
+                  placeholder="What was the call about?"
+                  value={form.reason}
+                  onChange={set('reason')}
+                />
+              </div>
+
+              <div>
                 <label className="label">Notes</label>
                 <textarea
                   className="field resize-none"
-                  rows={4}
-                  placeholder="Reason for call, details, and any other notes…"
-                  value={form.reason}
-                  onChange={set('reason')}
+                  rows={3}
+                  placeholder="Additional details…"
+                  value={form.notes}
+                  onChange={set('notes')}
                 />
               </div>
 
@@ -489,7 +500,7 @@ function NewCallPanel({ staff, templates, onSave, onCancel, onQueryChange }) {
                 <button
                   key={t.id}
                   type="button"
-                  onClick={() => setForm(p => ({ ...p, reason: [t.reason, t.notes].filter(Boolean).join('\n\n') }))}
+                  onClick={() => setForm(p => ({ ...p, reason: t.reason, notes: t.notes || p.notes }))}
                   className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
                     ${form.reason === t.reason
                       ? 'bg-brand text-white border-brand'
@@ -543,7 +554,8 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
   const [form, setForm] = useState({
     callerName:       call.callerName    || '',
     callerPhone:      call.callerPhone   || '',
-    reason:           [call.reason, call.notes].filter(Boolean).join('\n\n'),
+    reason:           call.reason        || '',
+    notes:            call.notes         || '',
     needsCallback:    call.needsCallback || false,
     requestedStaffId: call.requestedStaffId ? String(call.requestedStaffId) : '',
   });
@@ -558,14 +570,16 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
   async function handleFixGrammar() {
     setFixing(true);
     try {
-      const [fixedName, fixedReason] = await Promise.all([
+      const [fixedName, fixedReason, fixedNotes] = await Promise.all([
         form.callerName.trim() ? api.post('/reception/fix-grammar', { text: form.callerName }) : null,
         form.reason.trim()     ? api.post('/reception/fix-grammar', { text: form.reason })     : null,
+        form.notes.trim()      ? api.post('/reception/fix-grammar', { text: form.notes })      : null,
       ]);
       setForm(p => ({
         ...p,
         callerName: fixedName?.data.corrected   ?? p.callerName,
         reason:     fixedReason?.data.corrected ?? p.reason,
+        notes:      fixedNotes?.data.corrected  ?? p.notes,
       }));
       setJustFixed(true);
       setTimeout(() => setJustFixed(false), 2500);
@@ -580,7 +594,7 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
       callerName:       form.callerName || null,
       callerPhone:      form.callerPhone || null,
       reason:           form.reason     || null,
-      notes:            null,
+      notes:            form.notes      || null,
       needsCallback:    form.needsCallback,
       requestedStaffId: form.needsCallback && form.requestedStaffId
                           ? parseInt(form.requestedStaffId) : null,
@@ -633,8 +647,13 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
           </div>
 
           <div>
+            <label className="label">Reason / Subject</label>
+            <input className="field" placeholder="What was the call about?" value={form.reason} onChange={set('reason')} />
+          </div>
+
+          <div>
             <label className="label">Notes</label>
-            <textarea className="field resize-none" rows={4} value={form.reason} onChange={set('reason')} />
+            <textarea className="field resize-none" rows={3} value={form.notes} onChange={set('notes')} />
           </div>
 
           <div className="border border-gray-200 rounded-xl p-4 space-y-3">
@@ -664,7 +683,7 @@ function CallDetail({ call, staff, onCallbackStatus, onResolvedToggle, onSave, o
             <button
               type="button"
               onClick={handleFixGrammar}
-              disabled={fixing || (!form.callerName.trim() && !form.reason.trim())}
+              disabled={fixing || (!form.callerName.trim() && !form.reason.trim() && !form.notes.trim())}
               className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border transition-all disabled:opacity-30 disabled:cursor-not-allowed
                 ${justFixed
                   ? 'text-green-600 bg-green-50 border-green-200'
