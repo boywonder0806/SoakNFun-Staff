@@ -22,12 +22,13 @@ setInterval(() => {
 }, 60_000);
 
 function nvrRequest(urlPath, { method = 'GET', body } = {}) {
-  const nvrUrl = process.env.PROTECT_NVR_URL;
+  const nvrUrl = (process.env.PROTECT_NVR_URL || '').replace(/\/$/, '');
   const apiKey = process.env.PROTECT_API_KEY;
   if (!nvrUrl || !apiKey) return Promise.reject(new Error('Protect NVR not configured'));
 
   return new Promise((resolve, reject) => {
-    const url  = new URL(urlPath, nvrUrl);
+    // Concatenate directly — new URL(absolutePath, base) drops the base path
+    const url  = new URL(nvrUrl + urlPath);
     const buf  = body ? Buffer.from(JSON.stringify(body)) : null;
     const req  = https.request({
       hostname: url.hostname,

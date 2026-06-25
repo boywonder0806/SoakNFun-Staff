@@ -813,11 +813,15 @@ function FootageModal({ transaction, employeeName, onClose }) {
       .then(r => {
         setConfigured(r.data.configured);
         setCameras(r.data.cameras || []);
-        const configured = r.data.configuredCameras?.[park] || [];
-        if (configured.length > 0) setCameraId(configured[0]);
+        if (!r.data.configured) return;
+        const preconfigured = r.data.configuredCameras?.[park] || [];
+        if (preconfigured.length > 0) setCameraId(preconfigured[0]);
         else if (r.data.cameras?.length > 0) setCameraId(r.data.cameras[0].id);
       })
-      .catch(() => setConfigured(false));
+      .catch(err => {
+        setConfigured(false);
+        setError(err.response?.data?.error || 'Could not reach Protect NVR');
+      });
   }, []);
 
   async function loadFootage() {
@@ -864,9 +868,13 @@ function FootageModal({ transaction, employeeName, onClose }) {
           {!configured ? (
             <div className="text-center py-6 space-y-2">
               <p className="text-sm font-semibold text-gray-700">Protect NVR not configured</p>
-              <p className="text-xs text-gray-500">
-                Set <code className="bg-gray-100 px-1 rounded">PROTECT_NVR_URL</code> and <code className="bg-gray-100 px-1 rounded">PROTECT_API_KEY</code> in the server environment to enable footage access.
-              </p>
+              {error ? (
+                <p className="text-xs text-red-500 font-medium">{error}</p>
+              ) : (
+                <p className="text-xs text-gray-500">
+                  Set <code className="bg-gray-100 px-1 rounded">PROTECT_NVR_URL</code> and <code className="bg-gray-100 px-1 rounded">PROTECT_API_KEY</code> in the server environment to enable footage access.
+                </p>
+              )}
             </div>
           ) : (
             <>
