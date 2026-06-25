@@ -12,6 +12,12 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 pool.query(
   'ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_reception_access BOOLEAN NOT NULL DEFAULT FALSE'
 ).catch(e => console.error('auth migration (has_reception_access):', e.message));
+pool.query(
+  'ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_hr_access BOOLEAN NOT NULL DEFAULT FALSE'
+).catch(e => console.error('auth migration (has_hr_access):', e.message));
+pool.query(
+  'ALTER TABLE employees ADD COLUMN IF NOT EXISTS is_hr_manager BOOLEAN NOT NULL DEFAULT FALSE'
+).catch(e => console.error('auth migration (is_hr_manager):', e.message));
 
 pool.query(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id          SERIAL PRIMARY KEY,
@@ -36,7 +42,9 @@ router.post('/login', async (req, res) => {
                 position, avatar, phone, hire_date AS "hireDate", is_active AS "isActive",
                 force_password_reset AS "mustChangePassword", is_locked AS "isLocked",
                 COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess",
-                COALESCE(is_reception_manager, FALSE) AS "isReceptionManager"
+                COALESCE(is_reception_manager, FALSE) AS "isReceptionManager",
+                COALESCE(has_hr_access, FALSE) AS "hasHrAccess",
+                COALESCE(is_hr_manager, FALSE) AS "isHrManager"
          FROM employees WHERE email = $1`,
         [email.toLowerCase().trim()]
       ));
@@ -50,7 +58,11 @@ router.post('/login', async (req, res) => {
            FROM employees WHERE email = $1`,
           [email.toLowerCase().trim()]
         ));
-        if (rows[0]) rows[0].hasReceptionAccess = false;
+        if (rows[0]) {
+          rows[0].hasReceptionAccess = false;
+          rows[0].hasHrAccess = false;
+          rows[0].isHrManager = false;
+        }
       } else {
         throw colErr;
       }
@@ -108,7 +120,9 @@ router.post('/change-password', requireAuth, async (req, res) => {
        WHERE id = $2
        RETURNING id, email, name, role, department, departments, position, avatar, phone,
                  is_locked AS "isLocked",
-                 COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"`,
+                 COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess",
+                 COALESCE(has_hr_access, FALSE) AS "hasHrAccess",
+                 COALESCE(is_hr_manager, FALSE) AS "isHrManager"`,
       [hash, req.user.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'User not found' });

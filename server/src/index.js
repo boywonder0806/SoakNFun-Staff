@@ -15,6 +15,7 @@ import netchexRouter from './routes/netchex.js';
 import receptionRouter from './routes/reception.js';
 import reportsRouter from './routes/reports.js';
 import operationsRouter from './routes/operations.js';
+import hrRouter from './routes/hr.js';
 import { startCallbackDigestCron } from './cron/callbackDigest.js';
 
 const app  = express();
@@ -24,6 +25,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const allowedOrigins = [
   process.env.CLIENT_URL      || 'http://localhost:5173',
   process.env.RECEPTION_URL   || 'http://localhost:5174',
+  process.env.HR_URL          || 'http://localhost:5175',
 ];
 
 app.use(cors({
@@ -50,6 +52,7 @@ app.use('/api/netchex',    netchexRouter);
 app.use('/api/reception',  receptionRouter);
 app.use('/api/reports',     reportsRouter);
 app.use('/api/operations', operationsRouter);
+app.use('/api/hr',         hrRouter);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'Blue Bayou Staff API' }));
 
@@ -57,19 +60,25 @@ app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'Blue Ba
 if (process.env.NODE_ENV === 'production') {
   const clientBuild    = path.join(__dirname, '../../client/dist');
   const receptionBuild = path.join(__dirname, '../../reception-client/dist');
+  const hrBuild        = path.join(__dirname, '../../hr-client/dist');
 
   const serveClient    = express.static(clientBuild);
   const serveReception = express.static(receptionBuild);
+  const serveHR        = express.static(hrBuild);
 
   app.use((req, res, next) => {
     const host = req.get('host') || '';
-    host.startsWith('reception.') ? serveReception(req, res, next) : serveClient(req, res, next);
+    if (host.startsWith('reception.')) return serveReception(req, res, next);
+    if (host.startsWith('hr.'))        return serveHR(req, res, next);
+    serveClient(req, res, next);
   });
 
   app.get('*', (req, res) => {
     const host = req.get('host') || '';
     if (host.startsWith('reception.')) {
       res.sendFile(path.join(receptionBuild, 'index.html'));
+    } else if (host.startsWith('hr.')) {
+      res.sendFile(path.join(hrBuild, 'index.html'));
     } else {
       res.sendFile(path.join(clientBuild, 'index.html'));
     }

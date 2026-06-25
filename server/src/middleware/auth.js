@@ -57,6 +57,54 @@ export function requireReception(req, res, next) {
   });
 }
 
+export function requireHR(req, res, next) {
+  requireAuth(req, res, async () => {
+    if (!req.user.hasHrAccess) {
+      return res.status(403).json({ error: 'HR portal access required' });
+    }
+    try {
+      const { rows } = await pool.query(
+        'SELECT is_active, has_hr_access FROM employees WHERE id = $1',
+        [req.user.id]
+      );
+      const emp = rows[0];
+      if (!emp || !emp.is_active) {
+        return res.status(401).json({ error: 'Your account has been deactivated. Please contact your administrator.' });
+      }
+      if (!emp.has_hr_access) {
+        return res.status(403).json({ error: 'Your HR portal access has been revoked. Please contact your administrator.' });
+      }
+      next();
+    } catch {
+      res.status(500).json({ error: 'Failed to verify account status' });
+    }
+  });
+}
+
+export function requireHRManager(req, res, next) {
+  requireAuth(req, res, async () => {
+    try {
+      const { rows } = await pool.query(
+        'SELECT is_active, has_hr_access, is_hr_manager FROM employees WHERE id = $1',
+        [req.user.id]
+      );
+      const emp = rows[0];
+      if (!emp || !emp.is_active) {
+        return res.status(401).json({ error: 'Your account has been deactivated.' });
+      }
+      if (!emp.has_hr_access) {
+        return res.status(403).json({ error: 'HR portal access required.' });
+      }
+      if (!emp.is_hr_manager) {
+        return res.status(403).json({ error: 'HR Manager access required.' });
+      }
+      next();
+    } catch {
+      res.status(500).json({ error: 'Failed to verify account status' });
+    }
+  });
+}
+
 export function requireManagement(req, res, next) {
   requireAuth(req, res, () => {
     const depts = req.user.departments ?? [];

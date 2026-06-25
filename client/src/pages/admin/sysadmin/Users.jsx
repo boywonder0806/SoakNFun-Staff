@@ -212,6 +212,7 @@ function UserModal({ user, isSelf, onClose, onRoleUpdate, onUserUpdate, onLockUp
   const [photoUploading, setPhotoUploading]       = useState(false);
   const [lockSaving, setLockSaving]               = useState(false);
   const [receptionSaving, setReceptionSaving]     = useState(false);
+  const [hrSaving, setHrSaving]                   = useState(false);
   const [welcomeSending, setWelcomeSending]       = useState(false);
   const [welcomeSent, setWelcomeSent]             = useState(false);
 
@@ -328,6 +329,19 @@ function UserModal({ user, isSelf, onClose, onRoleUpdate, onUserUpdate, onLockUp
       console.error(err);
     } finally {
       setReceptionSaving(false);
+    }
+  }
+
+  async function handleHRToggle() {
+    setHrSaving(true);
+    try {
+      const next = !user.hasHrAccess;
+      const { data } = await api.patch(`/hr/access/${user.id}`, { access: next });
+      onUserUpdate(user.id, { hasHrAccess: data.user.hasHrAccess });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setHrSaving(false);
     }
   }
 
@@ -689,6 +703,34 @@ function UserModal({ user, isSelf, onClose, onRoleUpdate, onUserUpdate, onLockUp
                     ${receptionSaving ? 'opacity-50 cursor-wait' : ''}`}
                 >
                   {receptionSaving ? '…' : user.hasReceptionAccess ? 'Revoke' : 'Grant Access'}
+                </button>
+              </div>
+            </div>
+
+            {/* HR portal access */}
+            <div className={`mt-3 rounded-xl p-4 border transition-colors ${user.hasHrAccess ? 'bg-teal-500/5 border-teal-500/25' : 'bg-shell/40 border-rim/40'}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className={`text-xs font-semibold ${user.hasHrAccess ? 'text-teal-400' : 'text-ink'}`}>
+                    HR Portal Access
+                  </p>
+                  <p className="text-10 text-fog mt-0.5">
+                    {user.hasHrAccess
+                      ? 'Can sign in at hr.bluebayoustaff.com'
+                      : 'Cannot access the HR portal.'}
+                  </p>
+                </div>
+                <button
+                  onClick={handleHRToggle}
+                  disabled={hrSaving}
+                  className={`shrink-0 ml-4 px-4 py-2 rounded-md text-xs font-bold border transition-colors
+                    ${user.hasHrAccess
+                      ? 'text-red-400 border-red-500/30 hover:bg-red-500/10'
+                      : 'text-teal-400 border-teal-500/30 hover:bg-teal-500/10'
+                    }
+                    ${hrSaving ? 'opacity-50 cursor-wait' : ''}`}
+                >
+                  {hrSaving ? '…' : user.hasHrAccess ? 'Revoke' : 'Grant Access'}
                 </button>
               </div>
             </div>
