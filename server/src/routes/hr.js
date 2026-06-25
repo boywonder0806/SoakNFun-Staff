@@ -42,6 +42,7 @@ pool.query(`CREATE TABLE IF NOT EXISTS meal_deductions (
 pool.query(`ALTER TABLE meal_deductions ADD COLUMN IF NOT EXISTS payment_method TEXT`).catch(() => {});
 pool.query(`ALTER TABLE meal_deductions ADD COLUMN IF NOT EXISTS order_id TEXT`).catch(() => {});
 pool.query(`ALTER TABLE meal_deductions ADD COLUMN IF NOT EXISTS park TEXT`).catch(() => {});
+pool.query(`ALTER TABLE meal_deductions ADD COLUMN IF NOT EXISTS home_park TEXT`).catch(() => {});
 
 // ── CSV helpers ───────────────────────────────────────────────────────────────
 
@@ -146,25 +147,50 @@ function parseRocketRezReport(rows) {
   const deductions = [];
   for (const row of rows) {
     const rawName = row['Grouping Header']?.trim();
-    // Only process rows that have both an employee name and a transaction date
     if (!rawName || !row['EventDate']?.trim()) continue;
-    // Strip any "(XX) " prefix like "(BB) "
+
+    // Capture home park from name prefix before stripping it
+    const prefixMatch  = rawName.match(/^\(([^)]+)\)/i);
+    const rawPrefix    = prefixMatch?.[1]?.toUpperCase();
+    const homePark     = (rawPrefix === 'BB' || rawPrefix === 'GI') ? rawPrefix : null;
+
     const employeeName = rawName.replace(/^\([^)]+\)\s*/i, '').trim();
     if (!employeeName) continue;
 
     const amount      = parseAmount(row['textBox18']);
     const date        = parseDate(row['EventDate']);
-    // Strip "(BB Employee)" / "(Employee)" suffixes from item names
     const description = (row['Rate/ProductName'] || '')
       .replace(/\s*\([^)]*employee[^)]*\)\s*/gi, '').trim() || null;
     const paymentMethod = parsePaymentMethod(row['PaymentHistory']);
     const park          = parsePark(row['PaymentHistory']);
-    // The actual order ID lives in textBox6, not the OrderId column
     const orderId = row['textBox6']?.trim() || null;
 
-    deductions.push({ employeeName, amount, date, description, paymentMethod, orderId, park });
+    deductions.push({ employeeName, amount, date, description, paymentMethod, orderId, park, homePark });
   }
   return deductions;
+}
+
+// ── Deterministic cross-park detection ───────────────────────────────────────
+// Flags any transaction where an employee's home park (from name prefix) differs
+// from the park where the transaction was actually processed (from PaymentHistory).
+function detectCrossParkAnomalies(deductions) {
+  const byEmployee = {};
+  for (const d of deductions) {
+    if (!d.homePark || !d.park || d.homePark === d.park) continue;
+    if (!byEmployee[d.employeeName]) {
+      byEmployee[d.employeeName] = { homePark: d.homePark, crossParks: new Set(), count: 0 };
+    }
+    byEmployee[d.employeeName].crossParks.add(d.park);
+    byEmployee[d.employeeName].count++;
+  }
+
+  const PARK_NAME = { BB: 'Blue Bayou', GI: 'Gulf Islands' };
+  return Object.entries(byEmployee).map(([name, data]) => ({
+    type: 'cross_park',
+    employee: name,
+    description: `${name} is a ${PARK_NAME[data.homePark] || data.homePark} employee but ${data.count} transaction(s) were processed at ${[...data.crossParks].map(p => PARK_NAME[p] || p).join(', ')}. Verify this was intentional and ensure it is billed to the correct park's payroll.`,
+    severity: 'high',
+  }));
 }
 
 // ── AI anomaly analysis ───────────────────────────────────────────────────────
@@ -181,7 +207,7 @@ async function analyzeWithAI(deductions) {
     if (!byEmployee[d.employeeName]) {
       byEmployee[d.employeeName] = {
         payrollTotal: 0, stripeTotal: 0, cashTotal: 0, compTotal: 0, otherTotal: 0,
-        parks: new Set(), namePrefix: null, items: [],
+        parks: new Set(), homePark: null, items: [],
       };
     }
     const g = byEmployee[d.employeeName];
@@ -191,6 +217,7 @@ async function analyzeWithAI(deductions) {
     else if (d.paymentMethod === 'comp')              g.compTotal    += d.amount;
     else                                              g.otherTotal   += d.amount;
     if (d.park) g.parks.add(d.park);
+    if (d.homePark && !g.homePark) g.homePark = d.homePark;
     g.items.push({ item: d.description, amount: d.amount, method: d.paymentMethod, park: d.park });
 
     if (d.description && d.amount > 0) {
@@ -199,16 +226,24 @@ async function analyzeWithAI(deductions) {
     }
   }
 
-  const employeeSummaries = Object.entries(byEmployee).map(([name, g]) => ({
-    name,
-    parks: [...g.parks],
-    payrollDeduction: +g.payrollTotal.toFixed(2),
-    paidViaCreditCard: +g.stripeTotal.toFixed(2),
-    paidViaCash: +g.cashTotal.toFixed(2),
-    comped: +g.compTotal.toFixed(2),
-    itemCount: g.items.length,
-    items: g.items,
-  }));
+  const employeeSummaries = Object.entries(byEmployee).map(([name, g]) => {
+    const transParks = [...g.parks];
+    const crossParkItems = g.homePark
+      ? g.items.filter(t => t.park && t.park !== g.homePark)
+      : [];
+    return {
+      name,
+      homePark: g.homePark,
+      transactionParks: transParks,
+      crossParkTransactionCount: crossParkItems.length,
+      payrollDeduction: +g.payrollTotal.toFixed(2),
+      paidViaCreditCard: +g.stripeTotal.toFixed(2),
+      paidViaCash: +g.cashTotal.toFixed(2),
+      comped: +g.compTotal.toFixed(2),
+      itemCount: g.items.length,
+      items: g.items,
+    };
+  });
 
   const priceVariations = Object.entries(itemPriceMap)
     .filter(([, set]) => set.size > 1)
@@ -344,7 +379,8 @@ router.get('/meal-deductions/:id', requireHR, async (req, res) => {
               amount,
               COALESCE(payment_method, 'payroll_deduction') AS "paymentMethod",
               order_id AS "orderId",
-              park
+              park,
+              home_park AS "homePark"
        FROM meal_deductions
        WHERE upload_id = $1
        ORDER BY employee_name, transaction_date NULLS LAST, id`,
@@ -361,6 +397,8 @@ router.get('/meal-deductions/:id', requireHR, async (req, res) => {
           totalAmount: 0,
           payrollTotal: 0,
           parks: new Set(),
+          homePark: null,
+          crossParkCount: 0,
           transactions: [],
         };
       }
@@ -369,6 +407,9 @@ router.get('/meal-deductions/:id', requireHR, async (req, res) => {
       g.totalAmount += parseFloat(d.amount);
       if (d.paymentMethod === 'payroll_deduction') g.payrollTotal += parseFloat(d.amount);
       if (d.park) g.parks.add(d.park);
+      if (d.homePark && !g.homePark) g.homePark = d.homePark;
+      const isCrossPark = !!(d.homePark && d.park && d.homePark !== d.park);
+      if (isCrossPark) g.crossParkCount++;
       g.transactions.push({
         id: d.id,
         date: d.date,
@@ -377,6 +418,8 @@ router.get('/meal-deductions/:id', requireHR, async (req, res) => {
         paymentMethod: d.paymentMethod,
         orderId: d.orderId,
         park: d.park,
+        homePark: d.homePark,
+        crossPark: isCrossPark,
       });
     }
 
@@ -387,7 +430,6 @@ router.get('/meal-deductions/:id', requireHR, async (req, res) => {
         return {
           ...g,
           parks: parksArr,
-          // primary park: single park if consistent, 'MULTI' if cross-park, null if unknown
           park: parksArr.length === 1 ? parksArr[0] : (parksArr.length > 1 ? 'MULTI' : null),
           totalAmount:  g.totalAmount.toFixed(2),
           payrollTotal: g.payrollTotal.toFixed(2),
@@ -471,6 +513,25 @@ router.post('/meal-deductions/upload', requireHR, upload.single('file'), async (
     console.error('AI analysis skipped:', err.message);
   }
 
+  // Always inject server-detected cross-park anomalies — deterministic, not AI-dependent
+  const crossParkAnomalies = detectCrossParkAnomalies(deductions);
+  if (crossParkAnomalies.length > 0) {
+    if (aiAnalysis) {
+      // Remove any AI-generated cross_park entries for the same employees to avoid dupes
+      const cpNames = new Set(crossParkAnomalies.map(a => a.employee));
+      aiAnalysis.anomalies = (aiAnalysis.anomalies || []).filter(
+        a => !(a.type === 'cross_park' && cpNames.has(a.employee))
+      );
+      aiAnalysis.anomalies.unshift(...crossParkAnomalies);
+    } else {
+      aiAnalysis = {
+        summary: `${crossParkAnomalies.length} cross-park transaction(s) detected that require review.`,
+        anomalies: crossParkAnomalies,
+        payrollDeductionNote: 'Cross-park transactions must be reviewed before processing payroll to ensure charges are billed to the correct park.',
+      };
+    }
+  }
+
   // ── Persist ──────────────────────────────────────────────────────────────────
   const client = await pool.connect();
   try {
@@ -503,10 +564,10 @@ router.post('/meal-deductions/upload', requireHR, upload.single('file'), async (
     for (const d of deductions) {
       await client.query(
         `INSERT INTO meal_deductions
-           (upload_id, employee_name, transaction_date, item_description, amount, payment_method, order_id, park)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+           (upload_id, employee_name, transaction_date, item_description, amount, payment_method, order_id, park, home_park)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
         [uploadRow.id, d.employeeName, d.date, d.description, d.amount,
-         d.paymentMethod || 'payroll_deduction', d.orderId || null, d.park || null]
+         d.paymentMethod || 'payroll_deduction', d.orderId || null, d.park || null, d.homePark || null]
       );
     }
     await client.query('COMMIT');

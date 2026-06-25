@@ -450,11 +450,18 @@ export default function MealDeductions() {
                             </div>
                             <div className="min-w-0">
                               <p className="text-sm font-semibold text-gray-900 truncate">{b.employeeName}</p>
-                              {b.park && (
-                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${PARK_COLORS[b.park] || 'bg-gray-100 text-gray-600'}`}>
-                                  {PARK_LABEL[b.park] || b.park}
-                                </span>
-                              )}
+                              <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                                {b.park && (
+                                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${PARK_COLORS[b.park] || 'bg-gray-100 text-gray-600'}`}>
+                                    {PARK_LABEL[b.park] || b.park}
+                                  </span>
+                                )}
+                                {b.crossParkCount > 0 && (
+                                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-100 text-red-700">
+                                    ⚠ Cross-park
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
                           <div className="col-span-2 flex items-center justify-end">
@@ -500,18 +507,25 @@ export default function MealDeductions() {
                               </thead>
                               <tbody>
                                 {b.transactions.map((t, i) => (
-                                  <tr key={i} className="border-b border-gray-100 last:border-0">
+                                  <tr key={i} className={`border-b border-gray-100 last:border-0 ${t.crossPark ? 'bg-red-50' : ''}`}>
                                     <td className="px-4 py-2 text-gray-600 whitespace-nowrap">{t.date ? fmtDate(t.date) : '—'}</td>
                                     <td className="px-4 py-2 text-gray-700">{t.description || '—'}</td>
                                     {isRocketRez && (
                                       <>
                                         <td className="px-4 py-2 text-gray-500 font-mono">{t.orderId || '—'}</td>
                                         <td className="px-4 py-2">
-                                          {t.park ? (
-                                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${PARK_COLORS[t.park] || 'bg-gray-100 text-gray-600'}`}>
-                                              {t.park}
-                                            </span>
-                                          ) : '—'}
+                                          <div className="flex items-center gap-1">
+                                            {t.park ? (
+                                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${PARK_COLORS[t.park] || 'bg-gray-100 text-gray-600'}`}>
+                                                {t.park}
+                                              </span>
+                                            ) : '—'}
+                                            {t.crossPark && (
+                                              <span className="text-[10px] font-semibold px-1 py-0.5 rounded bg-red-100 text-red-700" title={`Home park: ${t.homePark}`}>
+                                                ⚠
+                                              </span>
+                                            )}
+                                          </div>
                                         </td>
                                         <td className="px-4 py-2">
                                           <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${METHOD_COLORS[t.paymentMethod] || METHOD_COLORS.other}`}>
