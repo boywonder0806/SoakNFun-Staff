@@ -83,6 +83,8 @@ pool.query(`ALTER TABLE meal_deductions ADD COLUMN IF NOT EXISTS payment_method 
 pool.query(`ALTER TABLE meal_deductions ADD COLUMN IF NOT EXISTS order_id TEXT`).catch(() => {});
 pool.query(`ALTER TABLE meal_deductions ADD COLUMN IF NOT EXISTS park TEXT`).catch(() => {});
 pool.query(`ALTER TABLE meal_deductions ADD COLUMN IF NOT EXISTS home_park TEXT`).catch(() => {});
+// Upgrade date-only column to full timestamp so we can store time-of-day
+pool.query(`ALTER TABLE meal_deductions ALTER COLUMN transaction_date TYPE TIMESTAMP USING transaction_date::timestamp`).catch(() => {});
 
 // ── CSV helpers ───────────────────────────────────────────────────────────────
 
@@ -156,6 +158,20 @@ function parseDate(str) {
   return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
 
+// Combines EventDate + EventTime from Rocket Rez CSV into a full ISO timestamp.
+// EventDate is typically "M/D/YYYY", EventTime is "H:MM:SS AM/PM".
+function parseDateTimeRR(dateStr, timeStr) {
+  if (!dateStr?.trim()) return null;
+  const combined = timeStr?.trim()
+    ? `${dateStr.trim()} ${timeStr.trim()}`
+    : dateStr.trim();
+  const d = new Date(combined);
+  if (!isNaN(d.getTime())) return d.toISOString();
+  // Fall back to date-only if combined parse fails
+  const fallback = new Date(dateStr.trim());
+  return isNaN(fallback.getTime()) ? null : fallback.toISOString().slice(0, 10);
+}
+
 // ── Rocket Rez report parsing ─────────────────────────────────────────────────
 
 // Detected by presence of these specific column names
@@ -197,8 +213,11 @@ function parseRocketRezReport(rows) {
     const employeeName = rawName.replace(/^\([^)]+\)\s*/i, '').trim();
     if (!employeeName) continue;
 
+    // Token redemptions are pre-paid benefits — not payroll charges, skip them
+    if (row['PaymentHistory']?.toLowerCase().includes('token')) continue;
+
     const amount      = parseAmount(row['textBox18']);
-    const date        = parseDate(row['EventDate']);
+    const date        = parseDateTimeRR(row['EventDate'], row['EventTime']);
     const description = (row['Rate/ProductName'] || '')
       .replace(/\s*\([^)]*employee[^)]*\)\s*/gi, '').trim() || null;
     const paymentMethod = parsePaymentMethod(row['PaymentHistory']);
