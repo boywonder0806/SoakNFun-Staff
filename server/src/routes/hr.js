@@ -41,6 +41,7 @@ pool.query(`CREATE TABLE IF NOT EXISTS meal_deductions (
 
 pool.query(`ALTER TABLE meal_deductions ADD COLUMN IF NOT EXISTS payment_method TEXT`).catch(() => {});
 pool.query(`ALTER TABLE meal_deductions ADD COLUMN IF NOT EXISTS order_id TEXT`).catch(() => {});
+pool.query(`ALTER TABLE meal_deductions ADD COLUMN IF NOT EXISTS park TEXT`).catch(() => {});
 
 // ── CSV helpers ───────────────────────────────────────────────────────────────
 
@@ -123,7 +124,7 @@ function isRocketRezFormat(headers) {
          headers.includes('Rate/ProductName');
 }
 
-// PaymentHistory format: "MM/DD/YYYY  $AMOUNT        BB - METHOD"
+// PaymentHistory format: "MM/DD/YYYY  $AMOUNT        BB - METHOD"  or  "GI - METHOD"
 function parsePaymentMethod(paymentHistory) {
   if (!paymentHistory?.trim()) return 'comp';
   const lower = paymentHistory.toLowerCase();
@@ -132,6 +133,13 @@ function parsePaymentMethod(paymentHistory) {
   if (lower.includes('cash'))              return 'cash';
   if (lower.includes('credit'))            return 'credit';
   return 'other';
+}
+
+// Extract park code from PaymentHistory: "BB" = Blue Bayou, "GI" = Gulf Islands
+function parsePark(paymentHistory) {
+  if (!paymentHistory?.trim()) return null;
+  const match = paymentHistory.match(/\b(BB|GI)\b/i);
+  return match ? match[1].toUpperCase() : null;
 }
 
 function parseRocketRezReport(rows) {
@@ -150,10 +158,11 @@ function parseRocketRezReport(rows) {
     const description = (row['Rate/ProductName'] || '')
       .replace(/\s*\([^)]*employee[^)]*\)\s*/gi, '').trim() || null;
     const paymentMethod = parsePaymentMethod(row['PaymentHistory']);
+    const park          = parsePark(row['PaymentHistory']);
     // The actual order ID lives in textBox6, not the OrderId column
     const orderId = row['textBox6']?.trim() || null;
 
-    deductions.push({ employeeName, amount, date, description, paymentMethod, orderId });
+    deductions.push({ employeeName, amount, date, description, paymentMethod, orderId, park });
   }
   return deductions;
 }
@@ -170,7 +179,10 @@ async function analyzeWithAI(deductions) {
 
   for (const d of deductions) {
     if (!byEmployee[d.employeeName]) {
-      byEmployee[d.employeeName] = { payrollTotal: 0, stripeTotal: 0, cashTotal: 0, compTotal: 0, otherTotal: 0, items: [] };
+      byEmployee[d.employeeName] = {
+        payrollTotal: 0, stripeTotal: 0, cashTotal: 0, compTotal: 0, otherTotal: 0,
+        parks: new Set(), namePrefix: null, items: [],
+      };
     }
     const g = byEmployee[d.employeeName];
     if      (d.paymentMethod === 'payroll_deduction') g.payrollTotal += d.amount;
@@ -178,7 +190,8 @@ async function analyzeWithAI(deductions) {
     else if (d.paymentMethod === 'cash')              g.cashTotal    += d.amount;
     else if (d.paymentMethod === 'comp')              g.compTotal    += d.amount;
     else                                              g.otherTotal   += d.amount;
-    g.items.push({ item: d.description, amount: d.amount, method: d.paymentMethod });
+    if (d.park) g.parks.add(d.park);
+    g.items.push({ item: d.description, amount: d.amount, method: d.paymentMethod, park: d.park });
 
     if (d.description && d.amount > 0) {
       if (!itemPriceMap[d.description]) itemPriceMap[d.description] = new Set();
@@ -188,8 +201,9 @@ async function analyzeWithAI(deductions) {
 
   const employeeSummaries = Object.entries(byEmployee).map(([name, g]) => ({
     name,
+    parks: [...g.parks],
     payrollDeduction: +g.payrollTotal.toFixed(2),
-    paidViaStripe: +g.stripeTotal.toFixed(2),
+    paidViaCreditCard: +g.stripeTotal.toFixed(2),
     paidViaCash: +g.cashTotal.toFixed(2),
     comped: +g.compTotal.toFixed(2),
     itemCount: g.items.length,
@@ -208,31 +222,38 @@ ${JSON.stringify(employeeSummaries, null, 2)}
 MENU ITEM PRICE VARIATIONS (same item seen at different prices):
 ${priceVariations.length ? JSON.stringify(priceVariations, null, 2) : 'None detected'}
 
+Context:
+- This is a multi-park waterpark company with two locations: Blue Bayou Waterpark (BB) and Gulf Islands Waterpark (GI)
+- Park is determined by the payment method prefix: "BB -" = Blue Bayou, "GI -" = Gulf Islands
+- Some employee names have a "(BB)" prefix in the system but the payment history park code is the authoritative source
+- Each park runs its own payroll, so BB transactions must be separated from GI transactions
+
 Payment method key:
-- payroll_deduction = will be deducted from paycheck
-- stripe = employee paid by credit card at the point of sale (do NOT also deduct from payroll)
-- cash = employee paid with cash at the point of sale (do NOT also deduct from payroll)
+- payroll_deduction = will be deducted from paycheck at their respective park
+- stripe/credit card = employee already paid by credit card (do NOT also deduct from payroll)
+- cash = employee already paid with cash (do NOT also deduct from payroll)
 - comp = $0 charge / free item (needs manager authorization)
 
 Identify and flag:
 1. Employees with payroll deductions significantly higher than the median (over-purchasing)
 2. Price inconsistencies for the same menu item across employees
 3. $0 comp items that need manager justification (who authorized a free item?)
-4. Employees who paid via Stripe or Cash (important: do NOT deduct from payroll — they already paid)
-5. Any other patterns worth HR attention
+4. Employees who paid via credit card or cash (do NOT deduct from payroll — they already paid)
+5. Employees whose transactions span both BB and GI parks (may indicate data mixup or inter-park work)
+6. Any other patterns worth HR attention
 
 Reply ONLY with valid JSON, no markdown, no explanation outside the JSON:
 {
-  "summary": "1-2 sentence overview of key findings",
+  "summary": "1-2 sentence overview of key findings including park breakdown",
   "anomalies": [
     {
-      "type": "high_total|price_inconsistency|comp_item|already_paid|other",
+      "type": "high_total|price_inconsistency|comp_item|already_paid|cross_park|other",
       "employee": "Employee Name or null for report-level",
       "description": "Clear, concise description of the issue",
       "severity": "low|medium|high"
     }
   ],
-  "payrollDeductionNote": "Brief note about payroll vs non-payroll breakdown in this report"
+  "payrollDeductionNote": "Note covering total payroll split by park (BB vs GI) and any already-paid transactions"
 }`;
 
   try {
@@ -322,14 +343,15 @@ router.get('/meal-deductions/:id', requireHR, async (req, res) => {
               item_description AS "description",
               amount,
               COALESCE(payment_method, 'payroll_deduction') AS "paymentMethod",
-              order_id AS "orderId"
+              order_id AS "orderId",
+              park
        FROM meal_deductions
        WHERE upload_id = $1
        ORDER BY employee_name, transaction_date NULLS LAST, id`,
       [id]
     );
 
-    // Group by employee, compute payroll subtotal per employee
+    // Group by employee
     const grouped = {};
     for (const d of deductions) {
       if (!grouped[d.employeeName]) {
@@ -338,6 +360,7 @@ router.get('/meal-deductions/:id', requireHR, async (req, res) => {
           transactionCount: 0,
           totalAmount: 0,
           payrollTotal: 0,
+          parks: new Set(),
           transactions: [],
         };
       }
@@ -345,6 +368,7 @@ router.get('/meal-deductions/:id', requireHR, async (req, res) => {
       g.transactionCount++;
       g.totalAmount += parseFloat(d.amount);
       if (d.paymentMethod === 'payroll_deduction') g.payrollTotal += parseFloat(d.amount);
+      if (d.park) g.parks.add(d.park);
       g.transactions.push({
         id: d.id,
         date: d.date,
@@ -352,16 +376,23 @@ router.get('/meal-deductions/:id', requireHR, async (req, res) => {
         amount: d.amount,
         paymentMethod: d.paymentMethod,
         orderId: d.orderId,
+        park: d.park,
       });
     }
 
     const breakdown = Object.values(grouped)
       .sort((a, b) => a.employeeName.localeCompare(b.employeeName))
-      .map(g => ({
-        ...g,
-        totalAmount:   g.totalAmount.toFixed(2),
-        payrollTotal:  g.payrollTotal.toFixed(2),
-      }));
+      .map(g => {
+        const parksArr = [...g.parks];
+        return {
+          ...g,
+          parks: parksArr,
+          // primary park: single park if consistent, 'MULTI' if cross-park, null if unknown
+          park: parksArr.length === 1 ? parksArr[0] : (parksArr.length > 1 ? 'MULTI' : null),
+          totalAmount:  g.totalAmount.toFixed(2),
+          payrollTotal: g.payrollTotal.toFixed(2),
+        };
+      });
 
     res.json({ upload, breakdown });
   } catch (err) {
@@ -472,10 +503,10 @@ router.post('/meal-deductions/upload', requireHR, upload.single('file'), async (
     for (const d of deductions) {
       await client.query(
         `INSERT INTO meal_deductions
-           (upload_id, employee_name, transaction_date, item_description, amount, payment_method, order_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+           (upload_id, employee_name, transaction_date, item_description, amount, payment_method, order_id, park)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
         [uploadRow.id, d.employeeName, d.date, d.description, d.amount,
-         d.paymentMethod || 'payroll_deduction', d.orderId || null]
+         d.paymentMethod || 'payroll_deduction', d.orderId || null, d.park || null]
       );
     }
     await client.query('COMMIT');
