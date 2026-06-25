@@ -56,6 +56,7 @@ export default function MealDeductions() {
   const [loading, setLoading]       = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [expanded, setExpanded]     = useState({});
+  const [footageTarget, setFootageTarget] = useState(null); // { transaction, employeeName }
 
   // Search & filter state
   const [search, setSearch]             = useState('');
@@ -503,6 +504,7 @@ export default function MealDeductions() {
                                     </>
                                   )}
                                   <th className="px-4 py-2 text-right font-semibold text-gray-400 uppercase tracking-wide">Amount</th>
+                                  {isRocketRez && <th className="px-2 py-2" />}
                                 </tr>
                               </thead>
                               <tbody>
@@ -537,6 +539,17 @@ export default function MealDeductions() {
                                     <td className={`px-4 py-2 text-right font-medium ${t.paymentMethod === 'comp' ? 'text-purple-600' : 'text-gray-900'}`}>
                                       {t.paymentMethod === 'comp' ? 'Comp' : fmtCurrency(t.amount)}
                                     </td>
+                                    {isRocketRez && (
+                                      <td className="px-2 py-2">
+                                        <button
+                                          onClick={() => setFootageTarget({ transaction: t, employeeName: b.employeeName })}
+                                          className="w-6 h-6 rounded flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors"
+                                          title="View camera footage"
+                                        >
+                                          <CameraIcon />
+                                        </button>
+                                      </td>
+                                    )}
                                   </tr>
                                 ))}
                               </tbody>
@@ -555,6 +568,13 @@ export default function MealDeductions() {
 
       {showUpload && (
         <UploadModal onClose={() => setShowUpload(false)} onUploaded={handleUploaded} />
+      )}
+      {footageTarget && (
+        <FootageModal
+          transaction={footageTarget.transaction}
+          employeeName={footageTarget.employeeName}
+          onClose={() => setFootageTarget(null)}
+        />
       )}
     </div>
   );
@@ -767,4 +787,151 @@ function XSmallIcon() {
 }
 function Spinner() {
   return <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>;
+}
+function CameraIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-3.5 h-3.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>;
+}
+
+// ── Footage Modal ─────────────────────────────────────────────────────────────
+
+function FootageModal({ transaction, employeeName, onClose }) {
+  const backdropRef = useRef(null);
+  const videoRef    = useRef(null);
+  const [cameras, setCameras]       = useState([]);
+  const [cameraId, setCameraId]     = useState('');
+  const [time, setTime]             = useState('12:00');
+  const [duration, setDuration]     = useState(10);
+  const [loading, setLoading]       = useState(false);
+  const [videoSrc, setVideoSrc]     = useState(null);
+  const [error, setError]           = useState('');
+  const [configured, setConfigured] = useState(true);
+
+  const { park, date } = transaction;
+
+  useEffect(() => {
+    api.get('/hr/protect/cameras')
+      .then(r => {
+        setConfigured(r.data.configured);
+        setCameras(r.data.cameras || []);
+        const configured = r.data.configuredCameras?.[park] || [];
+        if (configured.length > 0) setCameraId(configured[0]);
+        else if (r.data.cameras?.length > 0) setCameraId(r.data.cameras[0].id);
+      })
+      .catch(() => setConfigured(false));
+  }, []);
+
+  async function loadFootage() {
+    if (!cameraId) return setError('Select a camera first');
+    setError(''); setLoading(true); setVideoSrc(null);
+    try {
+      const [h, m]  = time.split(':').map(Number);
+      const base    = new Date(`${date}T00:00:00`);
+      base.setHours(h, m, 0, 0);
+      const startMs = base.getTime();
+      const endMs   = startMs + duration * 60 * 1000;
+
+      const { data } = await api.post('/hr/protect/footage-token', { cameraId, startMs, endMs });
+      setVideoSrc(`/api/hr/protect/footage-stream?token=${data.token}`);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to load footage');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div ref={backdropRef} onClick={e => e.target === backdropRef.current && onClose()}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+    >
+      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="bg-gray-900 px-5 py-4 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-bold text-white flex items-center gap-2">
+              <CameraIcon /> Camera Footage
+            </p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {employeeName} · {fmtDate(date)}
+              {transaction.description && ` · ${transaction.description}`}
+            </p>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors">
+            <CloseIcon />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {!configured ? (
+            <div className="text-center py-6 space-y-2">
+              <p className="text-sm font-semibold text-gray-700">Protect NVR not configured</p>
+              <p className="text-xs text-gray-500">
+                Set <code className="bg-gray-100 px-1 rounded">PROTECT_NVR_URL</code> and <code className="bg-gray-100 px-1 rounded">PROTECT_API_KEY</code> in the server environment to enable footage access.
+              </p>
+            </div>
+          ) : (
+            <>
+              <div>
+                <label className="label">Camera</label>
+                <select className="field" value={cameraId} onChange={e => setCameraId(e.target.value)}>
+                  <option value="">— select camera —</option>
+                  {cameras.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                {cameras.length === 0 && (
+                  <p className="text-xs text-amber-600 mt-1">No cameras found — check NVR connection</p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Approximate Time</label>
+                  <input
+                    type="time"
+                    className="field"
+                    value={time}
+                    onChange={e => setTime(e.target.value)}
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1">Time of the transaction on {fmtDate(date)}</p>
+                </div>
+                <div>
+                  <label className="label">Clip Duration</label>
+                  <select className="field" value={duration} onChange={e => setDuration(Number(e.target.value))}>
+                    <option value={5}>5 minutes</option>
+                    <option value={10}>10 minutes</option>
+                    <option value={15}>15 minutes</option>
+                    <option value={30}>30 minutes</option>
+                  </select>
+                </div>
+              </div>
+
+              {error && <p className="text-xs text-red-500 font-medium">{error}</p>}
+
+              <button
+                onClick={loadFootage}
+                disabled={loading || !cameraId}
+                className="btn-primary w-full gap-2"
+              >
+                {loading ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Loading footage…</> : <><CameraIcon /> Load Footage</>}
+              </button>
+
+              {videoSrc && (
+                <div className="rounded-xl overflow-hidden bg-black">
+                  <video
+                    ref={videoRef}
+                    src={videoSrc}
+                    controls
+                    autoPlay
+                    className="w-full"
+                    style={{ maxHeight: '360px' }}
+                    onError={() => setError('Footage unavailable for this time range — try adjusting the time or duration.')}
+                  />
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }

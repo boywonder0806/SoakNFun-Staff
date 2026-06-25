@@ -1,11 +1,50 @@
 import { Router } from 'express';
 import multer from 'multer';
 import Anthropic from '@anthropic-ai/sdk';
+import https from 'node:https';
+import { randomUUID } from 'node:crypto';
 import pool from '../db/index.js';
 import { requireSysAdmin, requireHR } from '../middleware/auth.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+
+// ── Unifi Protect NVR proxy ───────────────────────────────────────────────────
+// NVRs use self-signed TLS certs — skip verification for internal requests only
+const nvrAgent = new https.Agent({ rejectUnauthorized: false });
+
+// In-memory map of short-lived tokens for streaming footage to the browser
+// (video tags can't send Authorization headers, so we gate on a time-limited UUID)
+const footageTokens = new Map(); // token → { cameraId, startMs, endMs, expires }
+setInterval(() => {
+  const now = Date.now();
+  for (const [t, d] of footageTokens) if (d.expires < now) footageTokens.delete(t);
+}, 60_000);
+
+function nvrRequest(urlPath, { method = 'GET', body } = {}) {
+  const nvrUrl = process.env.PROTECT_NVR_URL;
+  const apiKey = process.env.PROTECT_API_KEY;
+  if (!nvrUrl || !apiKey) return Promise.reject(new Error('Protect NVR not configured'));
+
+  return new Promise((resolve, reject) => {
+    const url  = new URL(urlPath, nvrUrl);
+    const buf  = body ? Buffer.from(JSON.stringify(body)) : null;
+    const req  = https.request({
+      hostname: url.hostname,
+      port:     url.port || 443,
+      path:     url.pathname + url.search,
+      method,
+      headers: {
+        'X-API-Key': apiKey,
+        ...(buf ? { 'Content-Type': 'application/json', 'Content-Length': buf.length } : {}),
+      },
+      agent: nvrAgent,
+    }, resolve);
+    req.on('error', reject);
+    if (buf) req.write(buf);
+    req.end();
+  });
+}
 
 // ── Idempotent migrations ─────────────────────────────────────────────────────
 pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_hr_access BOOLEAN NOT NULL DEFAULT FALSE').catch(() => {});
@@ -578,6 +617,84 @@ router.post('/meal-deductions/upload', requireHR, upload.single('file'), async (
     res.status(500).json({ error: 'Failed to save deduction data.' });
   } finally {
     client.release();
+  }
+});
+
+// ── Unifi Protect endpoints ───────────────────────────────────────────────────
+
+// List all cameras from the NVR, plus which ones are configured per park
+router.get('/protect/cameras', requireHR, async (req, res) => {
+  const configured = !!(process.env.PROTECT_NVR_URL && process.env.PROTECT_API_KEY);
+  if (!configured) return res.json({ cameras: [], configured: false });
+
+  try {
+    const nvrRes = await nvrRequest('/proxy/protect/api/cameras');
+    let raw = '';
+    for await (const chunk of nvrRes) raw += chunk;
+    const all = JSON.parse(raw);
+    res.json({
+      configured: true,
+      cameras: (Array.isArray(all) ? all : [])
+        .map(c => ({ id: c.id, name: c.name || c.id, state: c.state, type: c.type })),
+      configuredCameras: {
+        BB: (process.env.PROTECT_BB_CAMERA_IDS || '').split(',').filter(Boolean),
+        GI: (process.env.PROTECT_GI_CAMERA_IDS || '').split(',').filter(Boolean),
+      },
+    });
+  } catch (err) {
+    res.status(502).json({ error: 'Cannot reach Protect NVR: ' + err.message, configured });
+  }
+});
+
+// Issue a 5-minute token so the browser can stream footage without an auth header
+router.post('/protect/footage-token', requireHR, (req, res) => {
+  if (!process.env.PROTECT_NVR_URL || !process.env.PROTECT_API_KEY) {
+    return res.status(503).json({ error: 'Protect NVR not configured on this server' });
+  }
+  const { cameraId, startMs, endMs } = req.body;
+  if (!cameraId || !startMs || !endMs) {
+    return res.status(400).json({ error: 'cameraId, startMs, and endMs are required' });
+  }
+  const start = parseInt(startMs);
+  const end   = parseInt(endMs);
+  if (isNaN(start) || isNaN(end) || end <= start) {
+    return res.status(400).json({ error: 'Invalid time range' });
+  }
+  if (end - start > 60 * 60 * 1000) {
+    return res.status(400).json({ error: 'Clip too long — max 1 hour' });
+  }
+  const token = randomUUID();
+  footageTokens.set(token, { cameraId, startMs: start, endMs: end, expires: Date.now() + 5 * 60_000 });
+  res.json({ token, expiresIn: 300 });
+});
+
+// Stream an MP4 clip — gated by the single-use token above, no auth header needed
+router.get('/protect/footage-stream', async (req, res) => {
+  const data = footageTokens.get(req.query.token);
+  if (!data || data.expires < Date.now()) {
+    footageTokens.delete(req.query.token);
+    return res.status(401).send('Footage token expired or invalid');
+  }
+
+  try {
+    const nvrRes = await nvrRequest('/proxy/protect/api/video/export', {
+      method: 'POST',
+      body: { camera: data.cameraId, start: data.startMs, end: data.endMs, type: 'video' },
+    });
+
+    if (nvrRes.statusCode !== 200) {
+      return res.status(nvrRes.statusCode || 404).send('Footage not available for this time range');
+    }
+
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Content-Disposition', 'inline; filename="footage.mp4"');
+    if (nvrRes.headers['content-length']) {
+      res.setHeader('Content-Length', nvrRes.headers['content-length']);
+      res.setHeader('Accept-Ranges', 'bytes');
+    }
+    nvrRes.pipe(res);
+  } catch (err) {
+    res.status(502).send('Cannot reach Protect NVR');
   }
 });
 
