@@ -652,8 +652,16 @@ router.get('/protect/cameras', requireHR, async (req, res) => {
 
   try {
     const nvrRes = await nvrRequest('/proxy/protect/integration/v1/cameras');
-    let raw = '';
-    for await (const chunk of nvrRes) raw += chunk;
+    if (nvrRes.statusCode !== 200) {
+      nvrRes.resume();
+      return res.status(502).json({ error: `NVR returned status ${nvrRes.statusCode}`, configured });
+    }
+    const raw = await new Promise((resolve, reject) => {
+      const chunks = [];
+      nvrRes.on('data', chunk => chunks.push(chunk));
+      nvrRes.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+      nvrRes.on('error', reject);
+    });
     const all = JSON.parse(raw);
     res.json({
       configured: true,
