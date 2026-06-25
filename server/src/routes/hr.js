@@ -665,6 +665,7 @@ router.get('/protect/cameras', requireHR, async (req, res) => {
       },
     });
   } catch (err) {
+    console.error('Protect cameras error:', err.message);
     res.status(502).json({ error: 'Cannot reach Protect NVR: ' + err.message, configured });
   }
 });

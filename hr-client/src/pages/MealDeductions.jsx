@@ -1680,7 +1680,7 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
         if (parkCams.length === 1) setSelectedCam(parkCams[0]);
         else if (parkCams.length === 0 && cams.length === 1) setSelectedCam(cams[0].id);
       })
-      .catch(() => setCamError('Cannot reach camera system — check server connection'))
+      .catch(err => setCamError(err.response?.data?.error || err.message || 'Cannot reach camera system'))
       .finally(() => setLoadingCams(false));
   }, []);
 
