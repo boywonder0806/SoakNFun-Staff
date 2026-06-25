@@ -37,6 +37,7 @@ function nvrRequest(urlPath, { method = 'GET', body } = {}) {
       method,
       headers: {
         'X-API-KEY': apiKey,
+        'Accept-Encoding': 'identity',
         ...(buf ? { 'Content-Type': 'application/json', 'Content-Length': buf.length } : {}),
       },
       agent: nvrAgent,
