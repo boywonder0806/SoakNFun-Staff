@@ -11,10 +11,41 @@ function fmtDate(iso) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+const METHOD_LABEL = {
+  payroll_deduction: 'Payroll',
+  stripe:            'Stripe',
+  cash:              'Cash',
+  credit:            'Credit',
+  comp:              'Comp',
+  other:             'Other',
+};
+
+const METHOD_COLORS = {
+  payroll_deduction: 'bg-teal-100 text-teal-700',
+  stripe:            'bg-blue-100 text-blue-700',
+  cash:              'bg-gray-100 text-gray-600',
+  credit:            'bg-indigo-100 text-indigo-700',
+  comp:              'bg-purple-100 text-purple-700',
+  other:             'bg-orange-100 text-orange-700',
+};
+
+const SEVERITY_COLORS = {
+  high:   'bg-red-50 border-red-200 text-red-800',
+  medium: 'bg-amber-50 border-amber-200 text-amber-800',
+  low:    'bg-blue-50 border-blue-200 text-blue-700',
+};
+
+const SEVERITY_DOT = {
+  high:   'bg-red-500',
+  medium: 'bg-amber-500',
+  low:    'bg-blue-400',
+};
+
 export default function MealDeductions() {
   const [uploads, setUploads]         = useState([]);
   const [selected, setSelected]       = useState(null);
   const [breakdown, setBreakdown]     = useState(null);
+  const [uploadMeta, setUploadMeta]   = useState(null);
   const [loadingBreakdown, setLoadingBreakdown] = useState(false);
   const [showUpload, setShowUpload]   = useState(false);
   const [expanded, setExpanded]       = useState({});
@@ -28,11 +59,13 @@ export default function MealDeductions() {
   async function loadBreakdown(upload) {
     setSelected(upload);
     setBreakdown(null);
+    setUploadMeta(null);
     setExpanded({});
     setLoadingBreakdown(true);
     try {
       const { data } = await api.get(`/hr/meal-deductions/${upload.id}`);
       setBreakdown(data.breakdown);
+      setUploadMeta(data.upload);
     } catch (err) {
       console.error(err);
     } finally {
@@ -51,7 +84,7 @@ export default function MealDeductions() {
     try {
       await api.delete(`/hr/meal-deductions/${uploadId}`);
       setUploads(prev => prev.filter(u => u.id !== uploadId));
-      if (selected?.id === uploadId) { setSelected(null); setBreakdown(null); }
+      if (selected?.id === uploadId) { setSelected(null); setBreakdown(null); setUploadMeta(null); }
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to delete upload.');
     }
@@ -63,9 +96,19 @@ export default function MealDeductions() {
 
   function exportCSV() {
     if (!breakdown || !selected) return;
-    const rows = [['Employee Name', 'Transactions', 'Total Deductions']];
+    const isRocketRez = uploadMeta?.reportType === 'rocket_rez';
+    const headers = isRocketRez
+      ? ['Employee Name', 'Transactions', 'Total Spent', 'Payroll Deduction']
+      : ['Employee Name', 'Transactions', 'Total Deductions'];
+    const rows = [headers];
     breakdown.forEach(b => {
-      rows.push([b.employeeName, b.transactionCount, parseFloat(b.totalAmount).toFixed(2)]);
+      if (isRocketRez) {
+        rows.push([b.employeeName, b.transactionCount,
+          parseFloat(b.totalAmount).toFixed(2),
+          parseFloat(b.payrollTotal).toFixed(2)]);
+      } else {
+        rows.push([b.employeeName, b.transactionCount, parseFloat(b.totalAmount).toFixed(2)]);
+      }
     });
     const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -75,6 +118,9 @@ export default function MealDeductions() {
     a.click();
     URL.revokeObjectURL(a.href);
   }
+
+  const isRocketRez = uploadMeta?.reportType === 'rocket_rez';
+  const aiAnalysis  = uploadMeta?.aiAnalysis;
 
   return (
     <div className="flex h-full min-h-0 gap-0">
@@ -111,14 +157,19 @@ export default function MealDeductions() {
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className={`text-xs font-semibold truncate ${selected?.id === u.id ? 'text-brand' : 'text-gray-800'}`}>
-                      {u.periodLabel || 'Unnamed Period'}
-                    </p>
+                    <div className="flex items-center gap-1.5">
+                      <p className={`text-xs font-semibold truncate ${selected?.id === u.id ? 'text-brand' : 'text-gray-800'}`}>
+                        {u.periodLabel || 'Unnamed Period'}
+                      </p>
+                      {u.reportType === 'rocket_rez' && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-100 text-teal-700 font-semibold shrink-0">RR</span>
+                      )}
+                    </div>
                     <p className="text-xs text-gray-500 mt-0.5 truncate">{u.filename}</p>
                     <div className="flex items-center gap-2 mt-1.5">
-                      <span className="text-xs text-gray-400">{u.rowCount} rows</span>
+                      <span className="text-xs text-gray-400">{u.rowCount} items</span>
                       <span className="text-gray-300">·</span>
-                      <span className="text-xs font-semibold text-gray-700">{fmtCurrency(u.totalAmount)}</span>
+                      <span className="text-xs font-semibold text-teal-700">{fmtCurrency(u.payrollTotal)} payroll</span>
                     </div>
                   </div>
                   <button
@@ -145,14 +196,19 @@ export default function MealDeductions() {
           </div>
         ) : (
           <>
-            {/* Breakdown header */}
+            {/* Header */}
             <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
               <div>
-                <h2 className="text-base font-bold text-gray-900">
-                  {selected.periodLabel || 'Deduction Breakdown'}
-                </h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-gray-900">
+                    {selected.periodLabel || 'Deduction Breakdown'}
+                  </h2>
+                  {uploadMeta?.reportType === 'rocket_rez' && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-teal-100 text-teal-700 font-semibold">Rocket Rez</span>
+                  )}
+                </div>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {selected.filename} · {selected.rowCount} transactions · {fmtCurrency(selected.totalAmount)} total
+                  {selected.filename} · {selected.rowCount} transactions
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -165,8 +221,8 @@ export default function MealDeductions() {
             </div>
 
             {/* Summary stats */}
-            {breakdown && (
-              <div className="px-6 py-4 grid grid-cols-3 gap-4 shrink-0">
+            {breakdown && uploadMeta && (
+              <div className={`px-6 py-4 grid gap-4 shrink-0 ${isRocketRez ? 'grid-cols-4' : 'grid-cols-3'}`}>
                 <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
                   <p className="text-2xl font-bold text-gray-900">{breakdown.length}</p>
                   <p className="text-xs text-gray-500 mt-1">Employees</p>
@@ -175,9 +231,78 @@ export default function MealDeductions() {
                   <p className="text-2xl font-bold text-gray-900">{selected.rowCount}</p>
                   <p className="text-xs text-gray-500 mt-1">Transactions</p>
                 </div>
-                <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
-                  <p className="text-2xl font-bold text-brand">{fmtCurrency(selected.totalAmount)}</p>
-                  <p className="text-xs text-gray-500 mt-1">Total Deductions</p>
+                {isRocketRez ? (
+                  <>
+                    <div className="bg-white rounded-xl border border-teal-200 p-4 text-center">
+                      <p className="text-2xl font-bold text-teal-700">{fmtCurrency(uploadMeta.payrollTotal)}</p>
+                      <p className="text-xs text-gray-500 mt-1">Payroll Deductions</p>
+                    </div>
+                    <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+                      <p className="text-2xl font-bold text-gray-700">{fmtCurrency(uploadMeta.totalAmount)}</p>
+                      <p className="text-xs text-gray-500 mt-1">Total Spent</p>
+                    </div>
+                  </>
+                ) : (
+                  <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+                    <p className="text-2xl font-bold text-brand">{fmtCurrency(uploadMeta.totalAmount)}</p>
+                    <p className="text-xs text-gray-500 mt-1">Total Deductions</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* AI Analysis panel */}
+            {aiAnalysis && (
+              <div className="mx-6 mb-4 shrink-0 bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <div className="px-4 py-3 bg-gradient-to-r from-teal-50 to-white border-b border-gray-100 flex items-center gap-2">
+                  <SparkleIcon />
+                  <span className="text-xs font-bold text-gray-700">AI Analysis</span>
+                  {aiAnalysis.anomalies?.some(a => a.severity === 'high') && (
+                    <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold">
+                      {aiAnalysis.anomalies.filter(a => a.severity === 'high').length} high
+                    </span>
+                  )}
+                  {aiAnalysis.anomalies?.some(a => a.severity === 'medium') && (
+                    <span className={aiAnalysis.anomalies?.some(a => a.severity === 'high') ? '' : 'ml-auto'}>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold">
+                        {aiAnalysis.anomalies.filter(a => a.severity === 'medium').length} medium
+                      </span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="px-4 py-3 space-y-3">
+                  {/* Summary */}
+                  {aiAnalysis.summary && (
+                    <p className="text-xs text-gray-600">{aiAnalysis.summary}</p>
+                  )}
+
+                  {/* Payroll note */}
+                  {aiAnalysis.payrollDeductionNote && (
+                    <div className="flex items-start gap-2 p-2.5 bg-teal-50 rounded-lg">
+                      <InfoIcon className="text-teal-600 mt-0.5 shrink-0" />
+                      <p className="text-xs text-teal-800">{aiAnalysis.payrollDeductionNote}</p>
+                    </div>
+                  )}
+
+                  {/* Anomalies */}
+                  {aiAnalysis.anomalies?.length > 0 && (
+                    <div className="space-y-1.5">
+                      {[...aiAnalysis.anomalies]
+                        .sort((a, b) => ['high','medium','low'].indexOf(a.severity) - ['high','medium','low'].indexOf(b.severity))
+                        .map((anomaly, i) => (
+                          <div key={i} className={`flex items-start gap-2.5 p-2.5 rounded-lg border ${SEVERITY_COLORS[anomaly.severity] || SEVERITY_COLORS.low}`}>
+                            <div className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${SEVERITY_DOT[anomaly.severity] || SEVERITY_DOT.low}`} />
+                            <div className="min-w-0">
+                              {anomaly.employee && (
+                                <p className="text-xs font-semibold truncate">{anomaly.employee}</p>
+                              )}
+                              <p className="text-xs">{anomaly.description}</p>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -193,60 +318,97 @@ export default function MealDeductions() {
               ) : (
                 <div className="space-y-2">
                   {/* Column headers */}
-                  <div className="grid grid-cols-12 gap-3 px-4 py-2">
+                  <div className={`grid gap-3 px-4 py-2 ${isRocketRez ? 'grid-cols-12' : 'grid-cols-12'}`}>
                     <div className="col-span-5 text-xs font-semibold text-gray-400 uppercase tracking-wide">Employee</div>
-                    <div className="col-span-3 text-xs font-semibold text-gray-400 uppercase tracking-wide text-right">Transactions</div>
-                    <div className="col-span-3 text-xs font-semibold text-gray-400 uppercase tracking-wide text-right">Total</div>
+                    <div className="col-span-2 text-xs font-semibold text-gray-400 uppercase tracking-wide text-right">Items</div>
+                    {isRocketRez ? (
+                      <>
+                        <div className="col-span-2 text-xs font-semibold text-gray-400 uppercase tracking-wide text-right">Total</div>
+                        <div className="col-span-2 text-xs font-semibold text-teal-500 uppercase tracking-wide text-right">Payroll</div>
+                      </>
+                    ) : (
+                      <div className="col-span-4 text-xs font-semibold text-gray-400 uppercase tracking-wide text-right">Total</div>
+                    )}
                     <div className="col-span-1" />
                   </div>
 
-                  {breakdown?.map(b => (
-                    <div key={b.employeeName} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                      <button
-                        onClick={() => toggleExpand(b.employeeName)}
-                        className="w-full grid grid-cols-12 gap-3 px-4 py-3.5 hover:bg-gray-50 transition-colors text-left"
-                      >
-                        <div className="col-span-5 flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-full bg-brand/10 flex items-center justify-center text-xs font-bold text-brand shrink-0">
-                            {b.employeeName.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
+                  {breakdown?.map(b => {
+                    const hasNonPayroll = isRocketRez && parseFloat(b.totalAmount) !== parseFloat(b.payrollTotal);
+                    return (
+                      <div key={b.employeeName} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                        <button
+                          onClick={() => toggleExpand(b.employeeName)}
+                          className="w-full grid grid-cols-12 gap-3 px-4 py-3.5 hover:bg-gray-50 transition-colors text-left"
+                        >
+                          <div className="col-span-5 flex items-center gap-2.5">
+                            <div className="w-7 h-7 rounded-full bg-brand/10 flex items-center justify-center text-xs font-bold text-brand shrink-0">
+                              {b.employeeName.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
+                            </div>
+                            <span className="text-sm font-semibold text-gray-900 truncate">{b.employeeName}</span>
                           </div>
-                          <span className="text-sm font-semibold text-gray-900 truncate">{b.employeeName}</span>
-                        </div>
-                        <div className="col-span-3 flex items-center justify-end">
-                          <span className="text-sm text-gray-600">{b.transactionCount}</span>
-                        </div>
-                        <div className="col-span-3 flex items-center justify-end">
-                          <span className="text-sm font-bold text-gray-900">{fmtCurrency(b.totalAmount)}</span>
-                        </div>
-                        <div className="col-span-1 flex items-center justify-end">
-                          <ChevronIcon expanded={expanded[b.employeeName]} />
-                        </div>
-                      </button>
+                          <div className="col-span-2 flex items-center justify-end">
+                            <span className="text-sm text-gray-600">{b.transactionCount}</span>
+                          </div>
+                          {isRocketRez ? (
+                            <>
+                              <div className="col-span-2 flex items-center justify-end">
+                                <span className={`text-sm font-medium ${hasNonPayroll ? 'text-gray-500' : 'text-gray-900'}`}>
+                                  {fmtCurrency(b.totalAmount)}
+                                </span>
+                              </div>
+                              <div className="col-span-2 flex items-center justify-end">
+                                <span className="text-sm font-bold text-teal-700">
+                                  {fmtCurrency(b.payrollTotal)}
+                                </span>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="col-span-4 flex items-center justify-end">
+                              <span className="text-sm font-bold text-gray-900">{fmtCurrency(b.totalAmount)}</span>
+                            </div>
+                          )}
+                          <div className="col-span-1 flex items-center justify-end">
+                            <ChevronIcon expanded={expanded[b.employeeName]} />
+                          </div>
+                        </button>
 
-                      {expanded[b.employeeName] && b.transactions?.length > 0 && (
-                        <div className="border-t border-gray-100 bg-gray-50">
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="border-b border-gray-200">
-                                <th className="px-4 py-2 text-left font-semibold text-gray-400 uppercase tracking-wide">Date</th>
-                                <th className="px-4 py-2 text-left font-semibold text-gray-400 uppercase tracking-wide">Description</th>
-                                <th className="px-4 py-2 text-right font-semibold text-gray-400 uppercase tracking-wide">Amount</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {b.transactions.map((t, i) => (
-                                <tr key={i} className="border-b border-gray-100 last:border-0">
-                                  <td className="px-4 py-2 text-gray-600 whitespace-nowrap">{t.date ? fmtDate(t.date) : '—'}</td>
-                                  <td className="px-4 py-2 text-gray-700">{t.description || '—'}</td>
-                                  <td className="px-4 py-2 text-right font-medium text-gray-900">{fmtCurrency(t.amount)}</td>
+                        {expanded[b.employeeName] && b.transactions?.length > 0 && (
+                          <div className="border-t border-gray-100 bg-gray-50">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="border-b border-gray-200">
+                                  <th className="px-4 py-2 text-left font-semibold text-gray-400 uppercase tracking-wide">Date</th>
+                                  <th className="px-4 py-2 text-left font-semibold text-gray-400 uppercase tracking-wide">Description</th>
+                                  {isRocketRez && (
+                                    <th className="px-4 py-2 text-left font-semibold text-gray-400 uppercase tracking-wide">Method</th>
+                                  )}
+                                  <th className="px-4 py-2 text-right font-semibold text-gray-400 uppercase tracking-wide">Amount</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                              </thead>
+                              <tbody>
+                                {b.transactions.map((t, i) => (
+                                  <tr key={i} className="border-b border-gray-100 last:border-0">
+                                    <td className="px-4 py-2 text-gray-600 whitespace-nowrap">{t.date ? fmtDate(t.date) : '—'}</td>
+                                    <td className="px-4 py-2 text-gray-700">{t.description || '—'}</td>
+                                    {isRocketRez && (
+                                      <td className="px-4 py-2">
+                                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${METHOD_COLORS[t.paymentMethod] || METHOD_COLORS.other}`}>
+                                          {METHOD_LABEL[t.paymentMethod] || t.paymentMethod}
+                                        </span>
+                                      </td>
+                                    )}
+                                    <td className={`px-4 py-2 text-right font-medium ${t.paymentMethod === 'comp' ? 'text-purple-600' : 'text-gray-900'}`}>
+                                      {t.paymentMethod === 'comp' ? 'Comp' : fmtCurrency(t.amount)}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -274,7 +436,6 @@ function UploadModal({ onClose, onUploaded }) {
   const [uploading, setUploading]   = useState(false);
   const [error, setError]           = useState('');
 
-  // Column mapping state — only shown when server can't auto-detect
   const [needsMapping, setNeedsMapping] = useState(false);
   const [headers, setHeaders]           = useState([]);
   const [employeeCol, setEmployeeCol]   = useState('');
@@ -314,11 +475,11 @@ function UploadModal({ onClose, onUploaded }) {
       }
       const { data } = await api.post('/hr/meal-deductions/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 30000, // AI analysis may take a few seconds
       });
       if (data.needsMapping) {
         setHeaders(data.headers);
         setNeedsMapping(true);
-        // Pre-select any detected columns
         if (data.detected?.employeeCol) setEmployeeCol(data.detected.employeeCol);
         if (data.detected?.amountCol)   setAmountCol(data.detected.amountCol);
         if (data.detected?.dateCol)     setDateCol(data.detected.dateCol);
@@ -347,11 +508,10 @@ function UploadModal({ onClose, onUploaded }) {
     >
       <div className="w-full max-w-md mx-4 bg-white rounded-2xl shadow-2xl overflow-hidden">
 
-        {/* Header */}
         <div className="bg-brand px-6 py-5 flex items-center justify-between">
           <div>
             <h2 className="text-base font-bold text-white">Upload Meal Deduction Report</h2>
-            <p className="text-xs text-white/70 mt-0.5">CSV format · max 5 MB</p>
+            <p className="text-xs text-white/70 mt-0.5">CSV format · Rocket Rez reports auto-detected</p>
           </div>
           <button
             onClick={onClose}
@@ -362,8 +522,6 @@ function UploadModal({ onClose, onUploaded }) {
         </div>
 
         <div className="p-6 space-y-5">
-
-          {/* Period label */}
           <div>
             <label className="label">Pay Period Label</label>
             <input
@@ -375,7 +533,6 @@ function UploadModal({ onClose, onUploaded }) {
             />
           </div>
 
-          {/* File picker */}
           <div>
             <label className="label">CSV File</label>
             <div
@@ -400,13 +557,12 @@ function UploadModal({ onClose, onUploaded }) {
                 <div>
                   <UploadIcon className="text-gray-400 mx-auto mb-2" />
                   <p className="text-sm text-gray-600">Click to select a CSV file</p>
-                  <p className="text-xs text-gray-400 mt-0.5">or drag and drop</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Rocket Rez reseller reports are detected automatically</p>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Column mapping — shown only when auto-detect fails */}
           {needsMapping && (
             <div className="space-y-4 border border-amber-200 bg-amber-50 rounded-xl p-4">
               <div className="flex items-start gap-2">
@@ -418,48 +574,31 @@ function UploadModal({ onClose, onUploaded }) {
                   </p>
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label text-amber-700">Employee Column *</label>
-                  <select
-                    className="field text-sm"
-                    value={employeeCol}
-                    onChange={e => setEmployeeCol(e.target.value)}
-                  >
+                  <select className="field text-sm" value={employeeCol} onChange={e => setEmployeeCol(e.target.value)}>
                     <option value="">— select —</option>
                     {headers.map(h => <option key={h} value={h}>{h}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="label text-amber-700">Amount Column *</label>
-                  <select
-                    className="field text-sm"
-                    value={amountCol}
-                    onChange={e => setAmountCol(e.target.value)}
-                  >
+                  <select className="field text-sm" value={amountCol} onChange={e => setAmountCol(e.target.value)}>
                     <option value="">— select —</option>
                     {headers.map(h => <option key={h} value={h}>{h}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="label text-amber-700">Date Column</label>
-                  <select
-                    className="field text-sm"
-                    value={dateCol}
-                    onChange={e => setDateCol(e.target.value)}
-                  >
+                  <select className="field text-sm" value={dateCol} onChange={e => setDateCol(e.target.value)}>
                     <option value="">— none —</option>
                     {headers.map(h => <option key={h} value={h}>{h}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="label text-amber-700">Description Column</label>
-                  <select
-                    className="field text-sm"
-                    value={descCol}
-                    onChange={e => setDescCol(e.target.value)}
-                  >
+                  <select className="field text-sm" value={descCol} onChange={e => setDescCol(e.target.value)}>
                     <option value="">— none —</option>
                     {headers.map(h => <option key={h} value={h}>{h}</option>)}
                   </select>
@@ -468,29 +607,24 @@ function UploadModal({ onClose, onUploaded }) {
             </div>
           )}
 
-          {error && (
-            <p className="text-xs text-red-500 font-semibold">{error}</p>
+          {uploading && (
+            <div className="flex items-center gap-2 text-xs text-gray-500 bg-gray-50 rounded-lg p-3">
+              <Spinner />
+              <span>Processing report and running AI analysis…</span>
+            </div>
           )}
 
+          {error && <p className="text-xs text-red-500 font-semibold">{error}</p>}
+
           <div className="flex gap-3 pt-1">
-            <button type="button" onClick={onClose} className="btn-ghost flex-1">
-              Cancel
-            </button>
+            <button type="button" onClick={onClose} className="btn-ghost flex-1">Cancel</button>
             {needsMapping ? (
-              <button
-                onClick={handleConfirmMapping}
-                disabled={uploading}
-                className="btn-primary flex-1"
-              >
+              <button onClick={handleConfirmMapping} disabled={uploading} className="btn-primary flex-1">
                 {uploading ? <><Spinner /> Processing…</> : 'Import Report'}
               </button>
             ) : (
-              <button
-                onClick={() => handleUpload()}
-                disabled={uploading || !file}
-                className="btn-primary flex-1"
-              >
-                {uploading ? <><Spinner /> Uploading…</> : 'Upload & Process'}
+              <button onClick={() => handleUpload()} disabled={uploading || !file} className="btn-primary flex-1">
+                {uploading ? <><Spinner /> Analyzing…</> : 'Upload & Analyze'}
               </button>
             )}
           </div>
@@ -587,6 +721,24 @@ function AlertIcon({ className = '' }) {
       <circle cx="12" cy="12" r="10" />
       <line x1="12" y1="8" x2="12" y2="12" />
       <line x1="12" y1="16" x2="12.01" y2="16" />
+    </svg>
+  );
+}
+
+function SparkleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5 text-teal-600">
+      <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" />
+    </svg>
+  );
+}
+
+function InfoIcon({ className = '' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={`w-3.5 h-3.5 ${className}`}>
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="16" x2="12" y2="12" />
+      <line x1="12" y1="8" x2="12.01" y2="8" />
     </svg>
   );
 }

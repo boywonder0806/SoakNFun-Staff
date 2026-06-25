@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import multer from 'multer';
+import Anthropic from '@anthropic-ai/sdk';
 import pool from '../db/index.js';
-import { requireSysAdmin, requireHR, requireHRManager } from '../middleware/auth.js';
+import { requireSysAdmin, requireHR } from '../middleware/auth.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -24,6 +25,10 @@ pool.query(`CREATE TABLE IF NOT EXISTS meal_deduction_uploads (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`).catch(e => console.error('meal_deduction_uploads migration:', e.message));
 
+pool.query(`ALTER TABLE meal_deduction_uploads ADD COLUMN IF NOT EXISTS report_type TEXT`).catch(() => {});
+pool.query(`ALTER TABLE meal_deduction_uploads ADD COLUMN IF NOT EXISTS payroll_total NUMERIC(10,2) NOT NULL DEFAULT 0`).catch(() => {});
+pool.query(`ALTER TABLE meal_deduction_uploads ADD COLUMN IF NOT EXISTS ai_analysis JSONB`).catch(() => {});
+
 pool.query(`CREATE TABLE IF NOT EXISTS meal_deductions (
   id               SERIAL PRIMARY KEY,
   upload_id        INTEGER NOT NULL REFERENCES meal_deduction_uploads(id) ON DELETE CASCADE,
@@ -33,6 +38,9 @@ pool.query(`CREATE TABLE IF NOT EXISTS meal_deductions (
   amount           NUMERIC(10,2) NOT NULL DEFAULT 0,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`).catch(e => console.error('meal_deductions migration:', e.message));
+
+pool.query(`ALTER TABLE meal_deductions ADD COLUMN IF NOT EXISTS payment_method TEXT`).catch(() => {});
+pool.query(`ALTER TABLE meal_deductions ADD COLUMN IF NOT EXISTS order_id TEXT`).catch(() => {});
 
 // ── CSV helpers ───────────────────────────────────────────────────────────────
 
@@ -106,6 +114,144 @@ function parseDate(str) {
   return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
 
+// ── Rocket Rez report parsing ─────────────────────────────────────────────────
+
+// Detected by presence of these specific column names
+function isRocketRezFormat(headers) {
+  return headers.includes('Grouping Header') &&
+         headers.includes('PaymentHistory') &&
+         headers.includes('Rate/ProductName');
+}
+
+// PaymentHistory format: "MM/DD/YYYY  $AMOUNT        BB - METHOD"
+function parsePaymentMethod(paymentHistory) {
+  if (!paymentHistory?.trim()) return 'comp';
+  const lower = paymentHistory.toLowerCase();
+  if (lower.includes('payroll deduction')) return 'payroll_deduction';
+  if (lower.includes('stripe'))            return 'stripe';
+  if (lower.includes('cash'))              return 'cash';
+  if (lower.includes('credit'))            return 'credit';
+  return 'other';
+}
+
+function parseRocketRezReport(rows) {
+  const deductions = [];
+  for (const row of rows) {
+    const rawName = row['Grouping Header']?.trim();
+    // Only process rows that have both an employee name and a transaction date
+    if (!rawName || !row['EventDate']?.trim()) continue;
+    // Strip any "(XX) " prefix like "(BB) "
+    const employeeName = rawName.replace(/^\([^)]+\)\s*/i, '').trim();
+    if (!employeeName) continue;
+
+    const amount      = parseAmount(row['textBox18']);
+    const date        = parseDate(row['EventDate']);
+    // Strip "(BB Employee)" / "(Employee)" suffixes from item names
+    const description = (row['Rate/ProductName'] || '')
+      .replace(/\s*\([^)]*employee[^)]*\)\s*/gi, '').trim() || null;
+    const paymentMethod = parsePaymentMethod(row['PaymentHistory']);
+    // The actual order ID lives in textBox6, not the OrderId column
+    const orderId = row['textBox6']?.trim() || null;
+
+    deductions.push({ employeeName, amount, date, description, paymentMethod, orderId });
+  }
+  return deductions;
+}
+
+// ── AI anomaly analysis ───────────────────────────────────────────────────────
+
+async function analyzeWithAI(deductions) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey || deductions.length === 0) return null;
+
+  // Build per-employee totals and item price variation map
+  const byEmployee = {};
+  const itemPriceMap = {};
+
+  for (const d of deductions) {
+    if (!byEmployee[d.employeeName]) {
+      byEmployee[d.employeeName] = { payrollTotal: 0, stripeTotal: 0, cashTotal: 0, compTotal: 0, otherTotal: 0, items: [] };
+    }
+    const g = byEmployee[d.employeeName];
+    if      (d.paymentMethod === 'payroll_deduction') g.payrollTotal += d.amount;
+    else if (d.paymentMethod === 'stripe')            g.stripeTotal  += d.amount;
+    else if (d.paymentMethod === 'cash')              g.cashTotal    += d.amount;
+    else if (d.paymentMethod === 'comp')              g.compTotal    += d.amount;
+    else                                              g.otherTotal   += d.amount;
+    g.items.push({ item: d.description, amount: d.amount, method: d.paymentMethod });
+
+    if (d.description && d.amount > 0) {
+      if (!itemPriceMap[d.description]) itemPriceMap[d.description] = new Set();
+      itemPriceMap[d.description].add(+d.amount.toFixed(2));
+    }
+  }
+
+  const employeeSummaries = Object.entries(byEmployee).map(([name, g]) => ({
+    name,
+    payrollDeduction: +g.payrollTotal.toFixed(2),
+    paidViaStripe: +g.stripeTotal.toFixed(2),
+    paidViaCash: +g.cashTotal.toFixed(2),
+    comped: +g.compTotal.toFixed(2),
+    itemCount: g.items.length,
+    items: g.items,
+  }));
+
+  const priceVariations = Object.entries(itemPriceMap)
+    .filter(([, set]) => set.size > 1)
+    .map(([item, set]) => ({ item, prices: [...set].sort((a, b) => a - b) }));
+
+  const prompt = `You are an HR analyst reviewing employee meal purchase records from a waterpark. Analyze for anomalies.
+
+EMPLOYEE SUMMARIES (${employeeSummaries.length} employees, ${deductions.length} transactions):
+${JSON.stringify(employeeSummaries, null, 2)}
+
+MENU ITEM PRICE VARIATIONS (same item seen at different prices):
+${priceVariations.length ? JSON.stringify(priceVariations, null, 2) : 'None detected'}
+
+Payment method key:
+- payroll_deduction = will be deducted from paycheck
+- stripe = employee already paid by credit card (do NOT also deduct from payroll)
+- cash = employee already paid in cash (do NOT also deduct from payroll)
+- comp = $0 charge / free item (needs manager authorization)
+
+Identify and flag:
+1. Employees with payroll deductions significantly higher than the median (over-purchasing)
+2. Price inconsistencies for the same menu item across employees
+3. $0 comp items that need manager justification (who authorized a free item?)
+4. Employees who paid via Stripe or Cash (important: do NOT deduct from payroll — they already paid)
+5. Any other patterns worth HR attention
+
+Reply ONLY with valid JSON, no markdown, no explanation outside the JSON:
+{
+  "summary": "1-2 sentence overview of key findings",
+  "anomalies": [
+    {
+      "type": "high_total|price_inconsistency|comp_item|already_paid|other",
+      "employee": "Employee Name or null for report-level",
+      "description": "Clear, concise description of the issue",
+      "severity": "low|medium|high"
+    }
+  ],
+  "payrollDeductionNote": "Brief note about payroll vs non-payroll breakdown in this report"
+}`;
+
+  try {
+    const client = new Anthropic({ apiKey });
+    const msg = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const text = msg.content[0]?.type === 'text' ? msg.content[0].text : '';
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) return JSON.parse(match[0]);
+    return null;
+  } catch (err) {
+    console.error('AI analysis error:', err.message);
+    return null;
+  }
+}
+
 // ── Access management ─────────────────────────────────────────────────────────
 router.patch('/access/:id', requireSysAdmin, async (req, res) => {
   const { access } = req.body;
@@ -135,6 +281,8 @@ router.get('/meal-deductions', requireHR, async (req, res) => {
       `SELECT mdu.id, mdu.filename, mdu.period_label AS "periodLabel",
               mdu.row_count AS "rowCount",
               mdu.total_amount AS "totalAmount",
+              COALESCE(mdu.payroll_total, mdu.total_amount) AS "payrollTotal",
+              mdu.report_type AS "reportType",
               mdu.employee_col AS "employeeCol",
               mdu.amount_col AS "amountCol",
               mdu.created_at AS "createdAt",
@@ -154,8 +302,13 @@ router.get('/meal-deductions/:id', requireHR, async (req, res) => {
   try {
     const { rows: [upload] } = await pool.query(
       `SELECT mdu.id, mdu.filename, mdu.period_label AS "periodLabel",
-              mdu.row_count AS "rowCount", mdu.total_amount AS "totalAmount",
-              mdu.created_at AS "createdAt", e.name AS "uploadedByName"
+              mdu.row_count AS "rowCount",
+              mdu.total_amount AS "totalAmount",
+              COALESCE(mdu.payroll_total, mdu.total_amount) AS "payrollTotal",
+              mdu.report_type AS "reportType",
+              mdu.ai_analysis AS "aiAnalysis",
+              mdu.created_at AS "createdAt",
+              e.name AS "uploadedByName"
        FROM meal_deduction_uploads mdu
        LEFT JOIN employees e ON mdu.uploaded_by = e.id
        WHERE mdu.id = $1`,
@@ -167,27 +320,48 @@ router.get('/meal-deductions/:id', requireHR, async (req, res) => {
       `SELECT id, employee_name AS "employeeName",
               transaction_date AS "date",
               item_description AS "description",
-              amount
+              amount,
+              COALESCE(payment_method, 'payroll_deduction') AS "paymentMethod",
+              order_id AS "orderId"
        FROM meal_deductions
        WHERE upload_id = $1
        ORDER BY employee_name, transaction_date NULLS LAST, id`,
       [id]
     );
 
-    // Group by employee
+    // Group by employee, compute payroll subtotal per employee
     const grouped = {};
     for (const d of deductions) {
       if (!grouped[d.employeeName]) {
-        grouped[d.employeeName] = { employeeName: d.employeeName, transactionCount: 0, totalAmount: 0, transactions: [] };
+        grouped[d.employeeName] = {
+          employeeName: d.employeeName,
+          transactionCount: 0,
+          totalAmount: 0,
+          payrollTotal: 0,
+          transactions: [],
+        };
       }
-      grouped[d.employeeName].transactionCount++;
-      grouped[d.employeeName].totalAmount += parseFloat(d.amount);
-      grouped[d.employeeName].transactions.push({ id: d.id, date: d.date, description: d.description, amount: d.amount });
+      const g = grouped[d.employeeName];
+      g.transactionCount++;
+      g.totalAmount += parseFloat(d.amount);
+      if (d.paymentMethod === 'payroll_deduction') g.payrollTotal += parseFloat(d.amount);
+      g.transactions.push({
+        id: d.id,
+        date: d.date,
+        description: d.description,
+        amount: d.amount,
+        paymentMethod: d.paymentMethod,
+        orderId: d.orderId,
+      });
     }
 
     const breakdown = Object.values(grouped)
       .sort((a, b) => a.employeeName.localeCompare(b.employeeName))
-      .map(g => ({ ...g, totalAmount: g.totalAmount.toFixed(2) }));
+      .map(g => ({
+        ...g,
+        totalAmount:   g.totalAmount.toFixed(2),
+        payrollTotal:  g.payrollTotal.toFixed(2),
+      }));
 
     res.json({ upload, breakdown });
   } catch (err) {
@@ -205,71 +379,110 @@ router.post('/meal-deductions/upload', requireHR, upload.single('file'), async (
   }
 
   const { headers, rows } = parsed;
-
-  // Resolve columns — prefer explicit params, fall back to auto-detect
-  const employeeCol = req.body.employeeCol || detectCol(headers, EMPLOYEE_PATTERNS);
-  const amountCol   = req.body.amountCol   || detectCol(headers, AMOUNT_PATTERNS);
-  const dateCol     = req.body.dateCol     || detectCol(headers, DATE_PATTERNS);
-  const descCol     = req.body.descCol     || detectCol(headers, DESC_PATTERNS);
-
-  if (!employeeCol || !amountCol) {
-    return res.json({
-      needsMapping: true,
-      headers,
-      detected: {
-        employeeCol: employeeCol || null,
-        amountCol:   amountCol   || null,
-        dateCol:     dateCol     || null,
-        descCol:     descCol     || null,
-      },
-    });
-  }
-
-  // Process rows
   const periodLabel = req.body.periodLabel?.trim() || null;
   const filename    = req.file.originalname;
 
-  let totalAmount = 0;
-  const deductions = [];
+  let deductions = [];
+  let reportType = 'generic';
 
-  for (const row of rows) {
-    const empName = row[employeeCol]?.trim();
-    if (!empName) continue;
-    const amount = parseAmount(row[amountCol]);
-    if (amount === 0 && !row[amountCol]?.trim()) continue;
-    const date = dateCol ? parseDate(row[dateCol]) : null;
-    const desc = descCol ? row[descCol]?.trim() || null : null;
-    totalAmount += amount;
-    deductions.push({ employeeName: empName, amount, date, description: desc });
+  // ── Rocket Rez path ─────────────────────────────────────────────────────────
+  if (isRocketRezFormat(headers)) {
+    reportType = 'rocket_rez';
+    deductions = parseRocketRezReport(rows);
+    if (deductions.length === 0) {
+      return res.status(400).json({ error: 'No valid transactions found in Rocket Rez report.' });
+    }
   }
 
-  if (deductions.length === 0) {
-    return res.status(400).json({ error: 'No valid deduction rows found. Check that the Employee and Amount columns are correct.' });
+  // ── Generic CSV path ────────────────────────────────────────────────────────
+  else {
+    const employeeCol = req.body.employeeCol || detectCol(headers, EMPLOYEE_PATTERNS);
+    const amountCol   = req.body.amountCol   || detectCol(headers, AMOUNT_PATTERNS);
+    const dateCol     = req.body.dateCol     || detectCol(headers, DATE_PATTERNS);
+    const descCol     = req.body.descCol     || detectCol(headers, DESC_PATTERNS);
+
+    if (!employeeCol || !amountCol) {
+      return res.json({
+        needsMapping: true,
+        headers,
+        detected: {
+          employeeCol: employeeCol || null,
+          amountCol:   amountCol   || null,
+          dateCol:     dateCol     || null,
+          descCol:     descCol     || null,
+        },
+      });
+    }
+
+    for (const row of rows) {
+      const empName = row[employeeCol]?.trim();
+      if (!empName) continue;
+      const amount = parseAmount(row[amountCol]);
+      if (amount === 0 && !row[amountCol]?.trim()) continue;
+      const date = dateCol ? parseDate(row[dateCol]) : null;
+      const desc = descCol ? row[descCol]?.trim() || null : null;
+      deductions.push({ employeeName: empName, amount, date, description: desc, paymentMethod: 'payroll_deduction', orderId: null });
+    }
+
+    if (deductions.length === 0) {
+      return res.status(400).json({ error: 'No valid deduction rows found. Check that the Employee and Amount columns are correct.' });
+    }
   }
 
+  const totalAmount   = deductions.reduce((s, d) => s + d.amount, 0);
+  const payrollTotal  = deductions.reduce((s, d) => s + (d.paymentMethod === 'payroll_deduction' ? d.amount : 0), 0);
+
+  // ── AI analysis (best-effort, non-blocking) ──────────────────────────────────
+  let aiAnalysis = null;
+  try {
+    aiAnalysis = await analyzeWithAI(deductions);
+  } catch (err) {
+    console.error('AI analysis skipped:', err.message);
+  }
+
+  // ── Persist ──────────────────────────────────────────────────────────────────
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { rows: [uploadRow] } = await client.query(
       `INSERT INTO meal_deduction_uploads
-         (uploaded_by, filename, period_label, row_count, total_amount, employee_col, amount_col, date_col, desc_col)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING id, filename, period_label AS "periodLabel", row_count AS "rowCount",
-                 total_amount AS "totalAmount", created_at AS "createdAt"`,
-      [req.user.id, filename, periodLabel, deductions.length, totalAmount.toFixed(2),
-       employeeCol, amountCol, dateCol || null, descCol || null]
+         (uploaded_by, filename, period_label, row_count, total_amount, payroll_total,
+          report_type, ai_analysis,
+          employee_col, amount_col, date_col, desc_col)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       RETURNING id, filename,
+                 period_label AS "periodLabel",
+                 row_count AS "rowCount",
+                 total_amount AS "totalAmount",
+                 COALESCE(payroll_total, total_amount) AS "payrollTotal",
+                 report_type AS "reportType",
+                 ai_analysis AS "aiAnalysis",
+                 created_at AS "createdAt"`,
+      [
+        req.user.id, filename, periodLabel, deductions.length,
+        totalAmount.toFixed(2), payrollTotal.toFixed(2),
+        reportType, aiAnalysis ? JSON.stringify(aiAnalysis) : null,
+        reportType === 'generic' ? (req.body.employeeCol || null) : null,
+        reportType === 'generic' ? (req.body.amountCol   || null) : null,
+        reportType === 'generic' ? (req.body.dateCol     || null) : null,
+        reportType === 'generic' ? (req.body.descCol     || null) : null,
+      ]
     );
+
     for (const d of deductions) {
       await client.query(
-        `INSERT INTO meal_deductions (upload_id, employee_name, transaction_date, item_description, amount)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [uploadRow.id, d.employeeName, d.date, d.description, d.amount]
+        `INSERT INTO meal_deductions
+           (upload_id, employee_name, transaction_date, item_description, amount, payment_method, order_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [uploadRow.id, d.employeeName, d.date, d.description, d.amount,
+         d.paymentMethod || 'payroll_deduction', d.orderId || null]
       );
     }
     await client.query('COMMIT');
     res.status(201).json({ upload: uploadRow });
   } catch (err) {
     await client.query('ROLLBACK');
+    console.error('Upload error:', err.message);
     res.status(500).json({ error: 'Failed to save deduction data.' });
   } finally {
     client.release();
