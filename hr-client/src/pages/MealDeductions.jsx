@@ -680,7 +680,7 @@ export default function MealDeductions() {
                                     {isRocketRez && (
                                       <td className="px-3 py-3">
                                         <button
-                                          onClick={() => setFootageTarget({ transaction: t, employeeName: b.employeeName })}
+                                          onClick={() => setFootageTarget({ transaction: t, employeeName: b.employeeName, park: b.park })}
                                           className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-gray-600 hover:bg-gray-200 transition-colors"
                                           title="View camera footage"
                                         >
@@ -721,6 +721,7 @@ export default function MealDeductions() {
         <FootageModal
           transaction={footageTarget.transaction}
           employeeName={footageTarget.employeeName}
+          park={footageTarget.park}
           onClose={() => setFootageTarget(null)}
         />
       )}
@@ -1651,15 +1652,69 @@ function UploadModal({ onClose, onUploaded }) {
 
 // ── Footage Modal ─────────────────────────────────────────────────────────────
 
-function FootageModal({ transaction, employeeName, onClose }) {
+function FootageModal({ transaction, employeeName, park, onClose }) {
   const backdropRef = useRef(null);
-  const { date } = transaction;
+  const { date, description } = transaction;
+
+  const [cameras,       setCameras]       = useState([]);
+  const [configuredCams, setConfiguredCams] = useState({});
+  const [selectedCam,   setSelectedCam]   = useState('');
+  const [loadingCams,   setLoadingCams]   = useState(true);
+  const [camError,      setCamError]      = useState(null);
+  const [windowMin,     setWindowMin]     = useState(5);
+  const [loading,       setLoading]       = useState(false);
+  const [videoUrl,      setVideoUrl]      = useState(null);
+  const [footageError,  setFootageError]  = useState(null);
+
+  const txMs   = date ? new Date(date).getTime() : null;
+  const hasTime = !!fmtTime(date);
+
+  useEffect(() => {
+    api.get('/hr/protect/cameras')
+      .then(r => {
+        const cams = r.data.cameras || [];
+        const configured = r.data.configuredCameras || {};
+        setCameras(cams);
+        setConfiguredCams(configured);
+        const parkCams = configured[park] || [];
+        if (parkCams.length === 1) setSelectedCam(parkCams[0]);
+        else if (parkCams.length === 0 && cams.length === 1) setSelectedCam(cams[0].id);
+      })
+      .catch(() => setCamError('Cannot reach camera system — check server connection'))
+      .finally(() => setLoadingCams(false));
+  }, []);
+
+  const parkCamIds     = configuredCams[park] || [];
+  const displayCameras = parkCamIds.length > 0
+    ? cameras.filter(c => parkCamIds.includes(c.id))
+    : cameras;
+
+  async function loadFootage() {
+    if (!selectedCam || !txMs) return;
+    setFootageError(null);
+    setVideoUrl(null);
+    setLoading(true);
+    try {
+      const startMs = txMs - windowMin * 60 * 1000;
+      const endMs   = txMs + windowMin * 60 * 1000;
+      const r = await api.post('/hr/protect/footage-token', { cameraId: selectedCam, startMs, endMs });
+      setVideoUrl(`/api/hr/protect/footage-stream?token=${r.data.token}`);
+    } catch (err) {
+      setFootageError(err.response?.data?.error || 'Failed to load footage');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const startTime = txMs ? new Date(txMs - windowMin * 60 * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
+  const endTime   = txMs ? new Date(txMs + windowMin * 60 * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
 
   return (
     <div ref={backdropRef} onClick={e => e.target === backdropRef.current && onClose()}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
     >
-      <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden">
+      <div className={`w-full ${videoUrl ? 'max-w-2xl' : 'max-w-md'} bg-white rounded-2xl shadow-2xl overflow-hidden transition-all`}>
+        {/* Header */}
         <div className="bg-gray-900 px-5 py-4 flex items-center justify-between">
           <div>
             <p className="text-sm font-bold text-white flex items-center gap-2">
@@ -1667,24 +1722,88 @@ function FootageModal({ transaction, employeeName, onClose }) {
             </p>
             <p className="text-xs text-gray-400 mt-0.5">
               {employeeName} · {fmtDate(date)}
-              {transaction.description && ` · ${transaction.description}`}
+              {hasTime && ` · ${fmtTime(date)}`}
+              {description && ` · ${description}`}
             </p>
           </div>
           <button onClick={onClose} className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors">
             <CloseIcon />
           </button>
         </div>
-        <div className="p-8 flex flex-col items-center text-center gap-3">
-          <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">
-            <CameraIcon />
+
+        {/* Video player */}
+        {videoUrl && (
+          <div className="bg-black">
+            <video key={videoUrl} controls autoPlay className="w-full max-h-72">
+              <source src={videoUrl} type="video/mp4" />
+            </video>
           </div>
+        )}
+
+        <div className="p-5 space-y-4">
+          {/* No time warning */}
+          {!hasTime && (
+            <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
+              <AlertIcon className="text-amber-500 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-700 leading-relaxed">No purchase time was recorded for this transaction — the time window below is centered on midnight.</p>
+            </div>
+          )}
+
+          {/* Camera selector */}
           <div>
-            <p className="text-sm font-semibold text-gray-800">Camera Footage</p>
-            <p className="text-xs font-semibold text-teal-600 mt-0.5">Coming Soon</p>
+            <label className="label">Camera</label>
+            {loadingCams ? (
+              <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
+                <Spinner /> Loading cameras…
+              </div>
+            ) : camError ? (
+              <p className="text-xs text-red-500 bg-red-50 rounded-lg p-2">{camError}</p>
+            ) : displayCameras.length === 0 ? (
+              <p className="text-xs text-gray-500 bg-gray-50 rounded-lg p-2">No cameras found on the NVR.</p>
+            ) : (
+              <select value={selectedCam} onChange={e => setSelectedCam(e.target.value)} className="field text-sm">
+                <option value="">Select a camera…</option>
+                {displayCameras.map(c => (
+                  <option key={c.id} value={c.id} disabled={c.state !== 'CONNECTED'}>
+                    {c.name}{c.state !== 'CONNECTED' ? ' (offline)' : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+            {!loadingCams && !camError && parkCamIds.length === 0 && cameras.length > 0 && (
+              <p className="text-xs text-gray-400 mt-1">Tip: set <code>PROTECT_BB_CAMERA_IDS</code> / <code>PROTECT_GI_CAMERA_IDS</code> in .env to pre-filter by park.</p>
+            )}
           </div>
-          <p className="text-xs text-gray-500 max-w-xs leading-relaxed">
-            Direct footage playback from Unifi Protect will be available in an upcoming update.
-          </p>
+
+          {/* Time window */}
+          <div>
+            <label className="label">Time Window Around Purchase</label>
+            <div className="grid grid-cols-4 gap-2">
+              {[5, 10, 15, 30].map(m => (
+                <button key={m} onClick={() => setWindowMin(m)}
+                  className={`py-2 rounded-lg text-xs font-semibold border transition-colors
+                    ${windowMin === m ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}
+                >
+                  ±{m} min
+                </button>
+              ))}
+            </div>
+            {startTime && (
+              <p className="text-xs text-gray-400 mt-1.5">{startTime} – {endTime}</p>
+            )}
+          </div>
+
+          {footageError && (
+            <p className="text-xs text-red-500 bg-red-50 rounded-lg p-2">{footageError}</p>
+          )}
+
+          <button
+            onClick={loadFootage}
+            disabled={!selectedCam || loading || !txMs}
+            className="w-full py-2.5 rounded-xl bg-gray-900 text-white text-sm font-semibold disabled:opacity-40 hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
+          >
+            {loading ? <><Spinner /> Loading footage…</> : videoUrl ? 'Reload Footage' : 'Load Footage'}
+          </button>
         </div>
       </div>
     </div>
