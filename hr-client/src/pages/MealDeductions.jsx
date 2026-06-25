@@ -1387,7 +1387,7 @@ function PDFExportModal({ breakdown, uploadMeta, selected, isRocketRez, onClose 
               ].map(opt => (
                 <button
                   key={String(opt.id)}
-                  onClick={() => setSimpleView(opt.id)}
+                  onClick={() => { setSimpleView(opt.id); if (opt.id) setPayrollOnly(true); }}
                   className={`text-left p-3 rounded-xl border-2 transition-colors
                     ${simpleView === opt.id
                       ? 'border-rose-500 bg-rose-50'
@@ -1432,15 +1432,19 @@ function PDFExportModal({ breakdown, uploadMeta, selected, isRocketRez, onClose 
 
           {/* Payroll only */}
           {isRocketRez && (
-            <label className="flex items-start gap-3 cursor-pointer">
+            <label className={`flex items-start gap-3 ${simpleView ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}>
               <input
                 type="checkbox"
                 checked={payrollOnly}
+                disabled={simpleView}
                 onChange={e => setPayrollOnly(e.target.checked)}
-                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-brand focus:ring-brand"
+                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-brand focus:ring-brand disabled:cursor-not-allowed"
               />
               <div>
-                <p className="text-sm font-medium text-gray-800">Payroll deductions only</p>
+                <p className="text-sm font-medium text-gray-800">
+                  Payroll deductions only
+                  {simpleView && <span className="ml-2 text-xs font-normal text-rose-600">(required for Simple View)</span>}
+                </p>
                 <p className="text-xs text-gray-500 mt-0.5">Exclude employees who only paid with cash or credit card</p>
               </div>
             </label>
