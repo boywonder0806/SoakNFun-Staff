@@ -24,6 +24,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const allowedOrigins = [
   process.env.CLIENT_URL      || 'http://localhost:5173',
+  'https://www.bluebayoustaff.com',   // www variant — nginx serves both
   process.env.RECEPTION_URL   || 'http://localhost:5174',
   process.env.HR_URL          || 'http://localhost:5175',
 ];

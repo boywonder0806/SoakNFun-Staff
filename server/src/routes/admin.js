@@ -844,7 +844,10 @@ router.get('/sysadmin/users', requireSysAdmin, async (_req, res) => {
       `SELECT id, email, name, role, department, departments, position,
               avatar, phone, hire_date AS "hireDate", is_active AS "isActive", created_at AS "createdAt",
               photo_url AS "photoUrl", is_locked AS "isLocked",
-              COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess"
+              COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess",
+              COALESCE(is_reception_manager, FALSE) AS "isReceptionManager",
+              COALESCE(has_hr_access, FALSE) AS "hasHrAccess",
+              COALESCE(is_hr_manager, FALSE) AS "isHrManager"
        FROM employees WHERE role != 'crew_member' ORDER BY name`
     );
     res.json({ users: rows });
