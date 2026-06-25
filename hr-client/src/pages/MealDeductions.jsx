@@ -13,9 +13,9 @@ function fmtDate(iso) {
 
 const METHOD_LABEL = {
   payroll_deduction: 'Payroll',
-  stripe:            'Stripe',
+  stripe:            'Credit Card',
   cash:              'Cash',
-  credit:            'Credit',
+  credit:            'Credit Card',
   comp:              'Comp',
   other:             'Other',
 };

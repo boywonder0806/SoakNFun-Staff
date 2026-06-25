@@ -210,8 +210,8 @@ ${priceVariations.length ? JSON.stringify(priceVariations, null, 2) : 'None dete
 
 Payment method key:
 - payroll_deduction = will be deducted from paycheck
-- stripe = employee already paid by credit card (do NOT also deduct from payroll)
-- cash = employee already paid in cash (do NOT also deduct from payroll)
+- stripe = employee paid by credit card at the point of sale (do NOT also deduct from payroll)
+- cash = employee paid with cash at the point of sale (do NOT also deduct from payroll)
 - comp = $0 charge / free item (needs manager authorization)
 
 Identify and flag:
