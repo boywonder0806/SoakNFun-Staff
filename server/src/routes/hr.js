@@ -36,7 +36,7 @@ function nvrRequest(urlPath, { method = 'GET', body } = {}) {
       path:     url.pathname + url.search,
       method,
       headers: {
-        'X-API-Key': apiKey,
+        'X-API-KEY': apiKey,
         ...(buf ? { 'Content-Type': 'application/json', 'Content-Length': buf.length } : {}),
       },
       agent: nvrAgent,
@@ -651,7 +651,7 @@ router.get('/protect/cameras', requireHR, async (req, res) => {
   if (!configured) return res.json({ cameras: [], configured: false });
 
   try {
-    const nvrRes = await nvrRequest('/proxy/protect/api/cameras');
+    const nvrRes = await nvrRequest('/proxy/protect/integration/v1/cameras');
     let raw = '';
     for await (const chunk of nvrRes) raw += chunk;
     const all = JSON.parse(raw);
