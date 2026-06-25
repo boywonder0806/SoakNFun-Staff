@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import api from '../lib/api.js';
 
 function fmtCurrency(val) {
@@ -54,8 +56,9 @@ export default function MealDeductions() {
   const [breakdown, setBreakdown]   = useState(null);
   const [uploadMeta, setUploadMeta] = useState(null);
   const [loading, setLoading]       = useState(false);
-  const [showUpload, setShowUpload] = useState(false);
-  const [expanded, setExpanded]     = useState({});
+  const [showUpload, setShowUpload]   = useState(false);
+  const [showPDFModal, setShowPDFModal] = useState(false);
+  const [expanded, setExpanded]       = useState({});
   const [footageTarget, setFootageTarget] = useState(null);
 
   // Report selector dropdown
@@ -302,9 +305,14 @@ export default function MealDeductions() {
         </div>
 
         {breakdown && (
-          <button onClick={exportCSV} className="btn-ghost text-xs gap-1.5 py-2">
-            <DownloadIcon /> Export
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={exportCSV} className="btn-ghost text-xs gap-1.5 py-2">
+              <DownloadIcon /> CSV
+            </button>
+            <button onClick={() => setShowPDFModal(true)} className="btn-ghost text-xs gap-1.5 py-2 text-rose-600 hover:text-rose-700 border-rose-200 hover:border-rose-300 hover:bg-rose-50">
+              <PDFIcon /> PDF Report
+            </button>
+          </div>
         )}
 
         <button onClick={() => setShowUpload(true)} className="btn-primary text-xs px-4 py-2 gap-1.5 shrink-0">
@@ -670,6 +678,15 @@ export default function MealDeductions() {
       {showUpload && (
         <UploadModal onClose={() => setShowUpload(false)} onUploaded={handleUploaded} />
       )}
+      {showPDFModal && breakdown && uploadMeta && (
+        <PDFExportModal
+          breakdown={breakdown}
+          uploadMeta={uploadMeta}
+          selected={selected}
+          isRocketRez={isRocketRez}
+          onClose={() => setShowPDFModal(false)}
+        />
+      )}
       {footageTarget && (
         <FootageModal
           transaction={footageTarget.transaction}
@@ -735,6 +752,397 @@ function SortArrow({ dir }) {
         ? <path d="M5 15l7-7 7 7"/>
         : <path d="M19 9l-7 7-7-7"/>}
     </svg>
+  );
+}
+
+// ── PDF Export Modal ──────────────────────────────────────────────────────────
+
+const PDF_SORT_OPTIONS = [
+  { value: 'name-asc',     label: 'Employee Name (A → Z)' },
+  { value: 'name-desc',    label: 'Employee Name (Z → A)' },
+  { value: 'park-asc',     label: 'Park (BB first)' },
+  { value: 'park-desc',    label: 'Park (GI first)' },
+  { value: 'payroll-desc', label: 'Payroll Deduction (High → Low)' },
+  { value: 'payroll-asc',  label: 'Payroll Deduction (Low → High)' },
+  { value: 'total-desc',   label: 'Total Spent (High → Low)' },
+  { value: 'total-asc',    label: 'Total Spent (Low → High)' },
+  { value: 'items-desc',   label: 'Transactions (Most → Least)' },
+  { value: 'items-asc',    label: 'Transactions (Least → Most)' },
+];
+
+function sortBreakdown(breakdown, sortKey) {
+  const [col, dir] = sortKey.split('-');
+  const d = dir === 'asc' ? 1 : -1;
+  return [...breakdown].sort((a, b) => {
+    switch (col) {
+      case 'name':    return d * a.employeeName.localeCompare(b.employeeName);
+      case 'park':    return d * (a.park || 'ZZ').localeCompare(b.park || 'ZZ');
+      case 'payroll': return d * (parseFloat(a.payrollTotal || 0) - parseFloat(b.payrollTotal || 0));
+      case 'total':   return d * (parseFloat(a.totalAmount) - parseFloat(b.totalAmount));
+      case 'items':   return d * (a.transactionCount - b.transactionCount);
+      default:        return 0;
+    }
+  });
+}
+
+function PDFExportModal({ breakdown, uploadMeta, selected, isRocketRez, onClose }) {
+  const backdropRef = useRef(null);
+  const [sortKey,   setSortKey]   = useState('name-asc');
+  const [groupPark, setGroupPark] = useState(false);
+  const [payrollOnly, setPayrollOnly] = useState(false);
+  const [generating, setGenerating]  = useState(false);
+
+  const availableParks = useMemo(() => {
+    const s = new Set();
+    breakdown.forEach(b => (b.parks || []).forEach(p => s.add(p)));
+    return [...s].sort();
+  }, [breakdown]);
+
+  const isMultiPark = availableParks.length > 1;
+
+  const sortOptions = isRocketRez
+    ? PDF_SORT_OPTIONS
+    : PDF_SORT_OPTIONS.filter(o => !o.value.startsWith('park') && !o.value.startsWith('payroll'));
+
+  function generate() {
+    setGenerating(true);
+    try {
+      let rows = payrollOnly
+        ? breakdown.filter(b => parseFloat(b.payrollTotal || 0) > 0)
+        : breakdown;
+
+      if (groupPark && isMultiPark) {
+        rows = sortBreakdown(rows, 'park-asc');
+      } else {
+        rows = sortBreakdown(rows, sortKey);
+      }
+
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter' });
+      const W = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+
+      // ── Header bar ──
+      doc.setFillColor(13, 148, 136); // teal-600
+      doc.rect(0, 0, W, 22, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Blue Bayou Waterpark', 14, 10);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Payroll Deduction Report', 14, 16);
+
+      const generatedStr = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+      doc.setFontSize(8);
+      doc.text(`Generated ${generatedStr}`, W - 14, 16, { align: 'right' });
+
+      // ── Period + meta ──
+      doc.setTextColor(30, 30, 30);
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.text(selected?.periodLabel || 'Pay Period', 14, 32);
+
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 100, 100);
+      const metaParts = [
+        `${rows.length} employee${rows.length !== 1 ? 's' : ''}`,
+        `${selected?.rowCount ?? '—'} transactions`,
+        ...(payrollOnly ? ['Payroll deductions only'] : []),
+      ];
+      doc.text(metaParts.join('  ·  '), 14, 38);
+
+      // ── Summary stat boxes ──
+      const totalPayroll = rows.reduce((s, b) => s + parseFloat(b.payrollTotal || 0), 0);
+      const totalSpent   = rows.reduce((s, b) => s + parseFloat(b.totalAmount   || 0), 0);
+
+      const boxes = isRocketRez
+        ? [
+            { label: 'Total Employees', value: String(rows.length) },
+            { label: 'Payroll Deductions', value: '$' + totalPayroll.toFixed(2), accent: true },
+            { label: 'Total Spent',        value: '$' + totalSpent.toFixed(2) },
+          ]
+        : [
+            { label: 'Total Employees',  value: String(rows.length) },
+            { label: 'Total Deductions', value: '$' + totalSpent.toFixed(2), accent: true },
+          ];
+
+      const boxW = (W - 28 - (boxes.length - 1) * 4) / boxes.length;
+      boxes.forEach((box, i) => {
+        const x = 14 + i * (boxW + 4);
+        const fillRGB = box.accent ? [240, 253, 250] : [248, 248, 248];
+        const drawRGB = box.accent ? [153, 246, 228] : [229, 229, 229];
+        doc.setFillColor(...fillRGB);
+        doc.setDrawColor(...drawRGB);
+        doc.roundedRect(x, 43, boxW, 16, 2, 2, 'FD');
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        const textRGB = box.accent ? [15, 118, 110] : [30, 30, 30];
+        doc.setTextColor(...textRGB);
+        doc.text(box.value, x + boxW / 2, 52, { align: 'center' });
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(120, 120, 120);
+        doc.text(box.label, x + boxW / 2, 57, { align: 'center' });
+      });
+
+      // ── Per-park payroll breakdown (multi-park RR) ──
+      let yAfterSummary = 65;
+      if (isRocketRez && isMultiPark) {
+        const parkMap = {};
+        for (const b of rows) {
+          for (const t of b.transactions) {
+            if (t.paymentMethod !== 'payroll_deduction' || !t.park) continue;
+            if (!parkMap[t.park]) parkMap[t.park] = 0;
+            parkMap[t.park] += parseFloat(t.amount);
+          }
+        }
+        const parkEntries = Object.entries(parkMap).sort();
+        if (parkEntries.length > 1) {
+          doc.setFontSize(7.5);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(80, 80, 80);
+          doc.text('Park Breakdown:', 14, 63);
+          let px = 14;
+          parkEntries.forEach(([code, total]) => {
+            const label = `${PARK_LABEL[code] || code}: $${total.toFixed(2)} payroll`;
+            doc.setFontSize(7);
+            doc.setFont('helvetica', 'normal');
+            const tw = doc.getTextWidth(label) + 6;
+            const isBB = code === 'BB';
+            doc.setFillColor(...(isBB ? [224, 242, 254] : [209, 250, 240]));
+            doc.setDrawColor(...(isBB ? [186, 230, 253] : [110, 231, 197]));
+            doc.roundedRect(px, 65, tw, 7, 1.5, 1.5, 'FD');
+            doc.setTextColor(...(isBB ? [3, 105, 161] : [6, 95, 70]));
+            doc.text(label, px + 3, 70);
+            px += tw + 3;
+          });
+          yAfterSummary = 76;
+        }
+      }
+
+      // ── Table ──
+      const PARK_NAME = { BB: 'Blue Bayou', GI: 'Gulf Islands' };
+
+      function buildTableRows(data) {
+        return data.map(b => {
+          const row = [b.employeeName];
+          if (isRocketRez) {
+            row.push(PARK_NAME[b.park] || b.park || '—');
+            row.push(b.crossParkCount > 0 ? '⚠ Yes' : 'No');
+          }
+          row.push(String(b.transactionCount));
+          if (isRocketRez) row.push('$' + parseFloat(b.totalAmount).toFixed(2));
+          row.push('$' + parseFloat(isRocketRez ? (b.payrollTotal || 0) : b.totalAmount).toFixed(2));
+          return row;
+        });
+      }
+
+      const head = isRocketRez
+        ? [['Employee', 'Home Park', 'Cross-Park', 'Items', 'Total Spent', 'Payroll Deduction']]
+        : [['Employee', 'Items', 'Total Deduction']];
+
+      const colStyles = isRocketRez
+        ? {
+            0: { cellWidth: 52 },
+            1: { cellWidth: 32 },
+            2: { cellWidth: 22, halign: 'center' },
+            3: { cellWidth: 14, halign: 'right' },
+            4: { cellWidth: 28, halign: 'right' },
+            5: { cellWidth: 32, halign: 'right', fontStyle: 'bold', textColor: [15, 118, 110] },
+          }
+        : {
+            0: { cellWidth: 'auto' },
+            1: { cellWidth: 20, halign: 'right' },
+            2: { cellWidth: 40, halign: 'right', fontStyle: 'bold' },
+          };
+
+      if (groupPark && isMultiPark) {
+        const byPark = {};
+        for (const b of rows) {
+          const pk = b.park || 'Other';
+          if (!byPark[pk]) byPark[pk] = [];
+          byPark[pk].push(b);
+        }
+
+        let currentY = yAfterSummary;
+        const parkKeys = Object.keys(byPark).sort();
+
+        parkKeys.forEach((pk, pi) => {
+          const groupRows = sortBreakdown(byPark[pk], sortKey);
+          const groupPayroll = groupRows.reduce((s, b) => s + parseFloat(b.payrollTotal || 0), 0);
+
+          autoTable(doc, {
+            startY: currentY,
+            head: [[{
+              content: `${PARK_NAME[pk] || pk}  ·  ${groupRows.length} employee${groupRows.length !== 1 ? 's' : ''}  ·  $${groupPayroll.toFixed(2)} payroll`,
+              colSpan: head[0].length,
+              styles: {
+                fillColor: pk === 'BB' ? [224, 242, 254] : [209, 250, 229],
+                textColor: pk === 'BB' ? [3, 105, 161] : [6, 95, 70],
+                fontStyle: 'bold',
+                fontSize: 8,
+              },
+            }], ...head],
+            body: buildTableRows(groupRows),
+            columnStyles: colStyles,
+            headStyles: {
+              fillColor: [240, 240, 240],
+              textColor: [80, 80, 80],
+              fontSize: 7.5,
+              fontStyle: 'bold',
+            },
+            bodyStyles: { fontSize: 8, textColor: [40, 40, 40] },
+            alternateRowStyles: { fillColor: [250, 250, 250] },
+            margin: { left: 14, right: 14 },
+            didParseCell: (data) => {
+              if (data.section === 'body') {
+                const row = groupRows[data.row.index];
+                if (row?.crossParkCount > 0) {
+                  data.cell.styles.textColor = [185, 28, 28];
+                }
+              }
+            },
+          });
+
+          currentY = doc.lastAutoTable.finalY + (pi < parkKeys.length - 1 ? 6 : 0);
+        });
+      } else {
+        autoTable(doc, {
+          startY: yAfterSummary,
+          head,
+          body: buildTableRows(rows),
+          columnStyles: colStyles,
+          headStyles: {
+            fillColor: [13, 148, 136],
+            textColor: [255, 255, 255],
+            fontSize: 7.5,
+            fontStyle: 'bold',
+          },
+          bodyStyles: { fontSize: 8, textColor: [40, 40, 40] },
+          alternateRowStyles: { fillColor: [248, 252, 252] },
+          margin: { left: 14, right: 14 },
+          didParseCell: (data) => {
+            if (data.section === 'body') {
+              const row = rows[data.row.index];
+              if (row?.crossParkCount > 0) {
+                data.cell.styles.textColor = [185, 28, 28];
+              }
+            }
+          },
+        });
+      }
+
+      // ── Footer on every page ──
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(160, 160, 160);
+        doc.text('Blue Bayou Waterpark — Confidential', 14, pageH - 8);
+        doc.text(`Page ${i} of ${pageCount}`, W - 14, pageH - 8, { align: 'right' });
+      }
+
+      const filename = `payroll-deductions-${(selected?.periodLabel || 'report').replace(/[^a-z0-9]/gi, '-').toLowerCase()}.pdf`;
+      doc.save(filename);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  return (
+    <div ref={backdropRef} onClick={e => e.target === backdropRef.current && onClose()}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+    >
+      <div className="w-full max-w-md mx-4 bg-white rounded-2xl shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="bg-rose-600 px-6 py-5 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-bold text-white">Export PDF Report</h2>
+            <p className="text-xs text-white/70 mt-0.5">{selected?.periodLabel || 'Pay Period'}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white transition-colors">
+            <CloseIcon />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* Sort by */}
+          <div>
+            <label className="label">Sort Employees By</label>
+            <select
+              value={sortKey}
+              onChange={e => setSortKey(e.target.value)}
+              className="field text-sm"
+            >
+              {sortOptions.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Group by park */}
+          {isRocketRez && isMultiPark && (
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={groupPark}
+                onChange={e => setGroupPark(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-brand focus:ring-brand"
+              />
+              <div>
+                <p className="text-sm font-medium text-gray-800">Group by park</p>
+                <p className="text-xs text-gray-500 mt-0.5">Creates a separate section for each park with its own subtotal</p>
+              </div>
+            </label>
+          )}
+
+          {/* Payroll only */}
+          {isRocketRez && (
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={payrollOnly}
+                onChange={e => setPayrollOnly(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-brand focus:ring-brand"
+              />
+              <div>
+                <p className="text-sm font-medium text-gray-800">Payroll deductions only</p>
+                <p className="text-xs text-gray-500 mt-0.5">Exclude employees who only paid with cash or credit card</p>
+              </div>
+            </label>
+          )}
+
+          {/* Preview info */}
+          <div className="bg-gray-50 rounded-xl p-3.5 space-y-1">
+            <p className="text-xs font-semibold text-gray-600">Report will include</p>
+            {[
+              `${payrollOnly ? breakdown.filter(b => parseFloat(b.payrollTotal || 0) > 0).length : breakdown.length} employees`,
+              isRocketRez ? `Columns: Employee, Park, Cross-Park flag, Items, Total Spent, Payroll Deduction` : `Columns: Employee, Items, Total Deduction`,
+              isRocketRez && isMultiPark ? (groupPark ? 'Grouped by park with subtotals' : 'Single table, all parks') : null,
+              'Cross-park employees highlighted in red',
+              'Page numbers + confidential footer',
+            ].filter(Boolean).map((line, i) => (
+              <p key={i} className="text-xs text-gray-500 flex items-center gap-1.5">
+                <span className="w-1 h-1 rounded-full bg-gray-300 shrink-0" />{line}
+              </p>
+            ))}
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button onClick={onClose} className="btn-ghost flex-1">Cancel</button>
+            <button
+              onClick={generate}
+              disabled={generating}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold transition-colors disabled:opacity-60"
+            >
+              {generating ? <><Spinner /> Generating…</> : <><PDFIcon /> Generate PDF</>}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -989,4 +1397,7 @@ function Spinner() {
 }
 function CameraIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-4 h-4"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>;
+}
+function PDFIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-3.5 h-3.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>;
 }
