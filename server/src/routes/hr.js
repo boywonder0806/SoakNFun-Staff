@@ -216,16 +216,7 @@ function parseRocketRezReport(rows) {
     if (!employeeName) continue;
 
     // Token redemptions are pre-paid benefits — not payroll charges, skip them
-    if (row['PaymentHistory']?.toLowerCase().includes('token')) {
-      skippedTokens.push({
-        employee:    employeeName,
-        date:        row['EventDate']?.trim(),
-        item:        (row['Rate/ProductName'] || '').trim(),
-        amount:      row['textBox18']?.trim(),
-        payment:     row['PaymentHistory']?.trim(),
-      });
-      continue;
-    }
+    if (row['PaymentHistory']?.toLowerCase().includes('token')) continue;
 
     const amount      = parseAmount(row['textBox18']);
     const date        = parseDateTimeRR(row['EventDate'], row['EventTime']);
@@ -236,13 +227,6 @@ function parseRocketRezReport(rows) {
     const orderId = row['textBox6']?.trim() || null;
 
     deductions.push({ employeeName, amount, date, description, paymentMethod, orderId, park, homePark });
-  }
-
-  if (skippedTokens.length > 0) {
-    console.log(`[RocketRez] Skipped ${skippedTokens.length} token redemption row(s):`);
-    skippedTokens.forEach(r =>
-      console.log(`  - ${r.employee} | ${r.date} | ${r.item} | ${r.amount} | ${r.payment}`)
-    );
   }
 
   return deductions;

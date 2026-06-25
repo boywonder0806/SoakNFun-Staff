@@ -1079,10 +1079,11 @@ function sortBreakdown(breakdown, sortKey) {
 
 function PDFExportModal({ breakdown, uploadMeta, selected, isRocketRez, onClose }) {
   const backdropRef = useRef(null);
-  const [sortKey,   setSortKey]   = useState('name-asc');
-  const [groupPark, setGroupPark] = useState(false);
+  const [sortKey,    setSortKey]    = useState('name-asc');
+  const [groupPark,  setGroupPark]  = useState(false);
   const [payrollOnly, setPayrollOnly] = useState(false);
-  const [generating, setGenerating]  = useState(false);
+  const [simpleView, setSimpleView] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   const availableParks = useMemo(() => {
     const s = new Set();
@@ -1217,6 +1218,13 @@ function PDFExportModal({ breakdown, uploadMeta, selected, isRocketRez, onClose 
       const PARK_NAME = { BB: 'Blue Bayou', GI: 'Gulf Islands' };
 
       function buildTableRows(data) {
+        if (simpleView) {
+          return data.map(b => [
+            b.employeeName,
+            PARK_NAME[b.park] || b.park || '—',
+            '$' + parseFloat(b.payrollTotal || 0).toFixed(2),
+          ]);
+        }
         return data.map(b => {
           const row = [b.employeeName];
           if (isRocketRez) {
@@ -1230,24 +1238,32 @@ function PDFExportModal({ breakdown, uploadMeta, selected, isRocketRez, onClose 
         });
       }
 
-      const head = isRocketRez
-        ? [['Employee', 'Home Park', 'Cross-Park', 'Items', 'Total Spent', 'Payroll Deduction']]
-        : [['Employee', 'Items', 'Total Deduction']];
+      const head = simpleView
+        ? [['Employee', 'Park', 'Payroll Deduction']]
+        : isRocketRez
+          ? [['Employee', 'Home Park', 'Cross-Park', 'Items', 'Total Spent', 'Payroll Deduction']]
+          : [['Employee', 'Items', 'Total Deduction']];
 
-      const colStyles = isRocketRez
+      const colStyles = simpleView
         ? {
-            0: { cellWidth: 52 },
-            1: { cellWidth: 32 },
-            2: { cellWidth: 22, halign: 'center' },
-            3: { cellWidth: 14, halign: 'right' },
-            4: { cellWidth: 28, halign: 'right' },
-            5: { cellWidth: 32, halign: 'right', fontStyle: 'bold', textColor: [15, 118, 110] },
-          }
-        : {
             0: { cellWidth: 'auto' },
-            1: { cellWidth: 20, halign: 'right' },
-            2: { cellWidth: 40, halign: 'right', fontStyle: 'bold' },
-          };
+            1: { cellWidth: 45 },
+            2: { cellWidth: 45, halign: 'right', fontStyle: 'bold', textColor: [15, 118, 110] },
+          }
+        : isRocketRez
+          ? {
+              0: { cellWidth: 52 },
+              1: { cellWidth: 32 },
+              2: { cellWidth: 22, halign: 'center' },
+              3: { cellWidth: 14, halign: 'right' },
+              4: { cellWidth: 28, halign: 'right' },
+              5: { cellWidth: 32, halign: 'right', fontStyle: 'bold', textColor: [15, 118, 110] },
+            }
+          : {
+              0: { cellWidth: 'auto' },
+              1: { cellWidth: 20, halign: 'right' },
+              2: { cellWidth: 40, halign: 'right', fontStyle: 'bold' },
+            };
 
       if (groupPark && isMultiPark) {
         const byPark = {};
@@ -1360,6 +1376,30 @@ function PDFExportModal({ breakdown, uploadMeta, selected, isRocketRez, onClose 
         </div>
 
         <div className="p-6 space-y-5">
+
+          {/* View mode toggle */}
+          <div>
+            <label className="label">Report Style</label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { id: false, title: 'Full View',   desc: 'All columns including items, totals, cross-park flags' },
+                { id: true,  title: 'Simple View', desc: 'Employee name, park, and payroll deduction only' },
+              ].map(opt => (
+                <button
+                  key={String(opt.id)}
+                  onClick={() => setSimpleView(opt.id)}
+                  className={`text-left p-3 rounded-xl border-2 transition-colors
+                    ${simpleView === opt.id
+                      ? 'border-rose-500 bg-rose-50'
+                      : 'border-gray-200 hover:border-gray-300 bg-white'}`}
+                >
+                  <p className={`text-xs font-bold ${simpleView === opt.id ? 'text-rose-700' : 'text-gray-700'}`}>{opt.title}</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5 leading-snug">{opt.desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Sort by */}
           <div>
             <label className="label">Sort Employees By</label>
@@ -1411,9 +1451,13 @@ function PDFExportModal({ breakdown, uploadMeta, selected, isRocketRez, onClose 
             <p className="text-xs font-semibold text-gray-600">Report will include</p>
             {[
               `${payrollOnly ? breakdown.filter(b => parseFloat(b.payrollTotal || 0) > 0).length : breakdown.length} employees`,
-              isRocketRez ? `Columns: Employee, Park, Cross-Park flag, Items, Total Spent, Payroll Deduction` : `Columns: Employee, Items, Total Deduction`,
+              simpleView
+                ? 'Columns: Employee, Park, Payroll Deduction'
+                : isRocketRez
+                  ? 'Columns: Employee, Park, Cross-Park flag, Items, Total Spent, Payroll Deduction'
+                  : 'Columns: Employee, Items, Total Deduction',
               isRocketRez && isMultiPark ? (groupPark ? 'Grouped by park with subtotals' : 'Single table, all parks') : null,
-              'Cross-park employees highlighted in red',
+              !simpleView ? 'Cross-park employees highlighted in red' : null,
               'Page numbers + confidential footer',
             ].filter(Boolean).map((line, i) => (
               <p key={i} className="text-xs text-gray-500 flex items-center gap-1.5">
