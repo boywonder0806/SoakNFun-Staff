@@ -796,33 +796,8 @@ function CameraIcon() {
 
 function FootageModal({ transaction, employeeName, onClose }) {
   const backdropRef = useRef(null);
-  const videoRef    = useRef(null);
-  const [cameras, setCameras]       = useState([]);
-  const [cameraId, setCameraId]     = useState('');
-  const [time, setTime]             = useState('12:00');
-  const [duration, setDuration]     = useState(10);
-  const [loading, setLoading]       = useState(false);
-  const [videoSrc, setVideoSrc]     = useState(null);
-  const [error, setError]           = useState('');
-  const [configured, setConfigured] = useState(true);
 
-  const { park, date } = transaction;
-
-  useEffect(() => {
-    api.get('/hr/protect/cameras')
-      .then(r => {
-        setConfigured(r.data.configured);
-        setCameras(r.data.cameras || []);
-        if (!r.data.configured) return;
-        const preconfigured = r.data.configuredCameras?.[park] || [];
-        if (preconfigured.length > 0) setCameraId(preconfigured[0]);
-        else if (r.data.cameras?.length > 0) setCameraId(r.data.cameras[0].id);
-      })
-      .catch(err => {
-        setConfigured(false);
-        setError(err.response?.data?.error || 'Could not reach Protect NVR');
-      });
-  }, []);
+  const { date } = transaction;
 
   async function loadFootage() {
     if (!cameraId) return setError('Select a camera first');
@@ -864,80 +839,17 @@ function FootageModal({ transaction, employeeName, onClose }) {
           </button>
         </div>
 
-        <div className="p-5 space-y-4">
-          {!configured ? (
-            <div className="text-center py-6 space-y-2">
-              <p className="text-sm font-semibold text-gray-700">Protect NVR not configured</p>
-              {error ? (
-                <p className="text-xs text-red-500 font-medium">{error}</p>
-              ) : (
-                <p className="text-xs text-gray-500">
-                  Set <code className="bg-gray-100 px-1 rounded">PROTECT_NVR_URL</code> and <code className="bg-gray-100 px-1 rounded">PROTECT_API_KEY</code> in the server environment to enable footage access.
-                </p>
-              )}
-            </div>
-          ) : (
-            <>
-              <div>
-                <label className="label">Camera</label>
-                <select className="field" value={cameraId} onChange={e => setCameraId(e.target.value)}>
-                  <option value="">— select camera —</option>
-                  {cameras.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-                {cameras.length === 0 && (
-                  <p className="text-xs text-amber-600 mt-1">No cameras found — check NVR connection</p>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Approximate Time</label>
-                  <input
-                    type="time"
-                    className="field"
-                    value={time}
-                    onChange={e => setTime(e.target.value)}
-                  />
-                  <p className="text-[10px] text-gray-400 mt-1">Time of the transaction on {fmtDate(date)}</p>
-                </div>
-                <div>
-                  <label className="label">Clip Duration</label>
-                  <select className="field" value={duration} onChange={e => setDuration(Number(e.target.value))}>
-                    <option value={5}>5 minutes</option>
-                    <option value={10}>10 minutes</option>
-                    <option value={15}>15 minutes</option>
-                    <option value={30}>30 minutes</option>
-                  </select>
-                </div>
-              </div>
-
-              {error && <p className="text-xs text-red-500 font-medium">{error}</p>}
-
-              <button
-                onClick={loadFootage}
-                disabled={loading || !cameraId}
-                className="btn-primary w-full gap-2"
-              >
-                {loading ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Loading footage…</> : <><CameraIcon /> Load Footage</>}
-              </button>
-
-              {videoSrc && (
-                <div className="rounded-xl overflow-hidden bg-black">
-                  <video
-                    ref={videoRef}
-                    src={videoSrc}
-                    controls
-                    autoPlay
-                    className="w-full"
-                    style={{ maxHeight: '360px' }}
-                    onError={() => setError('Footage unavailable for this time range — try adjusting the time or duration.')}
-                  />
-                </div>
-              )}
-            </>
-          )}
+        <div className="p-8 flex flex-col items-center text-center gap-3">
+          <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">
+            <CameraIcon />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-800">Camera Footage</p>
+            <p className="text-xs font-semibold text-teal-600 mt-0.5">Coming Soon</p>
+          </div>
+          <p className="text-xs text-gray-500 max-w-xs">
+            Direct footage playback from Unifi Protect will be available in an upcoming update.
+          </p>
         </div>
       </div>
     </div>
