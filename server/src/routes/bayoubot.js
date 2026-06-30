@@ -275,14 +275,17 @@ async function toolGetCrewOrders(startDate, endDate, park = 'both') {
 }
 
 // ── Tool 3: Orders by sales office — individual order detail ───────────────
-async function toolGetOrdersByOffice(startDate, endDate, salesOfficeName) {
+async function toolGetOrdersByOffice(startDate, endDate, salesOfficeName, sortOrder = 'desc') {
   const allOrders = activeOnly(await fetchAllOrders(startDate, endDate));
   const filtered  = allOrders.filter(o =>
     (o.salesOfficeName || '').toLowerCase().includes(salesOfficeName.toLowerCase())
   );
 
-  // Sort newest-first so the most recent orders are always within the returned slice
-  filtered.sort((a, b) => new Date(b.createdDate) - new Date(a.createdDate));
+  // Sort before slicing so the cap always captures the right end of the dataset
+  filtered.sort((a, b) => sortOrder === 'asc'
+    ? new Date(a.createdDate) - new Date(b.createdDate)
+    : new Date(b.createdDate) - new Date(a.createdDate)
+  );
 
   const LIMIT = limitForDateRange(startDate, endDate);
   const slice = filtered.slice(0, LIMIT);
@@ -556,6 +559,7 @@ Use this first when the user asks about revenue, sales, comparisons between depa
         startDate:       { type: 'string', description: 'Start date YYYY-MM-DD' },
         endDate:         { type: 'string', description: 'End date YYYY-MM-DD' },
         salesOfficeName: { type: 'string', description: 'Sales office name or partial name to filter by' },
+        sortOrder:       { type: 'string', enum: ['desc', 'asc'], description: "Sort direction before applying the result cap. Use 'desc' (default) when the user asks for the most recent/last order. Use 'asc' when the user asks for the first/earliest/oldest order. This ensures the relevant end of a high-volume day is always within the returned slice." },
       },
       required: ['startDate', 'endDate', 'salesOfficeName'],
     },
@@ -593,7 +597,7 @@ async function executeTool(name, input) {
   switch (name) {
     case 'get_order_summary':    return toolGetOrderSummary(input.startDate, input.endDate, input.park);
     case 'get_crew_orders':      return toolGetCrewOrders(input.startDate, input.endDate, input.park);
-    case 'get_orders_by_office': return toolGetOrdersByOffice(input.startDate, input.endDate, input.salesOfficeName);
+    case 'get_orders_by_office': return toolGetOrdersByOffice(input.startDate, input.endDate, input.salesOfficeName, input.sortOrder || 'desc');
     case 'search_line_items':    return toolSearchLineItems(input.startDate, input.endDate, input.keyword, input.park, input.salesOfficeName || null);
     case 'get_order_by_id':      return toolGetOrderById(input.orderId);
     default: throw new Error(`Unknown tool: ${name}`);
