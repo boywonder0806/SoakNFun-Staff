@@ -82,6 +82,15 @@ function classifyPayments(paymentMethods) {
   return { payroll, cashCard, token, comp };
 }
 
+// Filter orders to a single park by sales office name prefix ("BB ..." / "GI ...").
+// Park-agnostic offices (Admin, Accounting, etc.) are excluded from BB/GI-specific
+// filters since they don't belong to either park.
+function filterByPark(orders, park) {
+  if (!park || park === 'both') return orders;
+  const prefix = park.toUpperCase();
+  return orders.filter(o => (o.salesOfficeName || '').trim().toUpperCase().startsWith(prefix));
+}
+
 // Scale the per-call order cap to the size of the date range — narrow ranges
 // can afford far more detail per order than wide ones without bloating the
 // tool result sent to the model.
@@ -92,6 +101,13 @@ function limitForDateRange(startDate, endDate) {
   if (days <= 7)  return 300;
   if (days <= 14) return 200;
   return 150;
+}
+
+// A line item's actual revenue lives in rateTypes[].subTotal, not on the
+// line item itself — li.subTotal doesn't exist on RocketRez's response shape.
+// A line item can carry multiple rateTypes (e.g. bundled components), so sum them.
+function lineItemRevenue(li) {
+  return (li.rateTypes || []).reduce((sum, rt) => sum + (rt.subTotal || 0), 0);
 }
 
 function paymentTypeLabel(paymentMethod) {
@@ -105,8 +121,8 @@ function paymentTypeLabel(paymentMethod) {
 }
 
 // ── Tool 1: Full order summary (all order types) ───────────────────────────
-async function toolGetOrderSummary(startDate, endDate) {
-  const orders = await fetchAllOrders(startDate, endDate);
+async function toolGetOrderSummary(startDate, endDate, park = 'both') {
+  const orders = filterByPark(await fetchAllOrders(startDate, endDate), park);
 
   // Accumulators
   const officeMap    = {};
@@ -150,7 +166,7 @@ async function toolGetOrderSummary(startDate, endDate) {
       const name = (li.name || 'Unknown').trim();
       if (!itemMap[name]) itemMap[name] = { count: 0, revenue: 0 };
       itemMap[name].count++;
-      itemMap[name].revenue = +(itemMap[name].revenue + (li.subTotal || 0)).toFixed(2);
+      itemMap[name].revenue = +(itemMap[name].revenue + lineItemRevenue(li)).toFixed(2);
     }
   }
 
@@ -168,6 +184,7 @@ async function toolGetOrderSummary(startDate, endDate) {
     .sort((a, b) => a.hour.localeCompare(b.hour));
 
   return {
+    park,
     startDate,
     endDate,
     totalOrders:   orders.length,
@@ -182,21 +199,22 @@ async function toolGetOrderSummary(startDate, endDate) {
 }
 
 // ── Tool 2: Crew orders — employee-level payroll breakdown ─────────────────
-async function toolGetCrewOrders(startDate, endDate) {
+async function toolGetCrewOrders(startDate, endDate, park = 'both') {
   const orders = (await fetchAllOrders(startDate, endDate))
     .filter(o => o.contactGroupName?.trim());
 
   const byEmp = {};
   for (const order of orders) {
-    const rawName = order.contactGroupName.trim();
-    const isBB    = /^\(BB\)/i.test(rawName);
-    const park    = isBB ? 'BB' : 'GI';
-    const name    = rawName.replace(/^\(BB\)\s*/i, '').trim();
+    const rawName  = order.contactGroupName.trim();
+    const isBB     = /^\(BB\)/i.test(rawName);
+    const empPark  = isBB ? 'BB' : 'GI';
+    const name     = rawName.replace(/^\(BB\)\s*/i, '').trim();
     if (!name) continue;
+    if (park !== 'both' && empPark !== park.toUpperCase()) continue;
 
-    const key = `${park}:${name}`;
+    const key = `${empPark}:${name}`;
     if (!byEmp[key]) {
-      byEmp[key] = { name, park, orderCount: 0, payrollTotal: 0, cashCardTotal: 0, tokenTotal: 0, compTotal: 0, orders: [] };
+      byEmp[key] = { name, park: empPark, orderCount: 0, payrollTotal: 0, cashCardTotal: 0, tokenTotal: 0, compTotal: 0, orders: [] };
     }
 
     const { payroll, cashCard, token, comp } = classifyPayments(order.paymentMethods);
@@ -211,7 +229,7 @@ async function toolGetCrewOrders(startDate, endDate) {
       items:    (order.lineItems || [])
         .map(li => ({
           name:   (li.name || '').replace(/\s*\((BB|GI)\s*Employee\)/gi, '').replace(/\s*-\s*Token\b/gi, '').trim(),
-          amount: li.subTotal || 0,
+          amount: lineItemRevenue(li),
         }))
         .filter(li => li.name),
       payroll:  +payroll.toFixed(2),
@@ -240,7 +258,7 @@ async function toolGetCrewOrders(startDate, endDate) {
     comp:      +(s.comp      + e.compTotal).toFixed(2),
   }), { employees: 0, orders: 0, payroll: 0, cashCard: 0, token: 0, comp: 0 });
 
-  return { startDate, endDate, totals, breakdown };
+  return { park, startDate, endDate, totals, breakdown };
 }
 
 // ── Tool 3: Orders by sales office — individual order detail ───────────────
@@ -272,7 +290,7 @@ async function toolGetOrdersByOffice(startDate, endDate, salesOfficeName) {
     })),
     items: (o.lineItems || []).map(li => ({
       name:   (li.name || '').trim(),
-      amount: li.subTotal || 0,
+      amount: lineItemRevenue(li),
       event:  li.event ? {
         type:      li.event.type,
         name:      li.event.name,
@@ -296,8 +314,8 @@ async function toolGetOrdersByOffice(startDate, endDate, salesOfficeName) {
 }
 
 // ── Tool 4: Keyword search across all line items ───────────────────────────
-async function toolSearchLineItems(startDate, endDate, keyword) {
-  const orders = await fetchAllOrders(startDate, endDate);
+async function toolSearchLineItems(startDate, endDate, keyword, park = 'both') {
+  const orders = filterByPark(await fetchAllOrders(startDate, endDate), park);
   const kw = keyword.toLowerCase();
 
   const variantMap = {};
@@ -315,11 +333,12 @@ async function toolSearchLineItems(startDate, endDate, keyword) {
 
       if (!norm.includes(kw)) continue;
 
+      const rev = lineItemRevenue(li);
       if (!variantMap[raw]) variantMap[raw] = { count: 0, revenue: 0 };
       variantMap[raw].count++;
-      variantMap[raw].revenue = +(variantMap[raw].revenue + (li.subTotal || 0)).toFixed(2);
+      variantMap[raw].revenue = +(variantMap[raw].revenue + rev).toFixed(2);
       totalCount++;
-      totalRevenue += (li.subTotal || 0);
+      totalRevenue += rev;
     }
   }
 
@@ -329,6 +348,7 @@ async function toolSearchLineItems(startDate, endDate, keyword) {
 
   return {
     keyword,
+    park,
     startDate,
     endDate,
     totalCount,
@@ -379,7 +399,7 @@ async function toolGetOrderById(orderId) {
       name:       li.name,
       type:       li.type,
       salesOffice: li.salesOfficeName,
-      amount:     li.subTotal || 0,
+      amount:     lineItemRevenue(li),
       serials:    (li.rateTypes || []).flatMap(rt => rt.serials || []),
       taxItems:   (li.rateTypes || []).flatMap(rt => rt.taxItems || []).map(t => ({
         type:   t.taxType,
@@ -412,26 +432,29 @@ const TOOLS = [
 - Hourly order distribution
 - Crew order subtotals
 - List of all sales office names available for drill-down
+All totals/breakdowns are scoped to the requested park only — pass 'both' only after the user has confirmed they want combined numbers.
 Use this first when the user asks about revenue, sales, comparisons between departments, busiest times, popular items, or anything that requires a broad view of operations.`,
     input_schema: {
       type: 'object',
       properties: {
         startDate: { type: 'string', description: 'Start date YYYY-MM-DD (inclusive)' },
         endDate:   { type: 'string', description: 'End date YYYY-MM-DD (inclusive)' },
+        park:      { type: 'string', enum: ['BB', 'GI', 'both'], description: "Which park to scope the data to: 'BB' (Blue Bayou), 'GI' (Gulf Islands), or 'both' (combined). Only use 'both' if the user explicitly asked for combined/total numbers across both parks." },
       },
-      required: ['startDate', 'endDate'],
+      required: ['startDate', 'endDate', 'park'],
     },
   },
   {
     name: 'get_crew_orders',
-    description: `Fetch crew meal orders with a per-employee breakdown. Returns each employee's name, park (BB = Blue Bayou, GI = Gulf Islands), order count, payroll deduction total, cash/card total, token total, and the individual orders with items and amounts. Use this when the user asks specifically about employee spending, payroll deductions, or crew meal details.`,
+    description: `Fetch crew meal orders with a per-employee breakdown, scoped to the requested park. Returns each employee's name, park (BB = Blue Bayou, GI = Gulf Islands), order count, payroll deduction total, cash/card total, token total, and the individual orders with items and amounts. Use this when the user asks specifically about employee spending, payroll deductions, or crew meal details.`,
     input_schema: {
       type: 'object',
       properties: {
         startDate: { type: 'string', description: 'Start date YYYY-MM-DD (inclusive)' },
         endDate:   { type: 'string', description: 'End date YYYY-MM-DD (inclusive)' },
+        park:      { type: 'string', enum: ['BB', 'GI', 'both'], description: "Which park to scope the data to: 'BB' (Blue Bayou), 'GI' (Gulf Islands), or 'both' (combined). Only use 'both' if the user explicitly asked for combined/total numbers across both parks." },
       },
-      required: ['startDate', 'endDate'],
+      required: ['startDate', 'endDate', 'park'],
     },
   },
   {
@@ -449,15 +472,16 @@ Use this first when the user asks about revenue, sales, comparisons between depa
   },
   {
     name: 'search_line_items',
-    description: `Search ALL line items across every order for a keyword and return every matching name variant with individual counts and revenue. ALWAYS use this tool when the user asks about a specific food or product by name (e.g. "cheeseburger", "fries", "funnel cake", "admission"). Item names in RocketRez often have suffixes like "(BB Employee)", "(GI Employee)", "- Token", combo names, or location-specific prefixes — this tool strips those automatically so "cheeseburger" matches "Cheeseburger", "Cheeseburger (BB Employee)", "Double Cheeseburger", "Bacon Cheeseburger", etc. It returns the total count and revenue across ALL matching variants, plus a breakdown by exact name so you can see every variant. Never guess from the top-30 summary list — always use this tool for item-level questions.`,
+    description: `Search ALL line items across every order for a keyword and return every matching name variant with individual counts and revenue, scoped to the requested park. ALWAYS use this tool when the user asks about a specific food or product by name (e.g. "cheeseburger", "fries", "funnel cake", "admission"). Item names in RocketRez often have suffixes like "(BB Employee)", "(GI Employee)", "- Token", combo names, or location-specific prefixes — this tool strips those automatically so "cheeseburger" matches "Cheeseburger", "Cheeseburger (BB Employee)", "Double Cheeseburger", "Bacon Cheeseburger", etc. It returns the total count and revenue across ALL matching variants, plus a breakdown by exact name so you can see every variant. Never guess from the top-30 summary list — always use this tool for item-level questions.`,
     input_schema: {
       type: 'object',
       properties: {
         startDate: { type: 'string', description: 'Start date YYYY-MM-DD' },
         endDate:   { type: 'string', description: 'End date YYYY-MM-DD' },
         keyword:   { type: 'string', description: 'The item name or keyword to search for (case-insensitive, partial match). Use the core word, e.g. "cheeseburger" not "how many cheeseburgers".' },
+        park:      { type: 'string', enum: ['BB', 'GI', 'both'], description: "Which park to scope the search to: 'BB' (Blue Bayou), 'GI' (Gulf Islands), or 'both' (combined). Only use 'both' if the user explicitly asked for combined numbers across both parks." },
       },
-      required: ['startDate', 'endDate', 'keyword'],
+      required: ['startDate', 'endDate', 'keyword', 'park'],
     },
   },
   {
@@ -475,10 +499,10 @@ Use this first when the user asks about revenue, sales, comparisons between depa
 
 async function executeTool(name, input) {
   switch (name) {
-    case 'get_order_summary':    return toolGetOrderSummary(input.startDate, input.endDate);
-    case 'get_crew_orders':      return toolGetCrewOrders(input.startDate, input.endDate);
+    case 'get_order_summary':    return toolGetOrderSummary(input.startDate, input.endDate, input.park);
+    case 'get_crew_orders':      return toolGetCrewOrders(input.startDate, input.endDate, input.park);
     case 'get_orders_by_office': return toolGetOrdersByOffice(input.startDate, input.endDate, input.salesOfficeName);
-    case 'search_line_items':    return toolSearchLineItems(input.startDate, input.endDate, input.keyword);
+    case 'search_line_items':    return toolSearchLineItems(input.startDate, input.endDate, input.keyword, input.park);
     case 'get_order_by_id':      return toolGetOrderById(input.orderId);
     default: throw new Error(`Unknown tool: ${name}`);
   }
@@ -503,12 +527,16 @@ You have five tools:
 
 Today is ${today}. Yesterday was ${yesterday}.
 
+Two locations — Blue Bayou (BB) and Gulf Islands (GI):
+get_order_summary, get_crew_orders, and search_line_items all take a required "park" argument ('BB', 'GI', or 'both'). Before calling any of these, check whether the user has specified which park they mean — either in this message or earlier in the conversation. If it's not clear, STOP and ask a short clarifying question (e.g. "Just Blue Bayou, just Gulf Islands, or both combined?") instead of calling the tool or guessing. Do not default to 'both' on your own judgment. Once the user states a park (in this message or a prior one in the conversation), remember it for the rest of the conversation and don't ask again unless they ask about the other park or switch topics significantly. get_orders_by_office and get_order_by_id don't need this since the office name or order ID already pins down the scope.
+
 Formatting:
 - Dollar amounts: $X.XX
 - Use markdown tables for multi-column comparisons
 - Be direct and specific — management needs clear answers
 - For item searches: always report the total count across all variants first, then show the variant breakdown so the user can see every name used
-- When comparing departments or time periods, always show the numbers side by side`;
+- When comparing departments or time periods, always show the numbers side by side
+- When you report numbers, state which park(s) they cover`;
 
   const history = [
     ...messages.map(m => ({ role: m.role, content: m.content })),
