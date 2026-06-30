@@ -731,6 +731,141 @@ router.get('/protect/footage-stream', async (req, res) => {
   }
 });
 
+// ── RocketRez Live Sync (Gen 2) ───────────────────────────────────────────────
+const RR_CREW_OFFICES = ['BB Crew Kitchen', 'GI Food & Beverage'];
+let rrCachedToken = null;
+let rrTokenExpiry = 0;
+
+async function getRRToken() {
+  if (rrCachedToken && Date.now() < rrTokenExpiry - 60_000) return rrCachedToken;
+  const res = await fetch(`${process.env.ROCKETREZ_BASE_URL}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: process.env.ROCKETREZ_CLIENT_ID,
+      client_secret: process.env.ROCKETREZ_CLIENT_SECRET,
+      scope: 'read_orders',
+      grant_type: 'client_credentials',
+    }),
+  });
+  if (!res.ok) throw new Error(`RocketRez auth failed: ${res.status}`);
+  const data = await res.json();
+  rrCachedToken = data.data.access_token;
+  rrTokenExpiry = new Date(data.data.expiry).getTime();
+  return rrCachedToken;
+}
+
+router.get('/rocketrez/sync', requireHR, async (req, res) => {
+  const { startDate, endDate } = req.query;
+  if (!startDate || !endDate) {
+    return res.status(400).json({ error: 'startDate and endDate are required (YYYY-MM-DD)' });
+  }
+  if (!process.env.ROCKETREZ_CLIENT_ID || !process.env.ROCKETREZ_CLIENT_SECRET) {
+    return res.status(503).json({ error: 'RocketRez credentials not configured on this server' });
+  }
+
+  try {
+    const token = await getRRToken();
+    const base = (process.env.ROCKETREZ_BASE_URL || '').replace(/\/$/, '');
+
+    // Fetch all pages — must paginate because large days have 4000+ orders
+    const crewOrders = [];
+    let pageIndex = 0;
+    while (true) {
+      const url = `${base}/v1/orders?startDate=${startDate}&endDate=${endDate}&pageSize=250&pageIndex=${pageIndex}`;
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) throw new Error(`RocketRez orders API: ${r.status}`);
+      const data = await r.json();
+      const batch = Array.isArray(data.data) ? data.data : [];
+      crewOrders.push(...batch.filter(o => RR_CREW_OFFICES.includes(o.salesOfficeName)));
+      if (batch.length < 250) break;
+      pageIndex++;
+    }
+
+    // Group by employee
+    const byEmp = {};
+    for (const order of crewOrders) {
+      const park = order.salesOfficeName === 'BB Crew Kitchen' ? 'BB' : 'GI';
+      const rawName = order.contactGroupName;
+      const name = rawName ? rawName.replace(/^\((BB|GI)\)\s*/i, '').trim() : null;
+      const key = name ? `${park}:${name}` : `${park}:__walkup__`;
+
+      if (!byEmp[key]) {
+        byEmp[key] = {
+          employeeName: name || 'Walk-up / No Account',
+          park,
+          payrollTotal: 0,
+          cashCardTotal: 0,
+          tokenTotal: 0,
+          compTotal: 0,
+          transactionCount: 0,
+          transactions: [],
+        };
+      }
+
+      let payroll = 0, cashCard = 0, token = 0, comp = 0;
+      const methods = order.paymentMethods || [];
+      for (const pm of methods) {
+        const m = (pm.paymentMethod || '').toLowerCase();
+        const amt = pm.paymentAmount || 0;
+        if (m.includes('payroll'))                                    payroll  += amt;
+        else if (m.includes('token'))                                 token    += amt;
+        else if (m.includes('stripe') || m.includes('card') || m.includes('cash') || m.includes('mastercard') || m.includes('visa') || m.includes('amex')) cashCard += amt;
+        else                                                          comp     += amt;
+      }
+      if (methods.length === 0) comp += order.total || 0;
+
+      byEmp[key].payrollTotal   += payroll;
+      byEmp[key].cashCardTotal  += cashCard;
+      byEmp[key].tokenTotal     += token;
+      byEmp[key].compTotal      += comp;
+      byEmp[key].transactionCount++;
+      byEmp[key].transactions.push({
+        orderId: order.id,
+        date: order.createdDate,
+        cashier: [order.salesPersonFirstName, order.salesPersonLastName].filter(Boolean).join(' '),
+        items: (order.lineItems || [])
+          .map(li => ({
+            name: (li.name || '')
+              .replace(/\s*\((BB|GI)\s*Employee\)/gi, '')
+              .replace(/\s*-\s*Token\b/gi, '')
+              .trim(),
+            amount: li.subTotal || 0,
+          }))
+          .filter(li => li.name),
+        payroll,
+        cashCard,
+        token,
+        comp,
+      });
+    }
+
+    const breakdown = Object.values(byEmp)
+      .sort((a, b) => {
+        if (a.park !== b.park) return a.park.localeCompare(b.park);
+        return a.employeeName.localeCompare(b.employeeName);
+      })
+      .map(e => ({
+        ...e,
+        payrollTotal:  +e.payrollTotal.toFixed(2),
+        cashCardTotal: +e.cashCardTotal.toFixed(2),
+        tokenTotal:    +e.tokenTotal.toFixed(2),
+        compTotal:     +e.compTotal.toFixed(2),
+      }));
+
+    const totals = breakdown.reduce((s, e) => ({
+      payroll:  +(s.payroll  + e.payrollTotal).toFixed(2),
+      cashCard: +(s.cashCard + e.cashCardTotal).toFixed(2),
+      token:    +(s.token    + e.tokenTotal).toFixed(2),
+    }), { payroll: 0, cashCard: 0, token: 0 });
+
+    res.json({ startDate, endDate, totalOrders: crewOrders.length, totals, breakdown });
+  } catch (err) {
+    console.error('RocketRez sync error:', err.message);
+    res.status(502).json({ error: 'RocketRez sync failed: ' + err.message });
+  }
+});
+
 router.delete('/meal-deductions/:id', requireHR, async (req, res) => {
   try {
     const { rowCount } = await pool.query(
