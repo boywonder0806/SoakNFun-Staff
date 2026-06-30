@@ -4,6 +4,13 @@ import remarkGfm from 'remark-gfm';
 import { useAuth } from '../context/AuthContext.jsx';
 import api from '../lib/api.js';
 
+function buildGreeting(user) {
+  const hour      = new Date().getHours();
+  const timeOfDay = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+  const firstName = user?.name?.split(' ')[0] || 'there';
+  return `Good ${timeOfDay}, **${firstName}!** I'm **BayouBot** — your AI assistant for all RocketRez order data.\n\nI have real-time access to everything: ticket sales, food & beverage, online orders, crew meals, and more. Ask me things like:\n- *"Give me a full revenue summary for today"*\n- *"Compare ticket sales vs food revenue this week"*\n- *"What were our busiest hours yesterday?"*\n- *"Which crew employees had the most payroll deductions today?"*\n- *"Look up order #12345"*\n\nWhat would you like to know?`;
+}
+
 const QUICK_QUESTIONS = [
   'Give me a full revenue summary for today',
   'How much did we make in ticket sales today?',
@@ -15,14 +22,9 @@ const QUICK_QUESTIONS = [
   'How does today compare to yesterday in total revenue?',
 ];
 
-const GREETING = {
-  role: 'assistant',
-  content: `Hi, I'm **BayouBot** — your AI assistant for all RocketRez order data.\n\nI have real-time access to everything: ticket sales, food & beverage, online orders, crew meals, and more. Ask me things like:\n- *"Give me a full revenue summary for today"*\n- *"Compare ticket sales vs food revenue this week"*\n- *"What were our busiest hours yesterday?"*\n- *"Which crew employees had the most payroll deductions today?"*\n- *"Look up order #12345"*\n\nWhat would you like to know?`,
-};
-
 export default function Chat() {
   const { user, logout } = useAuth();
-  const [messages, setMessages]     = useState([GREETING]);
+  const [messages, setMessages]     = useState(() => [{ role: 'assistant', content: buildGreeting(user) }]);
   const [input, setInput]           = useState('');
   const [loading, setLoading]       = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -79,7 +81,7 @@ export default function Chat() {
   }
 
   function handleNewChat() {
-    setMessages([GREETING]);
+    setMessages([{ role: 'assistant', content: buildGreeting(user) }]);
     setInput('');
     setTimeout(() => inputRef.current?.focus(), 50);
   }
