@@ -5,22 +5,90 @@
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 
-/* Markdown styles inside bot messages */
-.bot-prose p          { margin: 0 0 0.5rem; }
-.bot-prose p:last-child { margin-bottom: 0; }
-.bot-prose ul, .bot-prose ol { padding-left: 1.25rem; margin: 0.4rem 0; }
-.bot-prose li         { margin: 0.2rem 0; }
-.bot-prose strong     { font-weight: 600; }
-.bot-prose code       { background: #f1f5f9; padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.85em; font-family: monospace; }
-.bot-prose pre        { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.75rem; overflow-x: auto; margin: 0.5rem 0; }
-.bot-prose pre code   { background: none; padding: 0; }
-.bot-prose h1, .bot-prose h2, .bot-prose h3 { font-weight: 700; margin: 0.75rem 0 0.35rem; }
-.bot-prose h1         { font-size: 1.1rem; }
-.bot-prose h2         { font-size: 1rem; }
-.bot-prose h3         { font-size: 0.9rem; }
+/* ── Animations ────────────────────────────────────────────────────────────── */
+@keyframes blob-move {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25%  { transform: translate(40px, -60px) scale(1.06); }
+  50%  { transform: translate(-30px, 40px) scale(0.94); }
+  75%  { transform: translate(-50px, -30px) scale(1.03); }
+}
+@keyframes shimmer {
+  from { background-position: 0% center; }
+  to   { background-position: 200% center; }
+}
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(99,102,241,0.3), 0 0 40px rgba(99,102,241,0.1); }
+  50%       { box-shadow: 0 0 40px rgba(99,102,241,0.6), 0 0 80px rgba(99,102,241,0.25); }
+}
+@keyframes scan-line {
+  0%   { top: -5%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { top: 105%; opacity: 0; }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-8px); }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
 
-/* Markdown table */
-.bot-prose table      { border-collapse: collapse; width: 100%; margin: 0.6rem 0; font-size: 0.8rem; }
-.bot-prose th         { background: #f1f5f9; padding: 0.4rem 0.75rem; text-align: left; font-weight: 600; border: 1px solid #e2e8f0; white-space: nowrap; }
-.bot-prose td         { padding: 0.4rem 0.75rem; border: 1px solid #e2e8f0; }
-.bot-prose tr:nth-child(even) td { background: #f8fafc; }
+/* ── Utility classes ───────────────────────────────────────────────────────── */
+@layer utilities {
+  .animate-blob       { animation: blob-move 12s ease-in-out infinite; }
+  .animate-blob-2     { animation: blob-move 14s ease-in-out 3s infinite; }
+  .animate-blob-3     { animation: blob-move 10s ease-in-out 6s infinite; }
+  .animate-float      { animation: float 6s ease-in-out infinite; }
+  .animate-fade-up    { animation: fade-up 0.6s ease-out forwards; }
+  .animate-scan       { animation: scan-line 4s ease-in-out infinite; }
+  .animate-spin-slow  { animation: spin-slow 20s linear infinite; }
+  .animate-blink      { animation: blink 1s step-end infinite; }
+
+  .gradient-text {
+    background: linear-gradient(90deg, #818cf8 0%, #67e8f9 35%, #a78bfa 65%, #818cf8 100%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: shimmer 5s linear infinite;
+  }
+
+  .glow-box  { animation: glow-pulse 3s ease-in-out infinite; }
+  .text-glow { text-shadow: 0 0 20px rgba(129,140,248,0.6); }
+}
+
+/* ── Markdown inside bot messages ─────────────────────────────────────────── */
+.bot-prose p             { margin: 0 0 0.5rem; }
+.bot-prose p:last-child  { margin-bottom: 0; }
+.bot-prose ul, .bot-prose ol { padding-left: 1.25rem; margin: 0.4rem 0; }
+.bot-prose li            { margin: 0.2rem 0; }
+.bot-prose strong        { font-weight: 600; color: #e2e8f0; }
+.bot-prose code          { background: rgba(99,102,241,0.15); color: #a5b4fc; padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.85em; font-family: 'Fira Code', monospace; }
+.bot-prose pre           { background: rgba(0,0,0,0.4); border: 1px solid rgba(99,102,241,0.2); border-radius: 8px; padding: 0.75rem; overflow-x: auto; margin: 0.5rem 0; }
+.bot-prose pre code      { background: none; padding: 0; color: #94a3b8; }
+.bot-prose h1, .bot-prose h2, .bot-prose h3 { font-weight: 700; color: #e2e8f0; margin: 0.75rem 0 0.35rem; }
+.bot-prose h1            { font-size: 1.1rem; }
+.bot-prose h2            { font-size: 1rem; }
+.bot-prose h3            { font-size: 0.9rem; }
+
+/* Dark-themed markdown table */
+.bot-prose table         { border-collapse: collapse; width: 100%; margin: 0.75rem 0; font-size: 0.8rem; }
+.bot-prose th            { background: rgba(99,102,241,0.15); color: #a5b4fc; padding: 0.45rem 0.75rem; text-align: left; font-weight: 600; border: 1px solid rgba(99,102,241,0.2); white-space: nowrap; }
+.bot-prose td            { padding: 0.45rem 0.75rem; border: 1px solid rgba(99,102,241,0.1); color: #cbd5e1; }
+.bot-prose tr:nth-child(even) td { background: rgba(99,102,241,0.05); }
+
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar       { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.3); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(99,102,241,0.5); }

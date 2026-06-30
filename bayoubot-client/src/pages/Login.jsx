@@ -22,71 +22,150 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-bot-bg via-indigo-950 to-indigo-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
+    <div className="relative min-h-screen bg-[#030712] flex items-center justify-center overflow-hidden p-4">
 
-        {/* Logo */}
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-bot/20 border border-bot/40 flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <BotIcon className="w-8 h-8 text-bot-light" />
+      {/* ── Animated background ─────────────────────────────────────────── */}
+      {/* Grid */}
+      <div
+        className="absolute inset-0 opacity-50"
+        style={{
+          backgroundImage:
+            'linear-gradient(rgba(99,102,241,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(99,102,241,0.06) 1px, transparent 1px)',
+          backgroundSize: '50px 50px',
+        }}
+      />
+
+      {/* Gradient orbs */}
+      <div className="absolute top-1/4 -left-20 w-[500px] h-[500px] rounded-full bg-indigo-700/20 blur-[100px] animate-blob" />
+      <div className="absolute bottom-1/4 -right-20 w-[500px] h-[500px] rounded-full bg-cyan-700/15 blur-[100px] animate-blob-2" />
+      <div className="absolute top-2/3 left-1/3 w-[300px] h-[300px] rounded-full bg-violet-700/10 blur-[80px] animate-blob-3" />
+
+      {/* Scan line */}
+      <div
+        className="absolute left-0 right-0 h-px bg-gradient-to-r from-transparent via-indigo-500/40 to-transparent animate-scan pointer-events-none"
+        style={{ zIndex: 1 }}
+      />
+
+      {/* ── Card ────────────────────────────────────────────────────────── */}
+      <div className="relative z-10 w-full max-w-sm animate-fade-up">
+
+        {/* Logo + title */}
+        <div className="text-center mb-10">
+          {/* Animated icon */}
+          <div className="relative inline-flex items-center justify-center mb-6 animate-float">
+            {/* Outer glow ring */}
+            <div className="absolute w-24 h-24 rounded-full bg-indigo-500/10 animate-ping" style={{ animationDuration: '2.5s' }} />
+            {/* Ring */}
+            <div className="absolute w-20 h-20 rounded-full border border-indigo-500/20 animate-spin-slow" />
+            {/* Inner container */}
+            <div className="relative w-16 h-16 rounded-2xl bg-[#0d1117] border border-indigo-500/40 flex items-center justify-center glow-box">
+              <BotIcon className="w-8 h-8 text-indigo-400" />
+            </div>
           </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">BayouBot</h1>
-          <p className="text-indigo-300 text-sm mt-1">AI-powered order intelligence</p>
+
+          <h1 className="text-5xl font-extrabold tracking-tight gradient-text leading-none mb-3">
+            BayouBot
+          </h1>
+          <p className="text-slate-400 text-sm tracking-widest uppercase">
+            AI Order Intelligence
+          </p>
+          {/* Cursor blink */}
+          <span className="inline-block w-0.5 h-4 bg-indigo-400 ml-1 align-middle animate-blink" />
         </div>
 
-        {/* Card */}
-        <div className="bg-white/10 backdrop-blur border border-white/10 rounded-2xl p-6 shadow-2xl">
-          <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Glass card */}
+        <div className="relative">
+          {/* Glowing border effect */}
+          <div className="absolute -inset-px rounded-2xl bg-gradient-to-r from-indigo-500/50 via-cyan-500/30 to-violet-500/50 opacity-50 blur-sm" />
+
+          <div className="relative bg-[#0a0f1e]/90 backdrop-blur-xl border border-white/8 rounded-2xl p-7">
             {error && (
-              <div className="bg-red-500/20 border border-red-500/30 rounded-lg p-3 text-sm text-red-200">
+              <div className="mb-4 flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-sm text-red-300">
+                <AlertIcon className="w-4 h-4 mt-0.5 shrink-0" />
                 {error}
               </div>
             )}
-            <div>
-              <label className="block text-xs font-semibold text-indigo-200 uppercase tracking-wide mb-1.5">
-                Email
-              </label>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                autoFocus
-                placeholder="you@example.com"
-                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2.5 text-sm text-white placeholder-indigo-300/50 focus:outline-none focus:ring-2 focus:ring-bot-light/50 focus:border-bot-light/50 transition"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-indigo-200 uppercase tracking-wide mb-1.5">
-                Password
-              </label>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2.5 text-sm text-white placeholder-indigo-300/50 focus:outline-none focus:ring-2 focus:ring-bot-light/50 focus:border-bot-light/50 transition"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-2.5 bg-bot text-white text-sm font-semibold rounded-lg hover:bg-bot-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors mt-1"
-            >
-              {loading ? 'Signing in…' : 'Sign In'}
-            </button>
-          </form>
+
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">
+                  Email
+                </label>
+                <div className="relative">
+                  <input
+                    type="email"
+                    required
+                    autoFocus
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500/70 focus:shadow-[0_0_0_2px_rgba(99,102,241,0.15),0_0_20px_rgba(99,102,241,0.08)] transition-all"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-[#0d1117] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500/70 focus:shadow-[0_0_0_2px_rgba(99,102,241,0.15),0_0_20px_rgba(99,102,241,0.08)] transition-all"
+                />
+              </div>
+
+              {/* Gradient button */}
+              <button
+                type="submit"
+                disabled={loading}
+                className="relative w-full py-3 rounded-xl text-sm font-bold text-white overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed transition-transform active:scale-[0.98]"
+                style={{
+                  background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #2563eb 100%)',
+                  boxShadow: '0 0 30px rgba(99,102,241,0.4)',
+                }}
+              >
+                {/* Shine sweep */}
+                {!loading && (
+                  <span
+                    className="absolute inset-0 pointer-events-none"
+                    style={{
+                      background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.12) 50%, transparent 100%)',
+                      animation: 'shimmer 3s linear infinite',
+                      backgroundSize: '200% 100%',
+                    }}
+                  />
+                )}
+                <span className="relative flex items-center justify-center gap-2">
+                  {loading ? (
+                    <>
+                      <SpinnerIcon />
+                      Authenticating…
+                    </>
+                  ) : (
+                    <>
+                      <LockIcon />
+                      Access BayouBot
+                    </>
+                  )}
+                </span>
+              </button>
+            </form>
+          </div>
         </div>
 
-        <p className="text-center text-indigo-400/50 text-xs mt-6">
-          Blue Bayou / Gulf Islands Waterpark
+        <p className="text-center text-slate-600 text-xs mt-8 tracking-wider uppercase">
+          Blue Bayou · Gulf Islands Waterpark
         </p>
       </div>
     </div>
   );
 }
 
+/* ── Icons ──────────────────────────────────────────────────────────────────── */
 function BotIcon({ className }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -96,6 +175,34 @@ function BotIcon({ className }) {
       <path d="M9 19.5h6" />
       <path d="M12 3a2 2 0 1 1 0 4 2 2 0 0 1 0-4z" />
       <line x1="12" y1="7" x2="12" y2="9" />
+    </svg>
+  );
+}
+
+function AlertIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" className={className}>
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="8" x2="12" y2="12" />
+      <line x1="12" y1="16" x2="12.01" y2="16" />
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" className="w-4 h-4">
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z" />
     </svg>
   );
 }

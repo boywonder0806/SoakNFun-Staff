@@ -8,7 +8,7 @@ const QUICK_QUESTIONS = [
   'Give me a full revenue summary for today',
   'How much did we make in ticket sales today?',
   'What were the most popular items sold today?',
-  'Compare food & beverage revenue vs ticket revenue today',
+  'Compare food & beverage vs ticket revenue today',
   'What were our busiest hours today?',
   'How much crew payroll deduction happened today?',
   'Break down revenue by sales office for today',
@@ -22,11 +22,12 @@ const GREETING = {
 
 export default function Chat() {
   const { user, logout } = useAuth();
-  const [messages, setMessages] = useState([GREETING]);
-  const [input, setInput]     = useState('');
-  const [loading, setLoading] = useState(false);
-  const bottomRef  = useRef(null);
-  const inputRef   = useRef(null);
+  const [messages, setMessages]     = useState([GREETING]);
+  const [input, setInput]           = useState('');
+  const [loading, setLoading]       = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const bottomRef   = useRef(null);
+  const inputRef    = useRef(null);
   const textareaRef = useRef(null);
 
   useEffect(() => {
@@ -38,13 +39,9 @@ export default function Chat() {
     if (!userMsg || loading) return;
 
     setInput('');
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
-    // Build API history from conversation so far (skip the static greeting)
     const apiHistory = messages.slice(1).map(m => ({ role: m.role, content: m.content }));
-
     setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
     setLoading(true);
 
@@ -77,14 +74,14 @@ export default function Chat() {
 
   function handleTextareaInput(e) {
     e.target.style.height = 'auto';
-    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+    e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px';
     setInput(e.target.value);
   }
 
   function handleNewChat() {
     setMessages([GREETING]);
     setInput('');
-    inputRef.current?.focus();
+    setTimeout(() => inputRef.current?.focus(), 50);
   }
 
   const initials = user?.name
@@ -92,119 +89,200 @@ export default function Chat() {
     : '?';
 
   return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden">
+    <div className="flex h-screen bg-[#030712] overflow-hidden text-white">
 
-      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
-      <aside className="w-64 shrink-0 bg-bot-bg flex flex-col text-white">
+      {/* ── Sidebar ───────────────────────────────────────────────────────── */}
+      <aside
+        className="shrink-0 flex flex-col transition-all duration-300 border-r border-white/5"
+        style={{
+          width: sidebarOpen ? '260px' : '0',
+          overflow: 'hidden',
+          background: 'linear-gradient(180deg, #08091a 0%, #050816 100%)',
+        }}
+      >
+        <div className="flex flex-col h-full w-[260px]">
 
-        {/* Brand */}
-        <div className="px-5 pt-6 pb-5 border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-bot/30 border border-bot/50 flex items-center justify-center shrink-0">
-              <BotIcon className="w-5 h-5 text-bot-light" />
+          {/* Brand */}
+          <div className="px-5 pt-6 pb-5 border-b border-white/5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="relative w-9 h-9 flex items-center justify-center shrink-0">
+                <div className="absolute inset-0 rounded-xl bg-indigo-500/20 animate-pulse" style={{ animationDuration: '2s' }} />
+                <div className="relative w-8 h-8 rounded-xl bg-[#0d1117] border border-indigo-500/40 flex items-center justify-center">
+                  <BotIcon className="w-4 h-4 text-indigo-400" />
+                </div>
+              </div>
+              <div>
+                <h1 className="text-sm font-bold text-white leading-tight gradient-text">BayouBot</h1>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="text-[10px] text-emerald-400/80 font-medium">Online · RocketRez live</span>
+                </div>
+              </div>
             </div>
-            <div>
-              <h1 className="text-base font-bold text-white leading-tight">BayouBot</h1>
-              <p className="text-xs text-indigo-400">Order Intelligence</p>
+
+            <button
+              onClick={handleNewChat}
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-white/10 text-xs font-semibold text-slate-300 hover:bg-white/5 hover:border-indigo-500/30 transition-all"
+            >
+              <PlusIcon />
+              New Conversation
+            </button>
+          </div>
+
+          {/* Quick questions */}
+          <div className="flex-1 px-3 py-4 overflow-y-auto">
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-2 mb-3">
+              Quick Queries
+            </p>
+            <div className="space-y-0.5">
+              {QUICK_QUESTIONS.map((q, i) => (
+                <button
+                  key={i}
+                  onClick={() => sendMessage(q)}
+                  disabled={loading}
+                  className="w-full text-left text-xs text-slate-400 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed px-3 py-2 rounded-lg transition-colors leading-snug"
+                >
+                  {q}
+                </button>
+              ))}
             </div>
           </div>
-          <button
-            onClick={handleNewChat}
-            className="mt-4 w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-white/20 text-xs font-semibold text-indigo-200 hover:bg-white/10 transition-colors"
-          >
-            <PlusIcon />
-            New Chat
-          </button>
-        </div>
 
-        {/* Quick questions */}
-        <div className="flex-1 px-4 py-4 overflow-y-auto">
-          <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wide mb-3">Quick Questions</p>
-          <div className="space-y-1">
-            {QUICK_QUESTIONS.map((q, i) => (
-              <button
-                key={i}
-                onClick={() => sendMessage(q)}
-                disabled={loading}
-                className="w-full text-left text-xs text-indigo-200 hover:text-white hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed px-3 py-2 rounded-lg transition-colors leading-snug"
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* User */}
-        <div className="px-4 py-4 border-t border-white/10">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-8 h-8 rounded-full bg-bot/30 border border-bot/50 flex items-center justify-center text-xs font-bold text-bot-light shrink-0">
-              {initials}
+          {/* User */}
+          <div className="px-4 py-4 border-t border-white/5">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-indigo-300 shrink-0 border border-indigo-500/30"
+                style={{ background: 'rgba(99,102,241,0.15)' }}>
+                {initials}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-white truncate">{user?.name}</p>
+                <p className="text-xs text-slate-500 truncate">{user?.position || user?.role}</p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-white truncate">{user?.name}</p>
-              <p className="text-xs text-indigo-400 truncate">{user?.position || user?.role}</p>
-            </div>
+            <button
+              onClick={logout}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-500 hover:text-red-400 hover:bg-red-900/20 rounded-lg transition-colors"
+            >
+              <LogoutIcon />
+              Sign Out
+            </button>
           </div>
-          <button
-            onClick={logout}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-indigo-400 hover:text-red-300 hover:bg-red-900/20 rounded-lg transition-colors"
-          >
-            <LogoutIcon />
-            Sign Out
-          </button>
         </div>
       </aside>
 
-      {/* ── Chat area ───────────────────────────────────────────────────── */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      {/* ── Main chat ─────────────────────────────────────────────────────── */}
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
-          {messages.map((msg, i) => (
-            <MessageBubble key={i} message={msg} />
-          ))}
-          {loading && <TypingIndicator />}
-          <div ref={bottomRef} />
+        {/* Background grid */}
+        <div
+          className="absolute inset-0 opacity-30 pointer-events-none"
+          style={{
+            backgroundImage:
+              'linear-gradient(rgba(99,102,241,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(99,102,241,0.04) 1px, transparent 1px)',
+            backgroundSize: '40px 40px',
+          }}
+        />
+
+        {/* Header */}
+        <div className="relative shrink-0 flex items-center justify-between px-5 py-3.5 border-b border-white/5"
+          style={{ background: 'rgba(5,8,22,0.8)', backdropFilter: 'blur(12px)' }}>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSidebarOpen(p => !p)}
+              className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-white/5 transition-colors"
+            >
+              <MenuIcon />
+            </button>
+            <div>
+              <p className="text-sm font-bold text-white">BayouBot</p>
+              <p className="text-[11px] text-slate-500">Powered by Claude · RocketRez live data</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-emerald-400/70 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            Live
+          </div>
         </div>
 
-        {/* Input */}
-        <div className="shrink-0 bg-white border-t border-gray-200 px-6 py-4">
-          <form onSubmit={handleSubmit} className="flex gap-3 items-end">
-            <textarea
-              ref={el => { inputRef.current = el; textareaRef.current = el; }}
-              value={input}
-              onInput={handleTextareaInput}
-              onChange={() => {}}
-              onKeyDown={handleKeyDown}
-              rows={1}
-              disabled={loading}
-              placeholder="Ask BayouBot about your order data…"
-              className="flex-1 resize-none border border-gray-300 rounded-xl px-4 py-3 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-bot/40 focus:border-bot/50 transition-colors disabled:opacity-50 leading-relaxed"
-              style={{ minHeight: '44px', maxHeight: '120px' }}
-            />
-            <button
-              type="submit"
-              disabled={!input.trim() || loading}
-              className="px-4 py-3 bg-bot text-white rounded-xl hover:bg-bot-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
-            >
-              <SendIcon />
-            </button>
-          </form>
-          <p className="text-center text-xs text-gray-400 mt-2">
-            BayouBot can make mistakes — verify important figures in RocketRez.
-          </p>
+        {/* Messages */}
+        <div className="relative flex-1 overflow-y-auto px-4 py-6 space-y-6">
+
+          {/* Empty state gradient blobs (show before any real convo) */}
+          {messages.length <= 1 && (
+            <div className="absolute inset-0 pointer-events-none overflow-hidden">
+              <div className="absolute top-1/4 left-1/4 w-64 h-64 rounded-full bg-indigo-900/20 blur-[80px] animate-blob" />
+              <div className="absolute bottom-1/3 right-1/4 w-48 h-48 rounded-full bg-violet-900/15 blur-[60px] animate-blob-2" />
+            </div>
+          )}
+
+          <div className="max-w-3xl mx-auto w-full space-y-6">
+            {messages.map((msg, i) => (
+              <MessageBubble key={i} message={msg} />
+            ))}
+            {loading && <TypingIndicator />}
+            <div ref={bottomRef} />
+          </div>
+        </div>
+
+        {/* Input area */}
+        <div
+          className="relative shrink-0 px-4 py-4 border-t border-white/5"
+          style={{ background: 'rgba(5,8,22,0.9)', backdropFilter: 'blur(12px)' }}
+        >
+          <div className="max-w-3xl mx-auto">
+            {/* Glowing wrapper */}
+            <div className="relative rounded-2xl" style={{ boxShadow: '0 0 0 1px rgba(99,102,241,0.2), 0 0 30px rgba(99,102,241,0.05)' }}>
+              <form onSubmit={handleSubmit} className="flex items-end gap-3 bg-[#0d1117] rounded-2xl p-3 border border-white/8">
+                <textarea
+                  ref={el => { inputRef.current = el; textareaRef.current = el; }}
+                  value={input}
+                  onInput={handleTextareaInput}
+                  onChange={() => {}}
+                  onKeyDown={handleKeyDown}
+                  rows={1}
+                  disabled={loading}
+                  placeholder="Ask BayouBot anything about your order data…"
+                  className="flex-1 resize-none bg-transparent text-sm text-white placeholder-slate-600 focus:outline-none leading-relaxed disabled:opacity-50"
+                  style={{ minHeight: '36px', maxHeight: '140px' }}
+                />
+                <button
+                  type="submit"
+                  disabled={!input.trim() || loading}
+                  className="shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                  style={{
+                    background: input.trim() && !loading
+                      ? 'linear-gradient(135deg, #4f46e5, #7c3aed)'
+                      : 'rgba(99,102,241,0.1)',
+                    boxShadow: input.trim() && !loading ? '0 0 20px rgba(99,102,241,0.4)' : 'none',
+                  }}
+                >
+                  <SendIcon />
+                </button>
+              </form>
+            </div>
+            <p className="text-center text-[11px] text-slate-600 mt-2.5">
+              BayouBot can make mistakes — verify critical figures in RocketRez.
+            </p>
+          </div>
         </div>
       </main>
     </div>
   );
 }
 
-// ── Message bubble ───────────────────────────────────────────────────────────
+/* ── Message bubble ─────────────────────────────────────────────────────────── */
 function MessageBubble({ message }) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-xl bg-bot text-white rounded-2xl rounded-tr-sm px-4 py-3 text-sm leading-relaxed shadow-sm">
+        <div
+          className="max-w-xl rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-white leading-relaxed"
+          style={{
+            background: 'linear-gradient(135deg, #4338ca, #6d28d9)',
+            boxShadow: '0 4px 20px rgba(99,102,241,0.25)',
+          }}
+        >
           {message.content}
         </div>
       </div>
@@ -212,13 +290,23 @@ function MessageBubble({ message }) {
   }
 
   return (
-    <div className="flex gap-3 max-w-3xl">
-      <div className="w-8 h-8 rounded-full bg-bot-bg border border-bot/40 flex items-center justify-center shrink-0 mt-0.5">
-        <BotIcon className="w-4 h-4 text-bot-light" />
+    <div className="flex gap-3">
+      {/* Bot avatar */}
+      <div className="shrink-0 mt-0.5">
+        <div className="w-8 h-8 rounded-xl bg-[#0d1117] border border-indigo-500/30 flex items-center justify-center"
+          style={{ boxShadow: '0 0 12px rgba(99,102,241,0.15)' }}>
+          <BotIcon className="w-4 h-4 text-indigo-400" />
+        </div>
       </div>
-      <div className={`flex-1 bg-white rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-gray-800 leading-relaxed shadow-sm border ${
-        message.error ? 'border-red-200 bg-red-50 text-red-700' : 'border-gray-100'
-      }`}>
+
+      <div
+        className={`flex-1 min-w-0 rounded-2xl rounded-tl-sm px-4 py-3 text-sm leading-relaxed ${
+          message.error
+            ? 'bg-red-950/50 border border-red-500/20 text-red-300'
+            : 'bg-[#0d1117]/80 border border-white/6 text-slate-200'
+        }`}
+        style={!message.error ? { boxShadow: '0 4px 20px rgba(0,0,0,0.3)' } : {}}
+      >
         <div className="bot-prose">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
             {message.content}
@@ -229,25 +317,27 @@ function MessageBubble({ message }) {
   );
 }
 
-// ── Typing indicator ─────────────────────────────────────────────────────────
+/* ── Typing indicator ───────────────────────────────────────────────────────── */
 function TypingIndicator() {
   return (
     <div className="flex gap-3">
-      <div className="w-8 h-8 rounded-full bg-bot-bg border border-bot/40 flex items-center justify-center shrink-0">
-        <BotIcon className="w-4 h-4 text-bot-light" />
+      <div className="shrink-0 w-8 h-8 rounded-xl bg-[#0d1117] border border-indigo-500/30 flex items-center justify-center"
+        style={{ boxShadow: '0 0 12px rgba(99,102,241,0.15)' }}>
+        <BotIcon className="w-4 h-4 text-indigo-400" />
       </div>
-      <div className="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm border border-gray-100">
+      <div className="bg-[#0d1117]/80 border border-white/6 rounded-2xl rounded-tl-sm px-4 py-3"
+        style={{ boxShadow: '0 4px 20px rgba(0,0,0,0.3)' }}>
         <div className="flex gap-1.5 items-center h-5">
-          <span className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-          <span className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-          <span className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '160ms' }} />
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '320ms' }} />
         </div>
       </div>
     </div>
   );
 }
 
-// ── Icons ────────────────────────────────────────────────────────────────────
+/* ── Icons ──────────────────────────────────────────────────────────────────── */
 function BotIcon({ className }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -275,6 +365,16 @@ function PlusIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" className="w-3.5 h-3.5">
       <line x1="12" y1="5" x2="12" y2="19" />
       <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
+function MenuIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" className="w-4 h-4">
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="18" x2="21" y2="18" />
     </svg>
   );
 }
