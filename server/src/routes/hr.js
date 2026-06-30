@@ -732,7 +732,8 @@ router.get('/protect/footage-stream', async (req, res) => {
 });
 
 // ── RocketRez Live Sync (Gen 2) ───────────────────────────────────────────────
-const RR_CREW_OFFICES = ['BB Crew Kitchen', 'GI Food & Beverage'];
+// Crew orders always have a contact group with a park prefix — "(BB) Name" or "(GI) Name"
+const RR_CREW_GROUP = /^\((BB|GI)\)/i;
 let rrCachedToken = null;
 let rrTokenExpiry = 0;
 
@@ -777,7 +778,7 @@ router.get('/rocketrez/sync', requireHR, async (req, res) => {
       if (!r.ok) throw new Error(`RocketRez orders API: ${r.status}`);
       const data = await r.json();
       const batch = Array.isArray(data.data) ? data.data : [];
-      crewOrders.push(...batch.filter(o => RR_CREW_OFFICES.includes(o.salesOfficeName)));
+      crewOrders.push(...batch.filter(o => RR_CREW_GROUP.test(o.contactGroupName || '')));
       if (batch.length < 250) break;
       pageIndex++;
     }
@@ -785,14 +786,15 @@ router.get('/rocketrez/sync', requireHR, async (req, res) => {
     // Group by employee
     const byEmp = {};
     for (const order of crewOrders) {
-      const park = order.salesOfficeName === 'BB Crew Kitchen' ? 'BB' : 'GI';
-      const rawName = order.contactGroupName;
-      const name = rawName ? rawName.replace(/^\((BB|GI)\)\s*/i, '').trim() : null;
-      const key = name ? `${park}:${name}` : `${park}:__walkup__`;
+      const rawName = order.contactGroupName || '';
+      const park = (rawName.match(/^\((BB|GI)\)/i)?.[1] || '').toUpperCase();
+      const name = rawName.replace(/^\((BB|GI)\)\s*/i, '').trim() || null;
+      if (!park || !name) continue;
+      const key = `${park}:${name}`;
 
       if (!byEmp[key]) {
         byEmp[key] = {
-          employeeName: name || 'Walk-up / No Account',
+          employeeName: name,
           park,
           payrollTotal: 0,
           cashCardTotal: 0,
