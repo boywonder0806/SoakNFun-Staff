@@ -28,8 +28,23 @@ async function getRRToken() {
   return rrCachedToken;
 }
 
-// Fetch every order in a date range — no filtering
+// Order cache — keyed by "startDate:endDate"
+// Historical dates cache for 1 hour; today's data refreshes every 5 minutes
+const orderCache = new Map();
+const TTL_TODAY = 5  * 60 * 1000;
+const TTL_PAST  = 60 * 60 * 1000;
+
+// Fetch every order in a date range — no filtering, with caching
 async function fetchAllOrders(startDate, endDate) {
+  const today  = new Date().toLocaleDateString('en-CA');
+  const ttl    = endDate >= today ? TTL_TODAY : TTL_PAST;
+  const key    = `${startDate}:${endDate}`;
+  const cached = orderCache.get(key);
+
+  if (cached && Date.now() - cached.fetchedAt < ttl) {
+    return cached.data;
+  }
+
   const token = await getRRToken();
   const base  = process.env.ROCKETREZ_BASE_URL;
   let pageIndex = 0;
@@ -46,6 +61,8 @@ async function fetchAllOrders(startDate, endDate) {
     if (batch.length < 250) break;
     pageIndex++;
   }
+
+  orderCache.set(key, { data: all, fetchedAt: Date.now() });
   return all;
 }
 
