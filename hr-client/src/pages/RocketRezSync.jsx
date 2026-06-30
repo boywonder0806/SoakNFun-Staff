@@ -252,6 +252,9 @@ export default function RocketRezSync() {
                                         timeZone: 'America/Chicago',
                                       })}
                                     </span>
+                                    <span className="text-gray-400 shrink-0 font-mono pt-0.5">
+                                      #{t.orderId}
+                                    </span>
                                     <div className="flex-1 min-w-0 text-gray-700">
                                       {t.items.length > 0
                                         ? t.items.map((item, ii) => (
