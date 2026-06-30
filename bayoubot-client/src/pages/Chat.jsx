@@ -5,17 +5,19 @@ import { useAuth } from '../context/AuthContext.jsx';
 import api from '../lib/api.js';
 
 const QUICK_QUESTIONS = [
-  'How much did all crew spend on payroll deductions today?',
-  'Give me a full employee breakdown for today',
-  'Which BB employees spent the most this week?',
-  'Compare BB vs GI payroll totals for today',
-  'What were the most ordered items yesterday?',
-  'Show me GI employees with cash/card payments today',
+  'Give me a full revenue summary for today',
+  'How much did we make in ticket sales today?',
+  'What were the most popular items sold today?',
+  'Compare food & beverage revenue vs ticket revenue today',
+  'What were our busiest hours today?',
+  'How much crew payroll deduction happened today?',
+  'Break down revenue by sales office for today',
+  'How does today compare to yesterday in total revenue?',
 ];
 
 const GREETING = {
   role: 'assistant',
-  content: `Hi, I'm **BayouBot** — your AI assistant for RocketRez order data.\n\nI can answer questions like:\n- *"How much did BB employees spend on payroll deductions today?"*\n- *"Give me a breakdown of crew meals this week"*\n- *"Which GI employees ordered the most yesterday?"*\n\nWhat would you like to know?`,
+  content: `Hi, I'm **BayouBot** — your AI assistant for all RocketRez order data.\n\nI have real-time access to everything: ticket sales, food & beverage, online orders, crew meals, and more. Ask me things like:\n- *"Give me a full revenue summary for today"*\n- *"Compare ticket sales vs food revenue this week"*\n- *"What were our busiest hours yesterday?"*\n- *"Which crew employees had the most payroll deductions today?"*\n- *"Look up order #12345"*\n\nWhat would you like to know?`,
 };
 
 export default function Chat() {

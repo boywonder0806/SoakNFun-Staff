@@ -2,7 +2,7 @@ import { Router } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { requireHR } from '../middleware/auth.js';
 
-const router   = Router();
+const router    = Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // ── RocketRez auth ─────────────────────────────────────────────────────────
@@ -28,44 +28,134 @@ async function getRRToken() {
   return rrCachedToken;
 }
 
-async function fetchCrewOrders(startDate, endDate) {
+// Fetch every order in a date range — no filtering
+async function fetchAllOrders(startDate, endDate) {
   const token = await getRRToken();
   const base  = process.env.ROCKETREZ_BASE_URL;
-  let page = 1;
-  const crewOrders = [];
+  let pageIndex = 0;
+  const all = [];
 
   while (true) {
-    const url = `${base}/v1/orders?startDate=${startDate}&endDate=${endDate}&limit=250&page=${page}`;
+    const url = `${base}/v1/orders?startDate=${startDate}&endDate=${endDate}&pageSize=250&pageIndex=${pageIndex}`;
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) throw new Error(`RocketRez orders failed: ${res.status}`);
     const json  = await res.json();
     const batch = json.data || [];
     if (!batch.length) break;
-    crewOrders.push(...batch.filter(o => o.contactGroupName?.trim()));
+    all.push(...batch);
     if (batch.length < 250) break;
-    page++;
+    pageIndex++;
   }
-  return crewOrders;
+  return all;
 }
 
+// ── Payment helpers ────────────────────────────────────────────────────────
 function classifyPayments(paymentMethods) {
   let payroll = 0, cashCard = 0, token = 0, comp = 0;
   if (!paymentMethods?.length) return { payroll, cashCard, token, comp };
   for (const pm of paymentMethods) {
     const m   = (pm.paymentMethod || '').toLowerCase();
     const amt = pm.paymentAmount  || 0;
-    if (m.includes('payroll'))                                                                          payroll  += amt;
-    else if (m.includes('token'))                                                                       token    += amt;
+    if      (m.includes('payroll'))                                                                        payroll  += amt;
+    else if (m.includes('token'))                                                                          token    += amt;
     else if (m.includes('stripe') || m.includes('card') || m.includes('cash') ||
-             m.includes('mastercard') || m.includes('visa') || m.includes('amex'))                      cashCard += amt;
-    else                                                                                                comp     += amt;
+             m.includes('mastercard') || m.includes('visa') || m.includes('amex'))                         cashCard += amt;
+    else                                                                                                   comp     += amt;
   }
   return { payroll, cashCard, token, comp };
 }
 
-// ── Tool implementation ────────────────────────────────────────────────────
+function paymentTypeLabel(paymentMethod) {
+  const m = (paymentMethod || '').toLowerCase();
+  if (m.includes('payroll'))                                                              return 'Payroll Deduction';
+  if (m.includes('token'))                                                                return 'Token';
+  if (m.includes('stripe') || m.includes('card') || m.includes('mastercard') ||
+      m.includes('visa') || m.includes('amex'))                                           return 'Card';
+  if (m.includes('cash'))                                                                 return 'Cash';
+  return 'Comp / Other';
+}
+
+// ── Tool 1: Full order summary (all order types) ───────────────────────────
+async function toolGetOrderSummary(startDate, endDate) {
+  const orders = await fetchAllOrders(startDate, endDate);
+
+  // Accumulators
+  const officeMap    = {};
+  const itemMap      = {};
+  const hourMap      = {};
+  const pmTypeMap    = {};
+  let totalRevenue   = 0;
+  let crewCount      = 0;
+  let crewRevenue    = 0;
+
+  for (const order of orders) {
+    const rev    = order.total || 0;
+    totalRevenue += rev;
+
+    const isCrew = !!order.contactGroupName?.trim();
+    if (isCrew) { crewCount++; crewRevenue += rev; }
+
+    // By sales office
+    const office = order.salesOfficeName || 'Unknown';
+    if (!officeMap[office]) officeMap[office] = { orderCount: 0, revenue: 0 };
+    officeMap[office].orderCount++;
+    officeMap[office].revenue = +(officeMap[office].revenue + rev).toFixed(2);
+
+    // By payment type
+    for (const pm of (order.paymentMethods || [])) {
+      const label = paymentTypeLabel(pm.paymentMethod);
+      if (!pmTypeMap[label]) pmTypeMap[label] = 0;
+      pmTypeMap[label] = +(pmTypeMap[label] + (pm.paymentAmount || 0)).toFixed(2);
+    }
+
+    // By hour (Central Time)
+    const hour = new Date(order.createdDate).toLocaleString('en-US', {
+      hour: '2-digit', hour12: false, timeZone: 'America/Chicago',
+    }).padStart(2, '0') + ':00';
+    if (!hourMap[hour]) hourMap[hour] = { orderCount: 0, revenue: 0 };
+    hourMap[hour].orderCount++;
+    hourMap[hour].revenue = +(hourMap[hour].revenue + rev).toFixed(2);
+
+    // By line item
+    for (const li of (order.lineItems || [])) {
+      const name = (li.name || 'Unknown').trim();
+      if (!itemMap[name]) itemMap[name] = { count: 0, revenue: 0 };
+      itemMap[name].count++;
+      itemMap[name].revenue = +(itemMap[name].revenue + (li.subTotal || 0)).toFixed(2);
+    }
+  }
+
+  const bySalesOffice = Object.entries(officeMap)
+    .map(([name, v]) => ({ name, ...v }))
+    .sort((a, b) => b.revenue - a.revenue);
+
+  const topLineItems = Object.entries(itemMap)
+    .map(([name, v]) => ({ name, ...v }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 30);
+
+  const byHour = Object.entries(hourMap)
+    .map(([hour, v]) => ({ hour, ...v }))
+    .sort((a, b) => a.hour.localeCompare(b.hour));
+
+  return {
+    startDate,
+    endDate,
+    totalOrders:   orders.length,
+    totalRevenue:  +totalRevenue.toFixed(2),
+    byPaymentType: pmTypeMap,
+    bySalesOffice,
+    topLineItems,
+    byHour,
+    crewOrders: { count: crewCount, revenue: +crewRevenue.toFixed(2) },
+    availableSalesOffices: [...new Set(orders.map(o => o.salesOfficeName).filter(Boolean))].sort(),
+  };
+}
+
+// ── Tool 2: Crew orders — employee-level payroll breakdown ─────────────────
 async function toolGetCrewOrders(startDate, endDate) {
-  const orders = await fetchCrewOrders(startDate, endDate);
+  const orders = (await fetchAllOrders(startDate, endDate))
+    .filter(o => o.contactGroupName?.trim());
 
   const byEmp = {};
   for (const order of orders) {
@@ -87,9 +177,9 @@ async function toolGetCrewOrders(startDate, endDate) {
     byEmp[key].compTotal      += comp;
     byEmp[key].orderCount++;
     byEmp[key].orders.push({
-      orderId: order.id,
-      date:    order.createdDate,
-      items:   (order.lineItems || [])
+      orderId:  order.id,
+      date:     order.createdDate,
+      items:    (order.lineItems || [])
         .map(li => ({
           name:   (li.name || '').replace(/\s*\((BB|GI)\s*Employee\)/gi, '').replace(/\s*-\s*Token\b/gi, '').trim(),
           amount: li.subTotal || 0,
@@ -124,44 +214,170 @@ async function toolGetCrewOrders(startDate, endDate) {
   return { startDate, endDate, totals, breakdown };
 }
 
+// ── Tool 3: Orders by sales office — individual order detail ───────────────
+async function toolGetOrdersByOffice(startDate, endDate, salesOfficeName) {
+  const allOrders = await fetchAllOrders(startDate, endDate);
+  const filtered  = allOrders.filter(o =>
+    (o.salesOfficeName || '').toLowerCase().includes(salesOfficeName.toLowerCase())
+  );
+
+  const LIMIT = 300;
+  const slice = filtered.slice(0, LIMIT);
+
+  const mapped = slice.map(o => ({
+    orderId:      o.id,
+    date:         o.createdDate,
+    status:       o.status,
+    salesOffice:  o.salesOfficeName,
+    contactGroup: o.contactGroupName || null,
+    total:        o.total,
+    paymentTypes: (o.paymentMethods || []).map(pm => ({
+      type:   paymentTypeLabel(pm.paymentMethod),
+      raw:    pm.paymentMethod,
+      amount: pm.paymentAmount,
+    })),
+    items: (o.lineItems || []).map(li => ({
+      name:   (li.name || '').trim(),
+      amount: li.subTotal || 0,
+    })),
+  }));
+
+  return {
+    salesOfficeName,
+    startDate,
+    endDate,
+    totalMatching:    filtered.length,
+    returned:         mapped.length,
+    truncated:        filtered.length > LIMIT,
+    totalRevenue:     +filtered.reduce((s, o) => s + (o.total || 0), 0).toFixed(2),
+    orders:           mapped,
+  };
+}
+
+// ── Tool 4: Single order lookup ────────────────────────────────────────────
+async function toolGetOrderById(orderId) {
+  const token = await getRRToken();
+  const base  = process.env.ROCKETREZ_BASE_URL;
+  const res   = await fetch(`${base}/v1/orders/${orderId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 404) throw new Error(`Order #${orderId} not found`);
+  if (!res.ok) throw new Error(`RocketRez order lookup failed: ${res.status}`);
+  const json  = await res.json();
+  const order = json.data;
+  return {
+    orderId:      order.id,
+    date:         order.createdDate,
+    status:       order.status,
+    salesOffice:  order.salesOfficeName,
+    contactGroup: order.contactGroupName || null,
+    subtotal:     order.subtotal,
+    total:        order.total,
+    paymentMethods: (order.paymentMethods || []).map(pm => ({
+      method: pm.paymentMethod,
+      amount: pm.paymentAmount,
+    })),
+    lineItems: (order.lineItems || []).map(li => ({
+      name:   li.name,
+      amount: li.subTotal || 0,
+    })),
+  };
+}
+
 // ── Tool definitions for Claude ────────────────────────────────────────────
 const TOOLS = [
   {
-    name: 'get_crew_orders',
-    description: 'Fetch crew meal and food orders from RocketRez for a date range. Returns a breakdown by employee with payroll deductions, cash/card, token, and comp totals plus individual order details. Blue Bayou crew have park="BB", Gulf Islands crew have park="GI". Employees are sorted by payroll total descending.',
+    name: 'get_order_summary',
+    description: `Fetch a comprehensive summary of ALL orders (tickets, food, merchandise, crew meals, online sales, everything) for a date range. Returns:
+- Total order count and revenue
+- Revenue broken down by payment type (card, cash, payroll, token, comp)
+- Revenue and order count per sales office (ticketing, food & beverage, online, etc.)
+- Top 30 line items by order count (with revenue)
+- Hourly order distribution
+- Crew order subtotals
+- List of all sales office names available for drill-down
+Use this first when the user asks about revenue, sales, comparisons between departments, busiest times, popular items, or anything that requires a broad view of operations.`,
     input_schema: {
       type: 'object',
       properties: {
-        startDate: { type: 'string', description: 'Start date in YYYY-MM-DD format (inclusive)' },
-        endDate:   { type: 'string', description: 'End date in YYYY-MM-DD format (inclusive)' },
+        startDate: { type: 'string', description: 'Start date YYYY-MM-DD (inclusive)' },
+        endDate:   { type: 'string', description: 'End date YYYY-MM-DD (inclusive)' },
       },
       required: ['startDate', 'endDate'],
     },
   },
+  {
+    name: 'get_crew_orders',
+    description: `Fetch crew meal orders with a per-employee breakdown. Returns each employee's name, park (BB = Blue Bayou, GI = Gulf Islands), order count, payroll deduction total, cash/card total, token total, and the individual orders with items and amounts. Use this when the user asks specifically about employee spending, payroll deductions, or crew meal details.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        startDate: { type: 'string', description: 'Start date YYYY-MM-DD (inclusive)' },
+        endDate:   { type: 'string', description: 'End date YYYY-MM-DD (inclusive)' },
+      },
+      required: ['startDate', 'endDate'],
+    },
+  },
+  {
+    name: 'get_orders_by_office',
+    description: `Fetch individual order details filtered to a specific sales office (e.g. "GI Food & Beverage", "BB Ticketing", "Online Sales"). Returns up to 300 individual orders with their line items, payment methods, totals, and status. Use this when the user wants to see specific orders or drill into a particular department after using get_order_summary to identify which office to look at. The salesOfficeName is matched as a case-insensitive substring so "food" will match "GI Food & Beverage".`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        startDate:       { type: 'string', description: 'Start date YYYY-MM-DD' },
+        endDate:         { type: 'string', description: 'End date YYYY-MM-DD' },
+        salesOfficeName: { type: 'string', description: 'Sales office name or partial name to filter by' },
+      },
+      required: ['startDate', 'endDate', 'salesOfficeName'],
+    },
+  },
+  {
+    name: 'get_order_by_id',
+    description: 'Look up a single order by its RocketRez order ID. Returns the full order detail: items, payments, totals, status, and which sales office processed it. Use when the user asks about a specific order number.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        orderId: { type: 'number', description: 'The numeric RocketRez order ID' },
+      },
+      required: ['orderId'],
+    },
+  },
 ];
+
+async function executeTool(name, input) {
+  switch (name) {
+    case 'get_order_summary':    return toolGetOrderSummary(input.startDate, input.endDate);
+    case 'get_crew_orders':      return toolGetCrewOrders(input.startDate, input.endDate);
+    case 'get_orders_by_office': return toolGetOrdersByOffice(input.startDate, input.endDate, input.salesOfficeName);
+    case 'get_order_by_id':      return toolGetOrderById(input.orderId);
+    default: throw new Error(`Unknown tool: ${name}`);
+  }
+}
 
 // ── Chat endpoint ──────────────────────────────────────────────────────────
 router.post('/chat', requireHR, async (req, res) => {
   const { messages = [], message } = req.body;
   if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
 
-  const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+  const today     = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
+  const yesterday = new Date(Date.now() - 86_400_000).toLocaleDateString('en-CA');
 
-  const SYSTEM = `You are BayouBot, an AI assistant for Blue Bayou and Gulf Islands Waterpark management. You have real-time access to crew meal order data from RocketRez, the park's ordering and ticketing system.
+  const SYSTEM = `You are BayouBot, an AI assistant for Blue Bayou and Gulf Islands Waterpark management. You have real-time access to all order data from RocketRez — tickets, food & beverage, online sales, crew meals, merchandise, everything.
 
-You can answer questions about:
-- Crew meal orders and payroll deductions for any date range
-- Per-employee spending broken down by park (BB = Blue Bayou, GI = Gulf Islands)
-- Payment types: payroll deductions, cash/card, token, comp
-- Order counts, totals, rankings, and trends
+You have four tools:
+1. get_order_summary — broad view of all orders: revenue by department, top items, hourly patterns, payment types. Start here for any question about overall performance.
+2. get_crew_orders — employee-level breakdown of crew meal orders with payroll deductions.
+3. get_orders_by_office — individual order details filtered to a specific sales office. Use to drill into a department after the summary.
+4. get_order_by_id — full detail on a single specific order.
 
-When a question involves order data, use the get_crew_orders tool to fetch it. Today's date is ${today}.
+Today is ${today}. Yesterday was ${yesterday}.
 
-Formatting rules:
+Formatting:
 - Dollar amounts: $X.XX
-- Use markdown tables when showing multi-row employee data
-- Be concise and direct — management needs quick answers
-- If asked about "today", use ${today}; "yesterday" is the day before`;
+- Use markdown tables for multi-column comparisons
+- Be direct and specific — management needs clear answers, not caveats
+- If a date range spans multiple days and the data is large, summarize intelligently rather than listing every record
+- When comparing departments or time periods, always show the numbers side by side`;
 
   const history = [
     ...messages.map(m => ({ role: m.role, content: m.content })),
@@ -172,7 +388,6 @@ Formatting rules:
     let currentMessages = [...history];
     let reply = null;
 
-    // Agentic loop — keep going until Claude stops calling tools
     while (!reply) {
       const response = await anthropic.messages.create({
         model:      'claude-sonnet-4-6',
@@ -194,7 +409,7 @@ Formatting rules:
             .filter(b => b.type === 'tool_use')
             .map(async b => {
               try {
-                const result = await toolGetCrewOrders(b.input.startDate, b.input.endDate);
+                const result = await executeTool(b.name, b.input);
                 return { type: 'tool_result', tool_use_id: b.id, content: JSON.stringify(result) };
               } catch (err) {
                 return { type: 'tool_result', tool_use_id: b.id, content: `Error: ${err.message}`, is_error: true };
