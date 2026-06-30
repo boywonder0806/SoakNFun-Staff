@@ -278,9 +278,7 @@ async function toolGetOrdersByOffice(startDate, endDate, salesOfficeName) {
     salesOffice:  o.salesOfficeName,
     contactGroup: o.contactGroupName || null,
     customer:     o.primaryContact ? {
-      name:  `${o.primaryContact.firstName || ''} ${o.primaryContact.lastName || ''}`.trim(),
-      email: o.primaryContact.email || null,
-      phone: o.primaryContact.phone || null,
+      name: `${o.primaryContact.firstName || ''} ${o.primaryContact.lastName || ''}`.trim(),
     } : null,
     total:        o.total,
     paymentTypes: (o.paymentMethods || []).map(pm => ({
@@ -543,8 +541,12 @@ Formatting:
 - When comparing departments or time periods, always show the numbers side by side
 - When you report numbers, state which park(s) they cover`;
 
+  // Cap history at the last 10 turns to avoid compounding input-token costs
+  // as conversations grow. The system prompt + tool results are already large;
+  // a 30-turn history of data-heavy answers would multiply that rapidly.
+  const trimmedHistory = messages.slice(-10);
   const history = [
-    ...messages.map(m => ({ role: m.role, content: m.content })),
+    ...trimmedHistory.map(m => ({ role: m.role, content: m.content })),
     { role: 'user', content: message.trim() },
   ];
 
@@ -555,7 +557,7 @@ Formatting:
     while (!reply) {
       const response = await anthropic.messages.create({
         model:      'claude-sonnet-4-6',
-        max_tokens: 4096,
+        max_tokens: 1500,
         system:     SYSTEM,
         tools:      TOOLS,
         messages:   currentMessages,
