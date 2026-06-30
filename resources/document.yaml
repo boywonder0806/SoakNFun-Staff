@@ -1,0 +1,1257 @@
+openapi: 3.1.0
+info:
+  title: RocketRez APIs [Beta]
+  description: |-
+    ![](assets/rocketrez-message.png)
+    ## ⚠️ <span style="color:red">Beta Release</span> ⚠️
+    This is currently in Beta release. As such you may encounter unexpected issues. Please inform your RocketRez contact of any feedback.
+    ## 💫 Overview
+
+    The RocketRez API provides a simple way for people to manage their data. This API is documented using **OpenAPI 3.1.0**.
+    ## 🚀 Getting Started
+
+    To begin using these APIs, you first must get your API credentials.
+    Afterwards, make a `POST` request to the `api/v1/oauth2/token` endpoint with the following parameters in the request body:
+      - `client_id`: this will be provided to you
+      - `client_secret`: this will be provided to you
+      - `scope`: for now use `read_orders`
+      - `grant_type`: this should always be `client_credentials`
+
+      You will be given a JSON Web Token (JWT) that expires in an hour. You will use that JWT to make future calls to the API by using it as the Bearer Token in the Authorization header.
+
+      For more information please see the [token](#/operations/post-oauth2-token) endpoint.
+  version: 0.0.0
+servers:
+  - url: https://secure.rocket-rez.com/api
+    description: Production
+tags:
+  - name: Authentication
+    description: Authentication
+  - name: Orders
+    description: Orders API
+  - name: Memberships
+    description: Memberships API
+paths:
+  /v1/orders:
+    get:
+      summary: List Orders
+      tags:
+        - Orders
+      description: <h3>Returns a list of orders.</h3>
+      operationId: get-orders
+      parameters:
+        - description: Start date for filtering orders in `yyyy-MM-dd` format. By default this value is in the company timezone configured in Rocket Office. This value is assumed to be at the start of the day, so a `startDate` and `endDate` of the same value will fetch results for that day. If no value is provided then `1970-01-01` is used.
+          name: startDate
+          in: query
+          schema: &ref_4
+            type: string
+            format: date
+            example: '1900-01-01'
+          required: false
+        - description: End date for filtering orders in `yyyy-MM-dd` format. By default this value is in the company timezone configured in Rocket Office. This value is assumed to be at the end of the day, so a `startDate` and `endDate` of the same value will fetch results for that day. If no value is provided then the end of the current day is used.
+          name: endDate
+          in: query
+          schema: &ref_5
+            type: string
+            format: date
+            example: '2024-06-01'
+          required: false
+        - description: Start date for filtering orders based on their last modification in `yyyy-MM-dd` format. Only orders modified on or after this date will be returned. By default this value is in the company timezone configured in Rocket Office. This value is assumed to be at the start of the day, so a `modifiedStartDate` and `modifiedEndDate` of the same value will fetch results for that day. If no value is provided then the `startDate` is used.
+          name: modifiedStartDate
+          in: query
+          schema: &ref_6
+            type: string
+            format: date
+            example: '1900-01-01'
+          required: false
+        - description: End date for filtering orders based on their last modification in `yyyy-MM-dd` format. Only orders modified on or before this date will be returned. By default this value is in the company timezone configured in Rocket Office. This value is assumed to be at the end of the day, so a `modifiedStartDate` and `modifiedEndDate` of the same value will fetch results for that day. If no value is provided then the end of the current day is used.
+          name: modifiedEndDate
+          in: query
+          schema: &ref_7
+            type: string
+            format: date
+            example: '2024-06-01'
+          required: false
+        - description: Size of pages used in pagination. By default this value is 250.
+          name: pageSize
+          in: query
+          schema: &ref_8
+            type: integer
+            minimum: 1
+            maximum: 250
+          required: false
+        - description: Index of the page to fetch. By default this value is 0.
+          name: pageIndex
+          in: query
+          schema: &ref_9
+            type: integer
+            minimum: 0
+          required: false
+      security:
+        - oAuth:
+            - read_orders
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: &ref_21
+                  data:
+                    description: The list of orders containing up to `pageSize` results
+                    type: array
+                    items:
+                      type: object
+                      properties: &ref_0
+                        id:
+                          description: Unique identifier for the order.
+                          type: integer
+                          minimum: 0
+                          example: 1234
+                        createdDate:
+                          description: Date and time when the order was created following ISO 8601 format.
+                          type: string
+                          format: date-time
+                          example: '2024-04-24T18:23:46Z'
+                        modifiedDate:
+                          description: Date and time when the last time the order was modified. The value is updated when an order is created, the order status is updated, or a payment is successfully captured. It is also updated when a line item is added, removed, or modified, including changes such as applying discounts or price overrides.
+                          type: string
+                          format: date-time
+                          example: '2024-04-24T18:23:46Z'
+                        status:
+                          description: Current status of the order.
+                          type: string
+                          enum:
+                            - Active
+                            - Estimate
+                            - Voided
+                            - Cancelled
+                            - WaitHold
+                            - ReturnPending
+                            - ReturnProcessed
+                          example: Active
+                        salesOfficeId:
+                          description: UNique identifier for the sales office associated with the order.
+                          type: integer
+                          minimum: 0
+                          example: 123
+                        salesOfficeName:
+                          description: Name of the sales office associated with the order.
+                          type: string
+                          example: Online Sales
+                        salesPersonId:
+                          description: Identifier for the sales person associated with the order.
+                          type:
+                            - 'null'
+                            - integer
+                          minimum: 0
+                        salesPersonFirstName:
+                          description: First name of the sales person associated with the order.
+                          type: string
+                          example: Online
+                        salesPersonLastName:
+                          description: Last name of the sales person associated with the order.
+                          type: string
+                          example: Sales
+                        isWebOrder:
+                          description: Indicates if the order was placed through web engine.
+                          type: boolean
+                          example: true
+                        contactGroupId:
+                          description: Identifier for the contact group.
+                          type:
+                            - 'null'
+                            - integer
+                          minimum: 0
+                          example: 100
+                        contactGroupName:
+                          description: Name of the contact group.
+                          type:
+                            - 'null'
+                            - string
+                          example: Cow Hollow Motor Inn
+                        conceirgeId:
+                          description: Identifier for the concierge.
+                          type:
+                            - 'null'
+                            - integer
+                          minimum: 0
+                          example: 35
+                        currency:
+                          description: Currency used for the order.
+                          type: string
+                          example: US Dollars
+                        discountTotal:
+                          description: Total discount applied to the order.
+                          type: number
+                          format: double
+                          minimum: 0
+                          example: 10.5
+                        subtotal:
+                          description: Subtotal amount for the order.
+                          type: number
+                          format: double
+                          minimum: 0
+                          example: 33.25
+                        taxTotal:
+                          description: Total tax amount for the order.
+                          type: number
+                          format: double
+                          minimum: 0
+                          example: 2.25
+                        total:
+                          description: Total amount of the order.
+                          type: number
+                          format: double
+                          minimum: 0
+                          example: 46
+                        gratuityTotal:
+                          description: Total gratuity amount for the order.
+                          type: number
+                          format: double
+                          example: 5.25
+                        primaryContact:
+                          description: Information about the primary contact for the order.
+                          type: &ref_12
+                            - 'null'
+                            - object
+                          properties: &ref_13
+                            id:
+                              description: Unique identifier for the contact.
+                              type: integer
+                              minimum: 0
+                              example: 12555
+                            firstName:
+                              description: First name of the contact.
+                              type:
+                                - 'null'
+                                - string
+                              example: Joshua
+                            lastName:
+                              description: Last name of the contact.
+                              type:
+                                - 'null'
+                                - string
+                              example: Klassen
+                            email:
+                              description: Email address of the contact.
+                              type:
+                                - 'null'
+                                - string
+                              example: fakeaddress@fakeaddress.com
+                            phone:
+                              description: Phone number of the contact.
+                              type:
+                                - 'null'
+                                - string
+                              example: 555-555-5555
+                            billingAddress:
+                              description: The billing address of the contact.
+                              type: &ref_10
+                                - 'null'
+                                - object
+                              properties: &ref_11
+                                addressLine1:
+                                  description: Address line 1 of the contact.
+                                  type:
+                                    - 'null'
+                                    - string
+                                  example: Fake street
+                                addressLine2:
+                                  description: Address line 2 of the contact.
+                                  type:
+                                    - 'null'
+                                    - string
+                                  example: Unit 5
+                                city:
+                                  description: City of the contact.
+                                  type:
+                                    - 'null'
+                                    - string
+                                  example: Fakeberg
+                                province:
+                                  description: Province/state of the contact.
+                                  type:
+                                    - 'null'
+                                    - string
+                                postalCode:
+                                  description: Postal/ZIP code of the contact.
+                                  type:
+                                    - 'null'
+                                    - string
+                                country:
+                                  description: Country of the contact.
+                                  type:
+                                    - 'null'
+                                    - string
+                        lineItems:
+                          description: Array of line items containing order details.
+                          type: array
+                          items:
+                            type: object
+                            properties: &ref_18
+                              id:
+                                description: Unique identifier for the line item.
+                                type: integer
+                                minimum: 0
+                              type:
+                                description: Type of the line item.
+                                type: string
+                                enum:
+                                  - Product
+                                  - Rate
+                                  - LodgingRate
+                                  - Certificate
+                                  - PrePaidPass
+                                  - PrePaidPassTourRate
+                                  - GeneralAdmission
+                                  - Charter
+                                  - Package
+                                  - Membership
+                                  - MultiPass
+                                  - MultiPassItem
+                              typeId:
+                                description: Unique identifier for the line item type.
+                                type:
+                                  - 'null'
+                                  - integer
+                              name:
+                                description: Name of the line item.
+                                type: string
+                              productId:
+                                description: Unique identifier for the product associated with the line item.
+                                type: string
+                              salesOfficeId:
+                                description: Unique identifier for the sales office associated with the line item.
+                                type: integer
+                              salesOfficeName:
+                                description: Name of the sales office associated with the line item.
+                                type: string
+                                example: Online Sales
+                              rateTypes:
+                                description: Represents different pricing categories for line items including details such as quantity, price, tax, and applicable discounts.
+                                type: array
+                                items:
+                                  type: object
+                                  properties: &ref_14
+                                    rateType:
+                                      description: Type of rate for the line item.
+                                      type:
+                                        - 'null'
+                                        - string
+                                      enum:
+                                        - null
+                                        - Adult
+                                        - Youth
+                                        - Minor
+                                        - Child
+                                        - Senior
+                                        - Military
+                                        - Quantity
+                                    quantity:
+                                      description: Quantity of the line item.
+                                      type: integer
+                                      minimum: 0
+                                    price:
+                                      description: Price of the line item.
+                                      type: number
+                                      format: double
+                                    couponAmount:
+                                      description: Coupon amount applied to the line item.
+                                      type: number
+                                      format: double
+                                    priceOverrideAmount:
+                                      description: Override price amount for the line item.
+                                      type: number
+                                      format: double
+                                    taxTotal:
+                                      description: Total tax for the line item.
+                                      type: number
+                                      format: double
+                                    subTotal:
+                                      description: Subtotal amount for the line item.
+                                      type: number
+                                      format: double
+                                    serials:
+                                      description: List of serials associated with the line item.
+                                      type: array
+                                      items:
+                                        type: string
+                              event:
+                                description: Information about the associated tour or charter.
+                                type: &ref_16
+                                  - 'null'
+                                  - object
+                                properties: &ref_17
+                                  id:
+                                    description: Unique identifier for the tour or charter associated with the order.
+                                    type: integer
+                                    minimum: 0
+                                  type:
+                                    description: Type of event (tour or charter).
+                                    type: string
+                                    enum:
+                                      - Tour
+                                      - Charter
+                                  name:
+                                    description: Name of the associated event.
+                                    type: string
+                                  schedule:
+                                    type: object
+                                    properties: &ref_15
+                                      id:
+                                        description: Unique identifier for the schedule.
+                                        type: integer
+                                        minimum: 0
+                                      date:
+                                        description: Date of the associated event.
+                                        type: string
+                                        format: date
+                                      startTime:
+                                        description: Date and time when the associate event starts.
+                                        type: string
+                                        format: date-time
+                                      endTime:
+                                        description: Date and time when the associate event ends.
+                                        type: string
+                                        format: date-time
+                        questions:
+                          description: Array of order questions.
+                          type: array
+                          items:
+                            type: object
+                            properties: &ref_19
+                              question:
+                                description: The question asked to customer during the order process.
+                                type: string
+                                example: Would you like a guide?
+                              answer:
+                                description: The answer given by the customer during the order process.
+                                type: string
+                                example: 'Yes'
+                  statusCode:
+                    description: The status code of the response.
+                    type: string
+                  rawContent:
+                    description: This field is a legacy field carried over from previous versions of the API. It does not have a defined use in the current implementation, and it is recommended to disregard its value.
+                    type:
+                      - 'null'
+                      - object
+                  errorMessage:
+                    description: Contains details of an error, if one occurred.
+                    type:
+                      - 'null'
+                      - string
+                  pagination:
+                    type: object
+                    description: Represents the pagination related data
+                    properties: &ref_20
+                      count:
+                        description: The number of results returned.
+                        type: integer
+                        minimum: 0
+                      pageIndex:
+                        description: The current page index in the current pagination.
+                        type: integer
+                        minimum: 0
+                      pageSize:
+                        description: The current page size being used in the current pagination. The max size is 250
+                        type: integer
+                        minimum: 1
+                        maximum: 250
+              example:
+                data:
+                  - id: 4
+                    createdDate: '2024-06-06T15:12:09-05:00'
+                    status: Active
+                    salesOfficeId: 5
+                    salesOfficeName: Online Sales
+                    salesPersonId: 131
+                    salesPersonFirstName: Admin
+                    salesPersonLastName: User
+                    isWebOrder: false
+                    contactGroupId: 3
+                    contactGroupName: Prime Group
+                    conceirgeId: null
+                    currency: US Dollars
+                    discountTotal: 4
+                    subtotal: 660.2
+                    taxTotal: 35.6
+                    total: 724.61
+                    gratuityTotal: 32.81
+                    primaryContact:
+                      id: 9876
+                      firstName: John
+                      lastName: Doe
+                      email: null
+                      phone: null
+                      billingAddress:
+                        addressLine1: 40 N Gate Dr
+                        addressLine2: Unit 12A
+                        city: Steinbach
+                        province: Manitoba
+                        postalCode: R5G 2T9
+                        country: Canada
+                    lineItems:
+                      - id: 25
+                        type: Product
+                        typeId: 0
+                        name: Cool Ring
+                        rateTypes:
+                          - rateType: Quantity
+                            quantity: 8
+                            price: 50
+                            couponAmount: 4
+                            priceOverrideAmount: -40
+                            taxTotal: 35.6
+                            subTotal: 391.6
+                            serials: []
+                        event: null
+                      - id: 29
+                        type: Membership
+                        typeId: 8
+                        name: Family Membership
+                        rateTypes:
+                          - rateType: Quantity
+                            quantity: 1
+                            price: 10
+                            couponAmount: 0
+                            priceOverrideAmount: 0
+                            taxTotal: 0
+                            subTotal: 10
+                            serials:
+                              - M1313F1313D1313
+                        event: null
+                      - id: 30
+                        type: Certificate
+                        typeId: 3
+                        name: Fun Gift Card
+                        rateTypes:
+                          - rateType: Quantity
+                            quantity: 2
+                            price: 10
+                            couponAmount: 0
+                            priceOverrideAmount: 0
+                            taxTotal: 0
+                            subTotal: 20
+                            serials: []
+                        event: null
+                      - id: 31
+                        type: Rate
+                        typeId: 1
+                        name: Simple Tour Rate
+                        rateTypes:
+                          - rateType: Adult
+                            quantity: 5
+                            price: 50
+                            couponAmount: 0
+                            priceOverrideAmount: 0
+                            taxTotal: 0
+                            subTotal: 250
+                            serials:
+                              - '26'
+                              - '27'
+                              - '28'
+                              - '29'
+                              - '30'
+                          - rateType: Youth
+                            quantity: 2
+                            price: 10
+                            couponAmount: 0
+                            priceOverrideAmount: 0
+                            taxTotal: 0
+                            subTotal: 20
+                            serials:
+                              - '31'
+                              - '32'
+                        event:
+                          id: 87948
+                          type: Tour
+                          name: Basic Tour
+                          schedule:
+                            id: 8049
+                            date: '2024-06-07'
+                            startTime: '2024-06-07T15:00:00-05:00'
+                            endTime: '2024-06-07T15:30:00-05:00'
+                      - id: 25
+                        type: Product
+                        typeId: 0
+                        name: Round Up Donation Product
+                        rateTypes:
+                          - rateType: Quantity
+                            quantity: 1
+                            price: 0.2
+                            couponAmount: 0
+                            priceOverrideAmount: 0
+                            taxTotal: 0
+                            subTotal: 0.2
+                            serials: []
+                        event: null
+                    questions:
+                      - question: Would you like a guide?
+                        answer: 'Yes'
+                      - question: Any allergies we should know about?
+                        answer: 'No'
+                      - question: How did you hear about us?
+                        answer: TikTok
+                  - id: 5
+                    createdDate: '2024-06-06T16:13:01-05:00'
+                    status: Active
+                    salesOfficeId: 5
+                    salesOfficeName: Online Sales
+                    salesPersonId: 131
+                    salesPersonFirstName: Admin
+                    salesPersonLastName: User
+                    isWebOrder: false
+                    contactGroupId: 3
+                    contactGroupName: Prime Group
+                    conceirgeId: null
+                    currency: US Dollars
+                    discountTotal: 0
+                    subtotal: 20
+                    taxTotal: 0
+                    total: 20
+                    gratuityTotal: 0
+                    primaryContact:
+                      id: 9877
+                      firstName: Jane
+                      lastName: Doe
+                      email: Jane.Doe@example.com
+                      phone: '5555555555'
+                      billingAddress:
+                        addressLine1: 40 N Gate Dr
+                        addressLine2: Unit 12A
+                        city: Steinbach
+                        province: Manitoba
+                        postalCode: R5G 2T9
+                        country: Canada
+                    lineItems:
+                      - id: 33
+                        type: LodgingRate
+                        typeId: 2
+                        name: Neat Lodging Rate
+                        rateTypes:
+                          - rateType: Quantity
+                            quantity: 2
+                            price: 10
+                            couponAmount: 0
+                            priceOverrideAmount: 0
+                            taxTotal: 0
+                            subTotal: 20
+                            serials: []
+                        event: null
+                    questions:
+                      - question: How many flips can you do in a row?
+                        answer: '2'
+                  - id: 6
+                    createdDate: '2024-06-06T16:19:42-05:00'
+                    status: Active
+                    salesOfficeId: 5
+                    salesOfficeName: Online Sales
+                    salesPersonId: 131
+                    salesPersonFirstName: Admin
+                    salesPersonLastName: User
+                    isWebOrder: true
+                    contactGroupId: null
+                    contactGroupName: null
+                    conceirgeId: 10
+                    currency: US Dollars
+                    discountTotal: 0
+                    subtotal: 50
+                    taxTotal: 8.61
+                    total: 58.61
+                    gratuityTotal: 0
+                    primaryContact:
+                      id: 0
+                      firstName: null
+                      lastName: null
+                      email: null
+                      phone: null
+                      billingAddress:
+                        addressLine1: null
+                        addressLine2: null
+                        city: null
+                        province: null
+                        postalCode: null
+                        country: null
+                    lineItems:
+                      - id: 25
+                        type: Product
+                        typeId: 0
+                        name: Cool Ring
+                        rateTypes:
+                          - rateType: Quantity
+                            quantity: 1
+                            price: 50
+                            couponAmount: 0
+                            priceOverrideAmount: 0
+                            taxTotal: 8.61
+                            subTotal: 58.61
+                            serials: []
+                        event: null
+                    questions: []
+                statusCode: OK
+                rawContent: null
+                errorMessage: null
+                pagination:
+                  count: 3
+                  pageIndex: 0
+                  pageSize: 250
+        '400':
+          description: Request cannot be understood.
+          content: &ref_24
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type:
+                      - 'null'
+                      - object
+                  statusCode:
+                    type: integer
+                  rawContent:
+                    type:
+                      - 'null'
+                      - object
+                  errorMessage:
+                    type: string
+                example:
+                  data: null
+                  statusCode: 400
+                  rawContent: null
+                  errorMessage: startDate is not in a valid format.
+        '401':
+          description: Unauthorized to use this api. Could happen if a bad or expired token was provided.
+          content: &ref_1
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type:
+                      - 'null'
+                      - object
+                  statusCode:
+                    type: integer
+                  rawContent:
+                    type:
+                      - 'null'
+                      - object
+                  errorMessage:
+                    type: string
+                example:
+                  data: null
+                  statusCode: 401
+                  rawContent: null
+                  errorMessage: Please provide valid authentication credentials.
+        '422':
+          description: Request is well formed but cannot be processed due to data contraints.
+          content: &ref_25
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type:
+                      - 'null'
+                      - object
+                  statusCode:
+                    type: integer
+                  rawContent:
+                    type:
+                      - 'null'
+                      - object
+                  errorMessage:
+                    type: string
+                example:
+                  data: null
+                  statusCode: 422
+                  rawContent: null
+                  errorMessage: pageIndex cannot be less than 0.
+        '429':
+          description: Rate limit exceeded.
+          content: &ref_2
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type:
+                      - 'null'
+                      - object
+                  statusCode:
+                    type: integer
+                  rawContent:
+                    type:
+                      - 'null'
+                      - object
+                  errorMessage:
+                    type: string
+                example:
+                  data: null
+                  statusCode: 429
+                  rawContent: null
+                  errorMessage: Rate limit for API requests exceeded. Please try again later.
+  /v1/orders/{orderID}:
+    get:
+      summary: Get Order
+      tags:
+        - Orders
+      description: <h3>Returns a specific order.</h3>
+      operationId: get-order
+      parameters:
+        - in: path
+          name: orderID
+          schema:
+            type: integer
+          required: true
+          description: Numeric ID of the order to fetch.
+      security:
+        - oAuth:
+            - read_orders
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: &ref_22
+                  data:
+                    description: The order associated with the given id.
+                    type: object
+                    properties: *ref_0
+                  statusCode:
+                    description: The status code of the response.
+                    type: string
+                  rawContent:
+                    description: This field is a legacy field carried over from previous versions of the API. It does not have a defined use in the current implementation, and it is recommended to disregard its value.
+                    type:
+                      - 'null'
+                      - object
+                  errorMessage:
+                    description: Contains details of an error, if one occurred.
+                    type:
+                      - 'null'
+                      - string
+              example:
+                data:
+                  id: 4
+                  createdDate: '2024-06-06T15:12:09-05:00'
+                  status: Active
+                  salesOfficeId: 5
+                  salesOfficeName: Online Sales
+                  salesPersonId: 131
+                  salesPersonFirstName: Admin
+                  salesPersonLastName: User
+                  isWebOrder: false
+                  contactGroupId: 3
+                  contactGroupName: Prime Group
+                  conceirgeId: null
+                  currency: US Dollars
+                  discountTotal: 4
+                  subtotal: 660.2
+                  taxTotal: 35.6
+                  total: 724.61
+                  gratuityTotal: 32.81
+                  primaryContact:
+                    id: 9876
+                    firstName: John
+                    lastName: Doe
+                    email: null
+                    phone: null
+                    billingAddress:
+                      addressLine1: 40 N Gate Dr
+                      addressLine2: Unit 12A
+                      city: Steinbach
+                      province: Manitoba
+                      postalCode: R5G 2T9
+                      country: Canada
+                  lineItems:
+                    - id: 25
+                      type: Product
+                      typeId: 0
+                      name: Cool Ring
+                      rateTypes:
+                        - rateType: Quantity
+                          quantity: 8
+                          price: 50
+                          couponAmount: 4
+                          priceOverrideAmount: -40
+                          taxTotal: 35.6
+                          subTotal: 391.6
+                          serials: []
+                      event: null
+                    - id: 29
+                      type: Membership
+                      typeId: 8
+                      name: Family Membership
+                      rateTypes:
+                        - rateType: Quantity
+                          quantity: 1
+                          price: 10
+                          couponAmount: 0
+                          priceOverrideAmount: 0
+                          taxTotal: 0
+                          subTotal: 10
+                          serials:
+                            - M1313F1313D1313
+                      event: null
+                    - id: 30
+                      type: Certificate
+                      typeId: 3
+                      name: Fun Gift Card
+                      rateTypes:
+                        - rateType: Quantity
+                          quantity: 2
+                          price: 10
+                          couponAmount: 0
+                          priceOverrideAmount: 0
+                          taxTotal: 0
+                          subTotal: 20
+                          serials: []
+                      event: null
+                    - id: 31
+                      type: Rate
+                      typeId: 1
+                      name: Simple Tour Rate
+                      rateTypes:
+                        - rateType: Adult
+                          quantity: 5
+                          price: 50
+                          couponAmount: 0
+                          priceOverrideAmount: 0
+                          taxTotal: 0
+                          subTotal: 250
+                          serials:
+                            - '26'
+                            - '27'
+                            - '28'
+                            - '29'
+                            - '30'
+                        - rateType: Youth
+                          quantity: 2
+                          price: 10
+                          couponAmount: 0
+                          priceOverrideAmount: 0
+                          taxTotal: 0
+                          subTotal: 20
+                          serials:
+                            - '31'
+                            - '32'
+                      event:
+                        id: 87948
+                        type: Tour
+                        name: Basic Tour
+                        schedule:
+                          id: 8049
+                          date: '2024-06-07'
+                          startTime: '2024-06-07T15:00:00-05:00'
+                          endTime: '2024-06-07T15:30:00-05:00'
+                    - id: 25
+                      type: Product
+                      typeId: 0
+                      name: Round Up Donation Product
+                      rateTypes:
+                        - rateType: Quantity
+                          quantity: 1
+                          price: 0.2
+                          couponAmount: 0
+                          priceOverrideAmount: 0
+                          taxTotal: 0
+                          subTotal: 0.2
+                          serials: []
+                      event: null
+                  questions:
+                    - question: Would you like a guide?
+                      answer: 'Yes'
+                    - question: Any allergies we should know about?
+                      answer: 'No'
+                    - question: How did you hear about us?
+                      answer: TikTok
+                statusCode: OK
+                rawContent: null
+                errorMessage: null
+        '401':
+          description: Unauthorized to use this api. Could happen if a bad or expired token was provided.
+          content: *ref_1
+        '404':
+          description: Unable to find requested order.
+          content: &ref_3
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type:
+                      - 'null'
+                      - object
+                  statusCode:
+                    type: integer
+                  rawContent:
+                    type:
+                      - 'null'
+                      - object
+                  errorMessage:
+                    type: string
+                example:
+                  data: null
+                  statusCode: 404
+                  rawContent: null
+                  errorMessage: The requested order was not found. Please verify the order ID and try again.
+        '429':
+          description: Rate limit exceeded.
+          content: *ref_2
+  /v1/orders/{orderID}/guests:
+    get:
+      summary: Get Order Guests
+      tags:
+        - Orders
+      description: <h3>Returns guests for a specific order.</h3>
+      operationId: get-order-guests
+      parameters:
+        - in: path
+          name: orderID
+          schema:
+            type: integer
+          required: true
+          description: Numeric ID of the order to fetch.
+      security:
+        - oAuth:
+            - read_orders
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: &ref_23
+                  data:
+                    description: The response data.
+                    type: object
+                    properties:
+                      guests:
+                        description: A list of guests associated with the order.
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            guestId:
+                              description: Unique identifier for the order.
+                              type: string
+                              example: c85a1208-27c9-4b52-a11d-97c5ff2bdef4
+                            firstName:
+                              description: First name of the guest associated with the order.
+                              type: string
+                              example: Timothy
+                            lastName:
+                              description: Last name of the guest associated with the order.
+                              type: string
+                              example: Smith
+                            emails:
+                              description: Array of email addresses associated with the guest.
+                              type: array
+                              exampleLength: 2
+                              items:
+                                type: string
+                                example: timothysmith@example.com
+                            phoneNumbers:
+                              description: Array of phone numbers associated with the guest.
+                              type: array
+                              items:
+                                type: string
+                                example: 555-123-4567
+                            lineItems:
+                              description: Array of line items associated with the guest.
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  lineItemId:
+                                    description: Unique identifier for the line item.
+                                    type: integer
+                                    format: integer
+                                    minimum: 1
+                                    example: 21455
+                                  quantity:
+                                    description: Quantity of the line item.
+                                    type: integer
+                                    minimum: 1
+                                    example: 2
+                  statusCode:
+                    description: The status code of the response.
+                    type: string
+                  errorMessage:
+                    description: Contains details of an error, if one occurred.
+                    type:
+                      - 'null'
+                      - string
+        '401':
+          description: Unauthorized to use this api. Could happen if a bad or expired token was provided.
+          content: *ref_1
+        '404':
+          description: Unable to find requested order.
+          content: *ref_3
+        '429':
+          description: Rate limit exceeded.
+          content: *ref_2
+  /v1/oauth2/token:
+    post:
+      summary: Authenticate
+      tags:
+        - Authentication
+      description: <h3>Authenticate using an API Key. Returns a JWT that is to be used to authenticate all subsequent API calls. The JWT expires after 1 hour.</h3>
+      operationId: post-oauth2-token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - client_id
+                - client_secret
+                - scope
+                - grant_type
+              properties:
+                client_id:
+                  description: The ID of the client requesting API access.
+                  type: string
+                client_secret:
+                  description: The secret of the client requesting API access.
+                  type: string
+                scope:
+                  description: A space separated list of the scopes the client is requesting access for.
+                  type: string
+                grant_type:
+                  description: Should always be `client_credentials`. Tells the token endpoint which grant type to issue.
+                  type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    description: The access token that clients can use to make subsequent API calls.
+                    type: string
+                  expiry:
+                    description: The datetime when the access_token expires. The client will have to make the same call again to obtain a new access token.
+                    type: string
+                    format: datetime
+              example:
+                access_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwiYXBpa2V5IjoiYWJjMTIzIiwiaWF0IjoxNTE2MjM5MDIyfQ.QWFE7ciUcDGF86LEuX08EBGj8iawZmPF2xXWZ_ZHx-M
+                expiry: '2024-05-21T20:37:54.4908461+00:00'
+        '401':
+          description: Unauthorized to use this api. Could happen if a bad or expired token was provided.
+          content: *ref_1
+        '429':
+          description: Rate limit exceeded.
+          content: *ref_2
+components:
+  securitySchemes:
+    oAuth:
+      type: oauth2
+      description: This API uses OAuth 2 with the Client Credential flow.
+      flows:
+        clientCredentials:
+          tokenUrl: https://rocketrez/api/v1/oauth2/token
+          scopes:
+            read_orders: read your orders
+  parameters:
+    startDate:
+      description: Start date for filtering orders in `yyyy-MM-dd` format. By default this value is in the company timezone configured in Rocket Office. This value is assumed to be at the start of the day, so a `startDate` and `endDate` of the same value will fetch results for that day. If no value is provided then `1970-01-01` is used.
+      name: startDate
+      in: query
+      schema: *ref_4
+      required: false
+    endDate:
+      description: End date for filtering orders in `yyyy-MM-dd` format. By default this value is in the company timezone configured in Rocket Office. This value is assumed to be at the end of the day, so a `startDate` and `endDate` of the same value will fetch results for that day. If no value is provided then the end of the current day is used.
+      name: endDate
+      in: query
+      schema: *ref_5
+      required: false
+    modifiedStartDate:
+      description: Start date for filtering orders based on their last modification in `yyyy-MM-dd` format. Only orders modified on or after this date will be returned. By default this value is in the company timezone configured in Rocket Office. This value is assumed to be at the start of the day, so a `modifiedStartDate` and `modifiedEndDate` of the same value will fetch results for that day. If no value is provided then the `startDate` is used.
+      name: modifiedStartDate
+      in: query
+      schema: *ref_6
+      required: false
+    modifiedEndDate:
+      description: End date for filtering orders based on their last modification in `yyyy-MM-dd` format. Only orders modified on or before this date will be returned. By default this value is in the company timezone configured in Rocket Office. This value is assumed to be at the end of the day, so a `modifiedStartDate` and `modifiedEndDate` of the same value will fetch results for that day. If no value is provided then the end of the current day is used.
+      name: modifiedEndDate
+      in: query
+      schema: *ref_7
+      required: false
+    pageSize:
+      description: Size of pages used in pagination. By default this value is 250.
+      name: pageSize
+      in: query
+      schema: *ref_8
+      required: false
+    pageIndex:
+      description: Index of the page to fetch. By default this value is 0.
+      name: pageIndex
+      in: query
+      schema: *ref_9
+      required: false
+  schemas:
+    Order_Contact_Address:
+      type: *ref_10
+      properties: *ref_11
+    Order_Contact:
+      type: *ref_12
+      properties: *ref_13
+    Order_LineItem_RateType:
+      type: object
+      properties: *ref_14
+    Order_LineItem_Event_Schedule:
+      type: object
+      properties: *ref_15
+    Order_lineItem_Event:
+      type: *ref_16
+      properties: *ref_17
+    Order_LineItem:
+      type: object
+      properties: *ref_18
+    Order_Question:
+      type: object
+      properties: *ref_19
+    Order:
+      type: object
+      properties: *ref_0
+    Pagination_Response:
+      type: object
+      description: Represents the pagination related data
+      properties: *ref_20
+    Order_ListResponse:
+      type: object
+      properties: *ref_21
+    Order_Response:
+      type: object
+      properties: *ref_22
+    Order_Guests_Response:
+      type: object
+      properties: *ref_23
+  responses:
+    BadRequest:
+      description: Request cannot be understood.
+      content: *ref_24
+    Unauthorized:
+      description: Unauthorized to use this api. Could happen if a bad or expired token was provided.
+      content: *ref_1
+    UnprocessableContent:
+      description: Request is well formed but cannot be processed due to data contraints.
+      content: *ref_25
+    RateLimitExceeded:
+      description: Rate limit exceeded.
+      content: *ref_2
+    OrderNotFound:
+      description: Unable to find requested order.
+      content: *ref_3
