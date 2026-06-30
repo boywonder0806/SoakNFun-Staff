@@ -313,8 +313,12 @@ async function toolGetOrdersByOffice(startDate, endDate, salesOfficeName) {
 }
 
 // ── Tool 4: Keyword search across all line items ───────────────────────────
-async function toolSearchLineItems(startDate, endDate, keyword, park = 'both') {
-  const orders = filterByPark(await fetchAllOrders(startDate, endDate), park);
+async function toolSearchLineItems(startDate, endDate, keyword, park = 'both', salesOfficeName = null) {
+  let orders = filterByPark(await fetchAllOrders(startDate, endDate), park);
+  if (salesOfficeName) {
+    const officeKw = salesOfficeName.toLowerCase();
+    orders = orders.filter(o => (o.salesOfficeName || '').toLowerCase().includes(officeKw));
+  }
   const kw = keyword.toLowerCase();
 
   const variantMap = {};
@@ -348,6 +352,7 @@ async function toolSearchLineItems(startDate, endDate, keyword, park = 'both') {
   return {
     keyword,
     park,
+    salesOfficeName: salesOfficeName || null,
     startDate,
     endDate,
     totalCount,
@@ -501,8 +506,9 @@ Use this first when the user asks about revenue, sales, comparisons between depa
       properties: {
         startDate: { type: 'string', description: 'Start date YYYY-MM-DD' },
         endDate:   { type: 'string', description: 'End date YYYY-MM-DD' },
-        keyword:   { type: 'string', description: 'The item name or keyword to search for (case-insensitive, partial match). Use the core word, e.g. "cheeseburger" not "how many cheeseburgers".' },
-        park:      { type: 'string', enum: ['BB', 'GI', 'both'], description: "Which park to scope the search to: 'BB' (Blue Bayou), 'GI' (Gulf Islands), or 'both' (combined). Only use 'both' if the user explicitly asked for combined numbers across both parks." },
+        keyword:         { type: 'string', description: 'The item name or keyword to search for (case-insensitive, partial match). Use the core word, e.g. "cheeseburger" not "how many cheeseburgers".' },
+        park:            { type: 'string', enum: ['BB', 'GI', 'both'], description: "Which park to scope the search to: 'BB' (Blue Bayou), 'GI' (Gulf Islands), or 'both' (combined). Only use 'both' if the user explicitly asked for combined numbers across both parks." },
+        salesOfficeName: { type: 'string', description: 'Optional. Restrict the search to a specific sales office / POS location (e.g. "BB Gift Shop", "GI Food & Beverage", "BB Crew Kitchen"). Use this whenever the user mentions a specific location like "in the gift shop", "at food & beverage", "from the kitchen", etc. Matched as a case-insensitive substring.' },
       },
       required: ['startDate', 'endDate', 'keyword', 'park'],
     },
@@ -526,7 +532,7 @@ async function executeTool(name, input) {
     case 'get_order_summary':    return toolGetOrderSummary(input.startDate, input.endDate, input.park);
     case 'get_crew_orders':      return toolGetCrewOrders(input.startDate, input.endDate, input.park);
     case 'get_orders_by_office': return toolGetOrdersByOffice(input.startDate, input.endDate, input.salesOfficeName);
-    case 'search_line_items':    return toolSearchLineItems(input.startDate, input.endDate, input.keyword, input.park);
+    case 'search_line_items':    return toolSearchLineItems(input.startDate, input.endDate, input.keyword, input.park, input.salesOfficeName || null);
     case 'get_order_by_id':      return toolGetOrderById(input.orderId);
     default: throw new Error(`Unknown tool: ${name}`);
   }
