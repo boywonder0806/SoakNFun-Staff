@@ -254,7 +254,50 @@ async function toolGetOrdersByOffice(startDate, endDate, salesOfficeName) {
   };
 }
 
-// ── Tool 4: Single order lookup ────────────────────────────────────────────
+// ── Tool 4: Keyword search across all line items ───────────────────────────
+async function toolSearchLineItems(startDate, endDate, keyword) {
+  const orders = await fetchAllOrders(startDate, endDate);
+  const kw = keyword.toLowerCase();
+
+  const variantMap = {};
+  let totalCount   = 0;
+  let totalRevenue = 0;
+
+  for (const order of orders) {
+    for (const li of (order.lineItems || [])) {
+      const raw  = (li.name || '').trim();
+      const norm = raw.toLowerCase()
+        // strip employee/crew suffixes so "Cheeseburger (BB Employee)" matches "cheeseburger"
+        .replace(/\s*\((bb|gi)\s*employee\)/gi, '')
+        .replace(/\s*-\s*token\b/gi, '')
+        .trim();
+
+      if (!norm.includes(kw)) continue;
+
+      if (!variantMap[raw]) variantMap[raw] = { count: 0, revenue: 0 };
+      variantMap[raw].count++;
+      variantMap[raw].revenue = +(variantMap[raw].revenue + (li.subTotal || 0)).toFixed(2);
+      totalCount++;
+      totalRevenue += (li.subTotal || 0);
+    }
+  }
+
+  const variants = Object.entries(variantMap)
+    .map(([name, v]) => ({ name, count: v.count, revenue: v.revenue }))
+    .sort((a, b) => b.count - a.count);
+
+  return {
+    keyword,
+    startDate,
+    endDate,
+    totalCount,
+    totalRevenue: +totalRevenue.toFixed(2),
+    variantCount: variants.length,
+    variants,
+  };
+}
+
+// ── Tool 5: Single order lookup ────────────────────────────────────────────
 async function toolGetOrderById(orderId) {
   const token = await getRRToken();
   const base  = process.env.ROCKETREZ_BASE_URL;
@@ -332,6 +375,19 @@ Use this first when the user asks about revenue, sales, comparisons between depa
     },
   },
   {
+    name: 'search_line_items',
+    description: `Search ALL line items across every order for a keyword and return every matching name variant with individual counts and revenue. ALWAYS use this tool when the user asks about a specific food or product by name (e.g. "cheeseburger", "fries", "funnel cake", "admission"). Item names in RocketRez often have suffixes like "(BB Employee)", "(GI Employee)", "- Token", combo names, or location-specific prefixes — this tool strips those automatically so "cheeseburger" matches "Cheeseburger", "Cheeseburger (BB Employee)", "Double Cheeseburger", "Bacon Cheeseburger", etc. It returns the total count and revenue across ALL matching variants, plus a breakdown by exact name so you can see every variant. Never guess from the top-30 summary list — always use this tool for item-level questions.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        startDate: { type: 'string', description: 'Start date YYYY-MM-DD' },
+        endDate:   { type: 'string', description: 'End date YYYY-MM-DD' },
+        keyword:   { type: 'string', description: 'The item name or keyword to search for (case-insensitive, partial match). Use the core word, e.g. "cheeseburger" not "how many cheeseburgers".' },
+      },
+      required: ['startDate', 'endDate', 'keyword'],
+    },
+  },
+  {
     name: 'get_order_by_id',
     description: 'Look up a single order by its RocketRez order ID. Returns the full order detail: items, payments, totals, status, and which sales office processed it. Use when the user asks about a specific order number.',
     input_schema: {
@@ -349,6 +405,7 @@ async function executeTool(name, input) {
     case 'get_order_summary':    return toolGetOrderSummary(input.startDate, input.endDate);
     case 'get_crew_orders':      return toolGetCrewOrders(input.startDate, input.endDate);
     case 'get_orders_by_office': return toolGetOrdersByOffice(input.startDate, input.endDate, input.salesOfficeName);
+    case 'search_line_items':    return toolSearchLineItems(input.startDate, input.endDate, input.keyword);
     case 'get_order_by_id':      return toolGetOrderById(input.orderId);
     default: throw new Error(`Unknown tool: ${name}`);
   }
@@ -364,19 +421,20 @@ router.post('/chat', requireHR, async (req, res) => {
 
   const SYSTEM = `You are BayouBot, an AI assistant for Blue Bayou and Gulf Islands Waterpark management. You have real-time access to all order data from RocketRez — tickets, food & beverage, online sales, crew meals, merchandise, everything.
 
-You have four tools:
-1. get_order_summary — broad view of all orders: revenue by department, top items, hourly patterns, payment types. Start here for any question about overall performance.
+You have five tools:
+1. get_order_summary — broad view of all orders: revenue by department, top items, hourly patterns, payment types. Start here for questions about overall performance or revenue.
 2. get_crew_orders — employee-level breakdown of crew meal orders with payroll deductions.
-3. get_orders_by_office — individual order details filtered to a specific sales office. Use to drill into a department after the summary.
-4. get_order_by_id — full detail on a single specific order.
+3. get_orders_by_office — individual order details filtered to a specific sales office.
+4. search_line_items — keyword search across EVERY line item in every order, finding all name variants automatically. ALWAYS use this when the user asks about a specific item by name (cheeseburger, fries, admission ticket, funnel cake, etc.). Item names in RocketRez have suffixes like "(BB Employee)", combo names, location prefixes — this tool handles all of that automatically and sums across all variants. Never try to answer item-count questions from the top-30 list in get_order_summary.
+5. get_order_by_id — full detail on a single specific order by ID.
 
 Today is ${today}. Yesterday was ${yesterday}.
 
 Formatting:
 - Dollar amounts: $X.XX
 - Use markdown tables for multi-column comparisons
-- Be direct and specific — management needs clear answers, not caveats
-- If a date range spans multiple days and the data is large, summarize intelligently rather than listing every record
+- Be direct and specific — management needs clear answers
+- For item searches: always report the total count across all variants first, then show the variant breakdown so the user can see every name used
 - When comparing departments or time periods, always show the numbers side by side`;
 
   const history = [
