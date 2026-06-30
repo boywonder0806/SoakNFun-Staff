@@ -68,18 +68,28 @@ async function fetchAllOrders(startDate, endDate) {
 
 // ── Payment helpers ────────────────────────────────────────────────────────
 function classifyPayments(paymentMethods) {
-  let payroll = 0, cashCard = 0, token = 0, comp = 0;
-  if (!paymentMethods?.length) return { payroll, cashCard, token, comp };
+  let payroll = 0, cashCard = 0, token = 0, prePaid = 0, comp = 0;
+  if (!paymentMethods?.length) return { payroll, cashCard, token, prePaid, comp };
   for (const pm of paymentMethods) {
     const m   = (pm.paymentMethod || '').toLowerCase();
     const amt = pm.paymentAmount  || 0;
     if      (m.includes('payroll'))                                                                        payroll  += amt;
     else if (m.includes('token'))                                                                          token    += amt;
+    else if (m.includes('pre-paid'))                                                                       prePaid  += amt;
     else if (m.includes('stripe') || m.includes('card') || m.includes('cash') ||
-             m.includes('mastercard') || m.includes('visa') || m.includes('amex'))                         cashCard += amt;
+             m.includes('mastercard') || m.includes('visa') || m.includes('amex') ||
+             m.includes('discover') || m.includes('nayax') || m.includes('paypal'))                        cashCard += amt;
     else                                                                                                   comp     += amt;
   }
-  return { payroll, cashCard, token, comp };
+  return { payroll, cashCard, token, prePaid, comp };
+}
+
+// Exclude Cancelled, Void, Estimate and Return Processed orders from revenue
+// aggregates — these inflate totals by ~$100k/month in the live data.
+// get_order_by_id still returns any status since you may look up a cancelled order.
+const ACTIVE_STATUSES = new Set(['Active']);
+function activeOnly(orders) {
+  return orders.filter(o => ACTIVE_STATUSES.has(o.status));
 }
 
 // Filter orders to a single park by sales office name prefix ("BB ..." / "GI ...").
@@ -114,15 +124,18 @@ function paymentTypeLabel(paymentMethod) {
   const m = (paymentMethod || '').toLowerCase();
   if (m.includes('payroll'))                                                              return 'Payroll Deduction';
   if (m.includes('token'))                                                                return 'Token';
-  if (m.includes('stripe') || m.includes('card') || m.includes('mastercard') ||
-      m.includes('visa') || m.includes('amex'))                                           return 'Card';
+  if (m.includes('pre-paid'))                                                             return 'Pre-Paid Pass';
+  if (m.includes('nayax'))                                                                return 'Nayax (Kiosk)';
+  if (m.includes('paypal'))                                                               return 'PayPal';
   if (m.includes('cash'))                                                                 return 'Cash';
+  if (m.includes('stripe') || m.includes('card') || m.includes('mastercard') ||
+      m.includes('visa') || m.includes('amex') || m.includes('discover'))                return 'Card';
   return 'Comp / Other';
 }
 
 // ── Tool 1: Full order summary (all order types) ───────────────────────────
 async function toolGetOrderSummary(startDate, endDate, park = 'both') {
-  const orders = filterByPark(await fetchAllOrders(startDate, endDate), park);
+  const orders = activeOnly(filterByPark(await fetchAllOrders(startDate, endDate), park));
 
   // Accumulators
   const officeMap    = {};
@@ -200,7 +213,7 @@ async function toolGetOrderSummary(startDate, endDate, park = 'both') {
 
 // ── Tool 2: Crew orders — employee-level payroll breakdown ─────────────────
 async function toolGetCrewOrders(startDate, endDate, park = 'both') {
-  const orders = (await fetchAllOrders(startDate, endDate))
+  const orders = activeOnly(await fetchAllOrders(startDate, endDate))
     .filter(o => o.contactGroupName?.trim());
 
   const byEmp = {};
@@ -263,7 +276,7 @@ async function toolGetCrewOrders(startDate, endDate, park = 'both') {
 
 // ── Tool 3: Orders by sales office — individual order detail ───────────────
 async function toolGetOrdersByOffice(startDate, endDate, salesOfficeName) {
-  const allOrders = await fetchAllOrders(startDate, endDate);
+  const allOrders = activeOnly(await fetchAllOrders(startDate, endDate));
   const filtered  = allOrders.filter(o =>
     (o.salesOfficeName || '').toLowerCase().includes(salesOfficeName.toLowerCase())
   );
@@ -275,6 +288,7 @@ async function toolGetOrdersByOffice(startDate, endDate, salesOfficeName) {
     orderId:      o.id,
     date:         o.createdDate,
     status:       o.status,
+    isWebOrder:   o.isWebOrder || false,
     salesOffice:  o.salesOfficeName,
     salesPerson:  `${o.salesPersonFirstName || ''} ${o.salesPersonLastName || ''}`.trim() || null,
     contactGroup: o.contactGroupName || null,
@@ -314,7 +328,7 @@ async function toolGetOrdersByOffice(startDate, endDate, salesOfficeName) {
 
 // ── Tool 4: Keyword search across all line items ───────────────────────────
 async function toolSearchLineItems(startDate, endDate, keyword, park = 'both', salesOfficeName = null) {
-  let orders = filterByPark(await fetchAllOrders(startDate, endDate), park);
+  let orders = activeOnly(filterByPark(await fetchAllOrders(startDate, endDate), park));
   if (salesOfficeName) {
     const officeKw = salesOfficeName.toLowerCase();
     orders = orders.filter(o => (o.salesOfficeName || '').toLowerCase().includes(officeKw));
@@ -440,13 +454,54 @@ You have five tools:
 Two locations — Blue Bayou (BB) and Gulf Islands (GI):
 get_order_summary, get_crew_orders, and search_line_items all take a required "park" argument ('BB', 'GI', or 'both'). Before calling any of these, check whether the user has specified which park they mean — either in this message or earlier in the conversation. If it's not clear, STOP and ask a short clarifying question (e.g. "Just Blue Bayou, just Gulf Islands, or both combined?") instead of calling the tool or guessing. Do not default to 'both' on your own judgment. Once the user states a park (in this message or a prior one in the conversation), remember it for the rest of the conversation and don't ask again unless they ask about the other park or switch topics significantly. get_orders_by_office and get_order_by_id don't need this since the office name or order ID already pins down the scope.
 
+Sales office names (use these exact strings for salesOfficeName):
+- BB Admissions (parking, admissions, gate)
+- BB Food & Beverage
+- BB Gift Shop
+- BB Crew Kitchen (crew/employee meals at BB)
+- BB Web Sales (online ticket purchases, BB website)
+- BB Cabana Services
+- BB - Lockers (Nayax Sales)
+- GI Admissions
+- GI Food & Beverage
+- GI Gully's Gift Shop (GI gift shop)
+- GI Web Sales (online ticket purchases, GI website)
+- GI Cabana Services
+- GI Groups
+- GI - Lockers (Nayax Sales)
+When a user says "gift shop" for BB, use "BB Gift Shop". When they say "gift shop" for GI, use "GI Gully's Gift Shop". "Admissions" or "parking" = Admissions office. "Food" or "F&B" = Food & Beverage.
+
+Item naming conventions in RocketRez:
+- BB items have a "(BB)" suffix: "Bottled Drink (BB)", "Pizza (BB)"
+- GI items have no park suffix: "Fries Cafe", "Chicken Tenders"
+- Employee/crew items have "(BB Employee)", "(GI Employee)", "(Employee)", or "- employee" suffix
+- Season pass redemptions appear as "BB Park Admission - Season Pass Redemption" and "GI Park Admission - Season Pass Redemption"
+- Some GI items have asterisk variants: "Bottle Drink *", "Chips*" — these are the same products
+- Parking at BB shows as "Parking Fee (BB)" or "BB Parking"
+- When searching, use the shortest core word: "drink" not "bottled drink", "fries" not "french fries"
+
+Salesperson naming in RocketRez:
+- BB staff appear as "BB - Name", "BB- Name", "BB-Name" or "BB Name" (inconsistent spacing/dash)
+- GI staff appear as plain "First Last" (sometimes ALL CAPS)
+- System/web accounts (not real employees): "BB - General Sales Web Engine", "BB - Season Pass Web Engine", "GI - Public Sales", "GI - SOAR", "GI - Season Passes", "GI - Consignment Admission", "GI - Covered Area Services", "Ticket 1 GIWP"
+- When reporting a cashier name, strip the "BB - ", "BB- ", "BB-" prefix for readability
+
+Payment types in this system:
+- Card: Stripe (Visa/Mastercard/Amex/Discover), Apple Pay, Google Pay, PayPal, Nayax kiosk
+- Cash: cash transactions
+- Token: token redemptions (internal currency)
+- Pre-Paid Pass: pre-sold pass redemptions (revenue was collected at time of purchase)
+- Payroll Deduction: employee payroll deductions
+
+Order status: only 'Active' orders represent completed transactions. Cancelled, Void, Estimate (open/incomplete tabs), and Return Processed orders are automatically excluded from all revenue and count figures returned by the tools. If a user asks about a cancelled or voided order specifically, use get_order_by_id.
+
 Formatting:
 - Dollar amounts: $X.XX
 - Use markdown tables for multi-column comparisons
 - Be direct and specific — management needs clear answers
 - For item searches: always report the total count across all variants first, then show the variant breakdown so the user can see every name used
 - When comparing departments or time periods, always show the numbers side by side
-- When you report numbers, state which park(s) they cover`;
+- When you report numbers, state which park(s) and office they cover`;
 
 // ── Tool definitions for Claude ────────────────────────────────────────────
 const TOOLS = [
