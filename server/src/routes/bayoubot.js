@@ -276,6 +276,7 @@ async function toolGetOrdersByOffice(startDate, endDate, salesOfficeName) {
     date:         o.createdDate,
     status:       o.status,
     salesOffice:  o.salesOfficeName,
+    salesPerson:  `${o.salesPersonFirstName || ''} ${o.salesPersonLastName || ''}`.trim() || null,
     contactGroup: o.contactGroupName || null,
     customer:     o.primaryContact ? {
       name: `${o.primaryContact.firstName || ''} ${o.primaryContact.lastName || ''}`.trim(),
@@ -481,7 +482,7 @@ Use this first when the user asks about revenue, sales, comparisons between depa
   },
   {
     name: 'get_orders_by_office',
-    description: `Fetch individual order details filtered to a specific sales office (e.g. "GI Food & Beverage", "BB Ticketing", "Online Sales"). Returns up to 150-500 individual orders depending on how wide the date range is (narrower ranges return more detail per call) with their line items, payment methods, totals, status, customer name/email/phone, and — for bookable line items (tours, rentals, rides) — the specific event name and scheduled date/start/end time, which pinpoints exactly which attraction/location an order was for, not just which office sold it. Use this when the user wants to see specific orders, identify which guest placed an order, or drill into a particular department or attraction after using get_order_summary to identify which office to look at. The salesOfficeName is matched as a case-insensitive substring so "food" will match "GI Food & Beverage".`,
+    description: `Fetch individual order details filtered to a specific sales office (e.g. "GI Food & Beverage", "BB Ticketing", "Online Sales"). Returns up to 150-500 individual orders depending on how wide the date range is (narrower ranges return more detail per call) with their line items, payment methods, totals, status, salesPerson (the cashier/employee who processed the order — use this to answer "who was working the register"), customer name, and — for bookable line items (tours, rentals, rides) — the specific event name and scheduled date/start/end time. Use this when the user wants to see specific orders, identify which cashier was working a register at a given time, identify which guest placed an order, or drill into a particular department. The salesOfficeName is matched as a case-insensitive substring so "food" will match "GI Food & Beverage", and "BB Admissions" or just "admissions" will match parking/admissions orders.`,
     input_schema: {
       type: 'object',
       properties: {
