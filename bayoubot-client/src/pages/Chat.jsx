@@ -318,20 +318,40 @@ function MessageBubble({ message }) {
 }
 
 /* ── Typing indicator ───────────────────────────────────────────────────────── */
+const THINKING_PHRASES = [
+  'Thinking…',
+  'Pulling order data…',
+  'Crunching the numbers…',
+  'Checking RocketRez…',
+  'Almost there…',
+];
+
 function TypingIndicator() {
+  const [phraseIdx, setPhraseIdx] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setPhraseIdx(i => (i + 1) % THINKING_PHRASES.length);
+    }, 1800);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <div className="flex gap-3">
       <div className="shrink-0 w-8 h-8 rounded-xl bg-[#0d1117] border border-indigo-500/30 flex items-center justify-center"
         style={{ boxShadow: '0 0 12px rgba(99,102,241,0.15)' }}>
         <BotIcon className="w-4 h-4 text-indigo-400" />
       </div>
-      <div className="bg-[#0d1117]/80 border border-white/6 rounded-2xl rounded-tl-sm px-4 py-3"
+      <div className="bg-[#0d1117]/80 border border-white/6 rounded-2xl rounded-tl-sm px-4 py-3 flex items-center gap-2.5"
         style={{ boxShadow: '0 4px 20px rgba(0,0,0,0.3)' }}>
         <div className="flex gap-1.5 items-center h-5">
           <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }} />
           <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '160ms' }} />
           <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '320ms' }} />
         </div>
+        <span className="text-xs text-slate-500 transition-opacity duration-300">
+          {THINKING_PHRASES[phraseIdx]}
+        </span>
       </div>
     </div>
   );

@@ -82,6 +82,18 @@ function classifyPayments(paymentMethods) {
   return { payroll, cashCard, token, comp };
 }
 
+// Scale the per-call order cap to the size of the date range — narrow ranges
+// can afford far more detail per order than wide ones without bloating the
+// tool result sent to the model.
+function limitForDateRange(startDate, endDate) {
+  const days = Math.max(1, Math.round((new Date(endDate) - new Date(startDate)) / 86_400_000) + 1);
+  if (days <= 1)  return 500;
+  if (days <= 3)  return 400;
+  if (days <= 7)  return 300;
+  if (days <= 14) return 200;
+  return 150;
+}
+
 function paymentTypeLabel(paymentMethod) {
   const m = (paymentMethod || '').toLowerCase();
   if (m.includes('payroll'))                                                              return 'Payroll Deduction';
@@ -238,7 +250,7 @@ async function toolGetOrdersByOffice(startDate, endDate, salesOfficeName) {
     (o.salesOfficeName || '').toLowerCase().includes(salesOfficeName.toLowerCase())
   );
 
-  const LIMIT = 300;
+  const LIMIT = limitForDateRange(startDate, endDate);
   const slice = filtered.slice(0, LIMIT);
 
   const mapped = slice.map(o => ({
@@ -247,6 +259,11 @@ async function toolGetOrdersByOffice(startDate, endDate, salesOfficeName) {
     status:       o.status,
     salesOffice:  o.salesOfficeName,
     contactGroup: o.contactGroupName || null,
+    customer:     o.primaryContact ? {
+      name:  `${o.primaryContact.firstName || ''} ${o.primaryContact.lastName || ''}`.trim(),
+      email: o.primaryContact.email || null,
+      phone: o.primaryContact.phone || null,
+    } : null,
     total:        o.total,
     paymentTypes: (o.paymentMethods || []).map(pm => ({
       type:   paymentTypeLabel(pm.paymentMethod),
@@ -256,6 +273,13 @@ async function toolGetOrdersByOffice(startDate, endDate, salesOfficeName) {
     items: (o.lineItems || []).map(li => ({
       name:   (li.name || '').trim(),
       amount: li.subTotal || 0,
+      event:  li.event ? {
+        type:      li.event.type,
+        name:      li.event.name,
+        date:      li.event.schedule?.date || null,
+        startTime: li.event.schedule?.startTime || null,
+        endTime:   li.event.schedule?.endTime || null,
+      } : null,
     })),
   }));
 
@@ -326,20 +350,52 @@ async function toolGetOrderById(orderId) {
   const json  = await res.json();
   const order = json.data;
   return {
-    orderId:      order.id,
-    date:         order.createdDate,
-    status:       order.status,
-    salesOffice:  order.salesOfficeName,
-    contactGroup: order.contactGroupName || null,
-    subtotal:     order.subtotal,
-    total:        order.total,
+    orderId:        order.id,
+    orderUrl:       order.orderUrl,
+    date:           order.createdDate,
+    modifiedDate:   order.modifiedDate,
+    status:         order.status,
+    isWebOrder:     order.isWebOrder,
+    salesOffice:    order.salesOfficeName,
+    salesPerson:    `${order.salesPersonFirstName || ''} ${order.salesPersonLastName || ''}`.trim() || null,
+    contactGroup:   order.contactGroupName || null,
+    subtotal:       order.subTotal,
+    discountTotal:  order.discountTotal || 0,
+    taxTotal:       order.taxTotal || 0,
+    gratuityTotal:  order.gratuityTotal || 0,
+    variableFeeTotal: order.variableFeeTotal || 0,
+    total:          order.total,
+    customer: order.primaryContact ? {
+      name:  `${order.primaryContact.firstName || ''} ${order.primaryContact.lastName || ''}`.trim(),
+      email: order.primaryContact.email || null,
+      phone: order.primaryContact.phone || null,
+      billingAddress: order.primaryContact.billingAddress || null,
+    } : null,
     paymentMethods: (order.paymentMethods || []).map(pm => ({
       method: pm.paymentMethod,
       amount: pm.paymentAmount,
     })),
     lineItems: (order.lineItems || []).map(li => ({
-      name:   li.name,
-      amount: li.subTotal || 0,
+      name:       li.name,
+      type:       li.type,
+      salesOffice: li.salesOfficeName,
+      amount:     li.subTotal || 0,
+      serials:    (li.rateTypes || []).flatMap(rt => rt.serials || []),
+      taxItems:   (li.rateTypes || []).flatMap(rt => rt.taxItems || []).map(t => ({
+        type:   t.taxType,
+        amount: t.taxAmount,
+      })),
+      event: li.event ? {
+        type:      li.event.type,
+        name:      li.event.name,
+        date:      li.event.schedule?.date || null,
+        startTime: li.event.schedule?.startTime || null,
+        endTime:   li.event.schedule?.endTime || null,
+      } : null,
+    })),
+    questions: (order.questions || []).map(q => ({
+      question: q.question,
+      answer:   q.answer,
     })),
   };
 }
@@ -380,7 +436,7 @@ Use this first when the user asks about revenue, sales, comparisons between depa
   },
   {
     name: 'get_orders_by_office',
-    description: `Fetch individual order details filtered to a specific sales office (e.g. "GI Food & Beverage", "BB Ticketing", "Online Sales"). Returns up to 300 individual orders with their line items, payment methods, totals, and status. Use this when the user wants to see specific orders or drill into a particular department after using get_order_summary to identify which office to look at. The salesOfficeName is matched as a case-insensitive substring so "food" will match "GI Food & Beverage".`,
+    description: `Fetch individual order details filtered to a specific sales office (e.g. "GI Food & Beverage", "BB Ticketing", "Online Sales"). Returns up to 150-500 individual orders depending on how wide the date range is (narrower ranges return more detail per call) with their line items, payment methods, totals, status, customer name/email/phone, and — for bookable line items (tours, rentals, rides) — the specific event name and scheduled date/start/end time, which pinpoints exactly which attraction/location an order was for, not just which office sold it. Use this when the user wants to see specific orders, identify which guest placed an order, or drill into a particular department or attraction after using get_order_summary to identify which office to look at. The salesOfficeName is matched as a case-insensitive substring so "food" will match "GI Food & Beverage".`,
     input_schema: {
       type: 'object',
       properties: {
@@ -406,7 +462,7 @@ Use this first when the user asks about revenue, sales, comparisons between depa
   },
   {
     name: 'get_order_by_id',
-    description: 'Look up a single order by its RocketRez order ID. Returns the full order detail: items, payments, totals, status, and which sales office processed it. Use when the user asks about a specific order number.',
+    description: 'Look up a single order by its RocketRez order ID. Returns the complete order detail: items (with tax breakdown and serial numbers like wristband/locker IDs), payments, discount/gratuity/fee totals, status, which sales office and salesperson processed it, the customer\'s name/email/phone/billing address, any checkout questions answered, and — for bookable items — the exact attraction/tour name and scheduled date/time. Use when the user asks about a specific order number or needs the full picture of one order.',
     input_schema: {
       type: 'object',
       properties: {
