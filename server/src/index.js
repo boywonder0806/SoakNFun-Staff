@@ -16,6 +16,7 @@ import receptionRouter from './routes/reception.js';
 import reportsRouter from './routes/reports.js';
 import operationsRouter from './routes/operations.js';
 import hrRouter from './routes/hr.js';
+import bayoubotRouter from './routes/bayoubot.js';
 import { startCallbackDigestCron } from './cron/callbackDigest.js';
 
 const app  = express();
@@ -27,6 +28,7 @@ const allowedOrigins = [
   'https://www.bluebayoustaff.com',   // www variant — nginx serves both
   process.env.RECEPTION_URL   || 'http://localhost:5174',
   process.env.HR_URL          || 'http://localhost:5175',
+  process.env.BOT_URL         || 'http://localhost:5176',
 ];
 
 app.use(cors({
@@ -54,6 +56,7 @@ app.use('/api/reception',  receptionRouter);
 app.use('/api/reports',     reportsRouter);
 app.use('/api/operations', operationsRouter);
 app.use('/api/hr',         hrRouter);
+app.use('/api/bayoubot',   bayoubotRouter);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'Blue Bayou Staff API' }));
 
@@ -62,15 +65,18 @@ if (process.env.NODE_ENV === 'production') {
   const clientBuild    = path.join(__dirname, '../../client/dist');
   const receptionBuild = path.join(__dirname, '../../reception-client/dist');
   const hrBuild        = path.join(__dirname, '../../hr-client/dist');
+  const botBuild       = path.join(__dirname, '../../bayoubot-client/dist');
 
   const serveClient    = express.static(clientBuild);
   const serveReception = express.static(receptionBuild);
   const serveHR        = express.static(hrBuild);
+  const serveBot       = express.static(botBuild);
 
   app.use((req, res, next) => {
     const host = req.get('host') || '';
     if (host.startsWith('reception.')) return serveReception(req, res, next);
     if (host.startsWith('hr.'))        return serveHR(req, res, next);
+    if (host.startsWith('bot.'))       return serveBot(req, res, next);
     serveClient(req, res, next);
   });
 
@@ -80,6 +86,8 @@ if (process.env.NODE_ENV === 'production') {
       res.sendFile(path.join(receptionBuild, 'index.html'));
     } else if (host.startsWith('hr.')) {
       res.sendFile(path.join(hrBuild, 'index.html'));
+    } else if (host.startsWith('bot.')) {
+      res.sendFile(path.join(botBuild, 'index.html'));
     } else {
       res.sendFile(path.join(clientBuild, 'index.html'));
     }

@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+
+/* Markdown styles inside bot messages */
+.bot-prose p          { margin: 0 0 0.5rem; }
+.bot-prose p:last-child { margin-bottom: 0; }
+.bot-prose ul, .bot-prose ol { padding-left: 1.25rem; margin: 0.4rem 0; }
+.bot-prose li         { margin: 0.2rem 0; }
+.bot-prose strong     { font-weight: 600; }
+.bot-prose code       { background: #f1f5f9; padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.85em; font-family: monospace; }
+.bot-prose pre        { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.75rem; overflow-x: auto; margin: 0.5rem 0; }
+.bot-prose pre code   { background: none; padding: 0; }
+.bot-prose h1, .bot-prose h2, .bot-prose h3 { font-weight: 700; margin: 0.75rem 0 0.35rem; }
+.bot-prose h1         { font-size: 1.1rem; }
+.bot-prose h2         { font-size: 1rem; }
+.bot-prose h3         { font-size: 0.9rem; }
+
+/* Markdown table */
+.bot-prose table      { border-collapse: collapse; width: 100%; margin: 0.6rem 0; font-size: 0.8rem; }
+.bot-prose th         { background: #f1f5f9; padding: 0.4rem 0.75rem; text-align: left; font-weight: 600; border: 1px solid #e2e8f0; white-space: nowrap; }
+.bot-prose td         { padding: 0.4rem 0.75rem; border: 1px solid #e2e8f0; }
+.bot-prose tr:nth-child(even) td { background: #f8fafc; }
