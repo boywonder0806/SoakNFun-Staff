@@ -36,7 +36,7 @@ const TTL_PAST  = 60 * 60 * 1000;
 
 // Fetch every order in a date range — no filtering, with caching
 async function fetchAllOrders(startDate, endDate) {
-  const today  = new Date().toLocaleDateString('en-CA');
+  const today  = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
   const ttl    = endDate >= today ? TTL_TODAY : TTL_PAST;
   const key    = `${startDate}:${endDate}`;
   const cached = orderCache.get(key);
@@ -609,8 +609,9 @@ router.post('/chat', requireHR, async (req, res) => {
   const { messages = [], message } = req.body;
   if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
 
-  const today     = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
-  const yesterday = new Date(Date.now() - 86_400_000).toLocaleDateString('en-CA');
+  const TZ        = 'America/Chicago';
+  const today     = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
+  const yesterday = new Date(Date.now() - 86_400_000).toLocaleDateString('en-CA', { timeZone: TZ });
 
   const userName     = req.user.name     || 'there';
   const userPosition = req.user.position || req.user.role || '';
