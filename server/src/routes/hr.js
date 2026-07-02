@@ -797,7 +797,9 @@ router.get('/protect/footage-stream', async (req, res) => {
   try {
     // The private export API is GET with query params (the same call the
     // Protect web UI makes), authenticated by the UniFi OS session cookie.
-    const qs = `camera=${encodeURIComponent(data.cameraId)}&start=${data.startMs}&end=${data.endMs}&filename=footage.mp4`;
+    // channel=1 exports the Medium recording (720p/1280px) — ~40x smaller and
+    // near-instant vs the 4K High stream; plenty for identifying staff.
+    const qs = `camera=${encodeURIComponent(data.cameraId)}&start=${data.startMs}&end=${data.endMs}&channel=1&filename=footage.mp4`;
 
     let session = await getProtectSession();
     let nvrRes  = await nvrSessionRequest(`/proxy/protect/api/video/export?${qs}`, session);
