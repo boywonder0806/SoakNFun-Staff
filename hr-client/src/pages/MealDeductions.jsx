@@ -1713,7 +1713,7 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
     <div ref={backdropRef} onClick={e => e.target === backdropRef.current && onClose()}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
     >
-      <div className={`w-full ${videoUrl ? 'max-w-2xl' : 'max-w-md'} bg-white rounded-2xl shadow-2xl overflow-hidden transition-all`}>
+      <div className={`w-full ${videoUrl || loading ? 'max-w-2xl' : 'max-w-md'} bg-white rounded-2xl shadow-2xl overflow-hidden transition-all`}>
         {/* Header */}
         <div className="bg-gray-900 px-5 py-4 flex items-center justify-between">
           <div>
@@ -1731,8 +1731,17 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
           </button>
         </div>
 
+        {/* Loading state — Blue Bayou water theme */}
+        {loading && (
+          <FootageLoader
+            cameraName={displayCameras.find(c => c.id === selectedCam)?.name}
+            startTime={startTime}
+            endTime={endTime}
+          />
+        )}
+
         {/* Video player */}
-        {videoUrl && (
+        {videoUrl && !loading && (
           <div className="bg-black">
             <video key={videoUrl} controls autoPlay className="w-full max-h-72">
               <source src={videoUrl} type="video/mp4" />
@@ -1807,6 +1816,90 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Footage loader (Blue Bayou water theme) ───────────────────────────────────
+
+const FOOTAGE_PHRASES = [
+  'Diving into the archives…',
+  'Rewinding the bayou…',
+  'Reeling in your footage…',
+  'Surfacing any second…',
+];
+
+function FootageLoader({ cameraName, startTime, endTime }) {
+  const [phrase, setPhrase] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => setPhrase(p => (p + 1) % FOOTAGE_PHRASES.length), 2400);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="relative overflow-hidden"
+      style={{ background: 'linear-gradient(165deg, #021f1e 0%, #073d38 45%, #0d5c55 100%)' }}>
+
+      {/* Soft top glow */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-72 h-72 rounded-full pointer-events-none"
+        style={{ background: 'radial-gradient(circle, rgba(45,212,191,0.14) 0%, transparent 70%)' }} />
+
+      <div className="relative flex flex-col items-center pt-10 pb-20 px-6">
+        {/* Ripple rings around a bobbing camera */}
+        <div className="relative w-20 h-20 flex items-center justify-center mb-5 bb-bob">
+          <span className="absolute inset-0 rounded-full border border-teal-400/50 bb-ripple" />
+          <span className="absolute inset-0 rounded-full border border-teal-400/40 bb-ripple" style={{ animationDelay: '0.95s' }} />
+          <div className="relative w-14 h-14 rounded-2xl flex items-center justify-center"
+            style={{ background: 'rgba(13,148,136,0.25)', boxShadow: 'inset 0 0 0 1px rgba(45,212,191,0.4), 0 8px 24px rgba(0,0,0,0.35)' }}>
+            <FilmIcon />
+          </div>
+        </div>
+
+        {/* Rotating phrase — keyed so each change re-triggers the fade */}
+        <p key={phrase} className="text-sm font-semibold text-teal-50 animate-fade-up">
+          {FOOTAGE_PHRASES[phrase]}
+        </p>
+        <p className="text-xs text-teal-200/50 mt-1.5">
+          {cameraName || 'Camera'}{startTime ? ` · ${startTime} – ${endTime}` : ''}
+        </p>
+
+        {/* Indeterminate shimmer bar */}
+        <div className="relative w-52 h-1 rounded-full bg-white/10 overflow-hidden mt-5">
+          <span className="absolute inset-y-0 w-1/3 rounded-full bb-shimmer"
+            style={{ background: 'linear-gradient(90deg, transparent, #2dd4bf, transparent)' }} />
+        </div>
+      </div>
+
+      {/* Layered bayou waves */}
+      <div className="absolute bottom-0 left-0 right-0 h-14 pointer-events-none">
+        <Wave fill="rgba(20,184,166,0.12)" duration={13} height="100%" />
+        <Wave fill="rgba(20,184,166,0.20)" duration={9}  height="80%" />
+        <Wave fill="rgba(13,148,136,0.38)" duration={6}  height="62%" />
+      </div>
+    </div>
+  );
+}
+
+// One tiling wave layer — the path repeats every 400 units across a 2400-unit
+// viewBox, so translateX(-50%) (3 periods) loops seamlessly
+function Wave({ fill, duration, height }) {
+  return (
+    <svg
+      className="absolute bottom-0 left-0"
+      style={{ width: '200%', height, animation: `bb-wave-slide ${duration}s linear infinite` }}
+      viewBox="0 0 2400 80" preserveAspectRatio="none" fill={fill}
+    >
+      <path d="M0,40 c100,18 300,-18 400,0 c100,18 300,-18 400,0 c100,18 300,-18 400,0 c100,18 300,-18 400,0 c100,18 300,-18 400,0 c100,18 300,-18 400,0 L2400,80 L0,80 Z" />
+    </svg>
+  );
+}
+
+function FilmIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="#5eead4" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" style={{ width: 26, height: 26 }}>
+      <polygon points="23 7 16 12 23 17 23 7" />
+      <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+    </svg>
   );
 }
 
