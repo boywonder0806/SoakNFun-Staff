@@ -422,6 +422,8 @@ Identify and flag:
 5. Employees whose transactions span both BB and GI parks (may indicate data mixup or inter-park work)
 6. Any other patterns worth HR attention
 
+Report at most 12 anomalies — the most important ones — and keep each description under 30 words.
+
 Reply ONLY with valid JSON, no markdown, no explanation outside the JSON:
 {
   "summary": "1-2 sentence overview of key findings including park breakdown",
@@ -440,7 +442,8 @@ Reply ONLY with valid JSON, no markdown, no explanation outside the JSON:
     const client = new Anthropic({ apiKey });
     const msg = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
+      // Busy days produce long anomaly lists — 1024 truncated mid-JSON
+      max_tokens: 4000,
       messages: [{ role: 'user', content: prompt }],
     });
     const text = msg.content[0]?.type === 'text' ? msg.content[0].text : '';
