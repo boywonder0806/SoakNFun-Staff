@@ -498,7 +498,8 @@ router.get('/meal-deductions', requireHR, async (req, res) => {
   }
 });
 
-router.get('/meal-deductions/:id', requireHR, async (req, res) => {
+// :id constrained to digits so it can't swallow /meal-deductions/live
+router.get('/meal-deductions/:id(\\d+)', requireHR, async (req, res) => {
   const id = parseInt(req.params.id);
   try {
     const { rows: [upload] } = await pool.query(
