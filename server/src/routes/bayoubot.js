@@ -63,6 +63,13 @@ async function fetchAllOrders(startDate, endDate) {
   }
 
   orderCache.set(key, { data: all, fetchedAt: Date.now() });
+
+  // Evict stale entries so a long-running process doesn't accumulate
+  // every date range ever queried.
+  for (const [k, v] of orderCache) {
+    if (Date.now() - v.fetchedAt > TTL_PAST) orderCache.delete(k);
+  }
+
   return all;
 }
 
@@ -637,16 +644,31 @@ router.post('/chat', requireHR, async (req, res) => {
     let currentMessages = [...history];
     let reply = null;
 
+    // Bound the tool loop so a pathological query can't burn tokens forever.
+    const MAX_TOOL_ITERATIONS = 12;
+    let iterations = 0;
+
     while (!reply) {
+      if (iterations++ >= MAX_TOOL_ITERATIONS) {
+        reply = 'That question required more data lookups than I can do in one answer. Try narrowing the date range or asking about one park/office at a time.';
+        break;
+      }
+
       const response = await anthropic.messages.create({
-        model:      'claude-sonnet-4-6',
-        max_tokens: 1500,
-        system:     SYSTEM,
-        tools:      TOOLS,
-        messages:   currentMessages,
+        model:         'claude-sonnet-5',
+        max_tokens:    8000,
+        output_config: { effort: 'medium' },
+        system:        SYSTEM,
+        tools:         TOOLS,
+        messages:      currentMessages,
+        // Third cache breakpoint (tools + system are the other two): caches the
+        // conversation prefix, so each tool-loop iteration and follow-up turn
+        // reads prior tool results from cache instead of re-processing them.
+        cache_control: { type: 'ephemeral' },
       });
 
-      if (response.stop_reason === 'end_turn') {
+      if (response.stop_reason === 'end_turn' || response.stop_reason === 'max_tokens') {
+        // max_tokens = truncated answer; return the partial text rather than erroring
         const textBlock = response.content.find(b => b.type === 'text');
         reply = textBlock?.text || 'I could not generate a response. Please try again.';
 
