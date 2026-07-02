@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import Layout from './components/Layout/Layout.jsx';
 import Login from './pages/Login.jsx';
+import Launcher from './pages/Launcher.jsx';
 import Home from './pages/Home.jsx';
 import Schedule from './pages/Schedule.jsx';
 import Messages from './pages/Messages.jsx';
@@ -13,7 +14,6 @@ import Positions from './pages/admin/scheduler/Positions.jsx';
 import NetchexImport from './pages/admin/scheduler/NetchexImport.jsx';
 import DailyAssignments from './pages/admin/scheduler/DailyAssignments.jsx';
 import SystemAdminLayout from './pages/admin/SystemAdminLayout.jsx';
-import SysAdminUsers from './pages/admin/sysadmin/Users.jsx';
 import SysAdminDepartments from './pages/admin/sysadmin/Departments.jsx';
 import SysAdminLogs from './pages/admin/sysadmin/Logs.jsx';
 import SysAdminAPI from './pages/admin/sysadmin/API.jsx';
@@ -42,8 +42,16 @@ function AppRoutes() {
   const { user } = useAuth();
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to="/home" replace /> : <Login />} />
+      <Route path="/login" element={user ? <Navigate to="/apps" replace /> : <Login />} />
       <Route path="/change-password" element={<ChangePassword />} />
+      <Route
+        path="/apps"
+        element={
+          <ProtectedRoute>
+            <Launcher />
+          </ProtectedRoute>
+        }
+      />
       <Route path="/reset-password"  element={<ResetPassword />} />
       <Route
         path="/staff/profile/:id"
@@ -91,8 +99,7 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         >
-          <Route index element={<Navigate to="users" replace />} />
-          <Route path="users"          element={<SysAdminUsers />} />
+          <Route index element={<Navigate to="departments" replace />} />
           <Route path="departments"    element={<SysAdminDepartments />} />
           <Route path="logs"           element={<SysAdminLogs />} />
           <Route path="api"            element={<SysAdminAPI />} />

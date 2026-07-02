@@ -1,7 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 
+// User management now lives in the Admin Console (admin.bluebayoustaff.com)
 const SUB_NAV = [
-  { to: '/sysadmin/users',       label: 'Users', icon: UsersIcon },
   { to: '/sysadmin/departments', label: 'Depts', icon: DeptIcon  },
   { to: '/sysadmin/logs',        label: 'Logs',  icon: LogsIcon  },
   { to: '/sysadmin/api',         label: 'API',   icon: ApiIcon   },

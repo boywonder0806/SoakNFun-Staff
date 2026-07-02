@@ -8,6 +8,14 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // SSO handoff from the staff platform launcher: token arrives in the URL
+    // fragment (#sso=...), which never reaches the server or its logs.
+    const hash = window.location.hash;
+    if (hash.startsWith('#sso=')) {
+      localStorage.setItem('hr_token', decodeURIComponent(hash.slice(5)));
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+
     const token = localStorage.getItem('hr_token');
     if (!token) { setLoading(false); return; }
     api.get('/auth/me')

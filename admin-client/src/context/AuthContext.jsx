@@ -12,40 +12,40 @@ export function AuthProvider({ children }) {
     // fragment (#sso=...), which never reaches the server or its logs.
     const hash = window.location.hash;
     if (hash.startsWith('#sso=')) {
-      localStorage.setItem('rc_token', decodeURIComponent(hash.slice(5)));
+      localStorage.setItem('admin_token', decodeURIComponent(hash.slice(5)));
       history.replaceState(null, '', window.location.pathname + window.location.search);
     }
 
-    const token = localStorage.getItem('rc_token');
+    const token = localStorage.getItem('admin_token');
     if (!token) { setLoading(false); return; }
     api.get('/auth/me')
       .then(r => {
-        if (!r.data.user.hasReceptionAccess) {
-          localStorage.removeItem('rc_token');
+        if (r.data.user.role !== 'sysadmin') {
+          localStorage.removeItem('admin_token');
           setUser(null);
         } else {
           setUser(r.data.user);
         }
       })
-      .catch(() => { localStorage.removeItem('rc_token'); setUser(null); })
+      .catch(() => { localStorage.removeItem('admin_token'); setUser(null); })
       .finally(() => setLoading(false));
   }, []);
 
   async function login(email, password) {
     const { data } = await api.post('/auth/login', { email, password });
-    if (!data.user.hasReceptionAccess) {
-      const err = new Error('Your account does not have access to the reception portal. Contact your system administrator to request access.');
+    if (data.user.role !== 'sysadmin') {
+      const err = new Error('The Admin Console requires system administrator access.');
       err.type = 'no_access';
       throw err;
     }
-    localStorage.setItem('rc_token', data.token);
+    localStorage.setItem('admin_token', data.token);
     setUser(data.user);
     return data.user;
   }
 
   function logout() {
     api.post('/auth/logout').catch(() => {});
-    localStorage.removeItem('rc_token');
+    localStorage.removeItem('admin_token');
     setUser(null);
   }
 

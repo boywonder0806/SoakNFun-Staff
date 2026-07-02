@@ -29,6 +29,8 @@ const allowedOrigins = [
   process.env.RECEPTION_URL   || 'http://localhost:5174',
   process.env.HR_URL          || 'http://localhost:5175',
   process.env.BOT_URL         || 'http://localhost:5176',
+  process.env.ADMIN_URL       || 'http://localhost:5177',
+  'https://admin.bluebayoustaff.com',
 ];
 
 app.use(cors({
@@ -66,17 +68,20 @@ if (process.env.NODE_ENV === 'production') {
   const receptionBuild = path.join(__dirname, '../../reception-client/dist');
   const hrBuild        = path.join(__dirname, '../../hr-client/dist');
   const botBuild       = path.join(__dirname, '../../bayoubot-client/dist');
+  const adminBuild     = path.join(__dirname, '../../admin-client/dist');
 
   const serveClient    = express.static(clientBuild);
   const serveReception = express.static(receptionBuild);
   const serveHR        = express.static(hrBuild);
   const serveBot       = express.static(botBuild);
+  const serveAdmin     = express.static(adminBuild);
 
   app.use((req, res, next) => {
     const host = req.get('host') || '';
     if (host.startsWith('reception.')) return serveReception(req, res, next);
     if (host.startsWith('hr.'))        return serveHR(req, res, next);
     if (host.startsWith('bot.'))       return serveBot(req, res, next);
+    if (host.startsWith('admin.'))     return serveAdmin(req, res, next);
     serveClient(req, res, next);
   });
 
@@ -88,6 +93,8 @@ if (process.env.NODE_ENV === 'production') {
       res.sendFile(path.join(hrBuild, 'index.html'));
     } else if (host.startsWith('bot.')) {
       res.sendFile(path.join(botBuild, 'index.html'));
+    } else if (host.startsWith('admin.')) {
+      res.sendFile(path.join(adminBuild, 'index.html'));
     } else {
       res.sendFile(path.join(clientBuild, 'index.html'));
     }

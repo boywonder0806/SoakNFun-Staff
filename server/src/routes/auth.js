@@ -18,6 +18,13 @@ pool.query(
 pool.query(
   'ALTER TABLE employees ADD COLUMN IF NOT EXISTS is_hr_manager BOOLEAN NOT NULL DEFAULT FALSE'
 ).catch(e => console.error('auth migration (is_hr_manager):', e.message));
+// BayouBot access used to piggyback on HR access — give it its own flag,
+// seeding existing HR users so nobody loses access. The NULL-check makes the
+// backfill one-time: after it runs, new rows get the FALSE default.
+pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_bot_access BOOLEAN')
+  .then(() => pool.query(`UPDATE employees SET has_bot_access = COALESCE(has_hr_access, FALSE) WHERE has_bot_access IS NULL`))
+  .then(() => pool.query('ALTER TABLE employees ALTER COLUMN has_bot_access SET DEFAULT FALSE'))
+  .catch(e => console.error('auth migration (has_bot_access):', e.message));
 
 pool.query(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id          SERIAL PRIMARY KEY,
@@ -44,7 +51,8 @@ router.post('/login', async (req, res) => {
                 COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess",
                 COALESCE(is_reception_manager, FALSE) AS "isReceptionManager",
                 COALESCE(has_hr_access, FALSE) AS "hasHrAccess",
-                COALESCE(is_hr_manager, FALSE) AS "isHrManager"
+                COALESCE(is_hr_manager, FALSE) AS "isHrManager",
+                COALESCE(has_bot_access, FALSE) AS "hasBotAccess"
          FROM employees WHERE email = $1`,
         [email.toLowerCase().trim()]
       ));
@@ -62,6 +70,7 @@ router.post('/login', async (req, res) => {
           rows[0].hasReceptionAccess = false;
           rows[0].hasHrAccess = false;
           rows[0].isHrManager = false;
+          rows[0].hasBotAccess = false;
         }
       } else {
         throw colErr;
@@ -122,7 +131,8 @@ router.post('/change-password', requireAuth, async (req, res) => {
                  is_locked AS "isLocked",
                  COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess",
                  COALESCE(has_hr_access, FALSE) AS "hasHrAccess",
-                 COALESCE(is_hr_manager, FALSE) AS "isHrManager"`,
+                 COALESCE(is_hr_manager, FALSE) AS "isHrManager",
+                 COALESCE(has_bot_access, FALSE) AS "hasBotAccess"`,
       [hash, req.user.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'User not found' });

@@ -74,7 +74,7 @@ export default function Login() {
       if (user.mustChangePassword) {
         navigate('/change-password');
       } else {
-        navigate(user.role === 'manager' || user.role === 'sysadmin' ? '/scheduler' : '/home');
+        navigate('/apps');
       }
     } catch (err) {
       const msg = err.response?.data?.error || 'Unable to sign in. Please try again.';

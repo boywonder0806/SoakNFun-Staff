@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
-import { requireHR } from '../middleware/auth.js';
+import { requireBot } from '../middleware/auth.js';
 
 const router    = Router();
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -612,7 +612,7 @@ async function executeTool(name, input) {
 }
 
 // ── Chat endpoint ──────────────────────────────────────────────────────────
-router.post('/chat', requireHR, async (req, res) => {
+router.post('/chat', requireBot, async (req, res) => {
   const { messages = [], message } = req.body;
   if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
 

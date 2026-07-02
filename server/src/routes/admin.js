@@ -838,6 +838,46 @@ router.post('/scheduler/plan/publish', requireAdmin, async (req, res) => {
 });
 
 // ── SysAdmin ──────────────────────────────────────────────────────────────────
+// Unified per-tool access toggle for the Admin Console.
+// tool: hr | reception | bot | hr_manager | reception_manager
+const ACCESS_COLUMNS = {
+  hr:                'has_hr_access',
+  reception:         'has_reception_access',
+  bot:               'has_bot_access',
+  hr_manager:        'is_hr_manager',
+  reception_manager: 'is_reception_manager',
+};
+
+router.patch('/sysadmin/users/:id/access', requireSysAdmin, async (req, res) => {
+  const { tool, access } = req.body;
+  const column = ACCESS_COLUMNS[tool];
+  if (!column || typeof access !== 'boolean') {
+    return res.status(400).json({ error: 'tool (hr|reception|bot|hr_manager|reception_manager) and boolean access are required' });
+  }
+  const empId = parseInt(req.params.id);
+  if (empId === req.user.id && !access) {
+    return res.status(400).json({ error: 'You cannot revoke your own access.' });
+  }
+  try {
+    const { rows } = await pool.query(
+      `UPDATE employees SET ${column} = $1 WHERE id = $2
+       RETURNING id, name,
+                 COALESCE(has_hr_access, FALSE) AS "hasHrAccess",
+                 COALESCE(is_hr_manager, FALSE) AS "isHrManager",
+                 COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess",
+                 COALESCE(is_reception_manager, FALSE) AS "isReceptionManager",
+                 COALESCE(has_bot_access, FALSE) AS "hasBotAccess"`,
+      [access, empId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+    logEvent(empId, `${tool} access ${access ? 'granted' : 'revoked'}`, {}, req.user.id, req.ip);
+    res.json({ user: rows[0] });
+  } catch (err) {
+    console.error('Access toggle error:', err.message);
+    res.status(500).json({ error: 'Failed to update access' });
+  }
+});
+
 router.get('/sysadmin/users', requireSysAdmin, async (_req, res) => {
   try {
     const { rows } = await pool.query(
@@ -847,7 +887,8 @@ router.get('/sysadmin/users', requireSysAdmin, async (_req, res) => {
               COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess",
               COALESCE(is_reception_manager, FALSE) AS "isReceptionManager",
               COALESCE(has_hr_access, FALSE) AS "hasHrAccess",
-              COALESCE(is_hr_manager, FALSE) AS "isHrManager"
+              COALESCE(is_hr_manager, FALSE) AS "isHrManager",
+              COALESCE(has_bot_access, FALSE) AS "hasBotAccess"
        FROM employees WHERE role != 'crew_member' ORDER BY name`
     );
     res.json({ users: rows });
