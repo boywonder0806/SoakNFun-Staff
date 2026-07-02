@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
+import { hubUrl } from '../lib/hub.js';
 import CallLog from './CallLog.jsx';
 import LostFound from './LostFound.jsx';
 import Configurator from './Configurator.jsx';
@@ -22,7 +23,7 @@ function useClock() {
 }
 
 export default function Dashboard() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const [tab, setTab]    = useState('calls');
   const TABS = user?.isReceptionManager ? [...BASE_TABS, ...MANAGER_TABS] : BASE_TABS;
   const [counts, setCounts] = useState({ pendingCallbacks: 0, unclaimed: 0, todayCalls: 0 });
@@ -113,10 +114,10 @@ export default function Dashboard() {
             </div>
           </div>
           <button
-            onClick={logout}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-gray-500 hover:text-red-400 hover:bg-red-900/20 rounded-lg transition-colors"
+            onClick={() => { window.location.href = hubUrl(); }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-gray-500 hover:bg-gray-800 hover:text-white rounded-lg transition-colors"
           >
-            <LogoutIcon /> Sign Out
+            <HomeIcon /> Return Home
           </button>
         </div>
       </aside>
@@ -155,12 +156,11 @@ function TagIcon() {
   );
 }
 
-function LogoutIcon() {
+function HomeIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-      <polyline points="16 17 21 12 16 7" />
-      <line x1="21" y1="12" x2="9" y2="12" />
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+      <path d="M3 9.5 12 3l9 6.5" />
+      <path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10" />
     </svg>
   );
 }

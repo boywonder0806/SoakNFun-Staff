@@ -1,5 +1,6 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
+import { hubUrl } from '../../lib/host.js';
 
 const NAV = [
   { to: '/home',          label: 'Home',     icon: HomeIcon      },
@@ -16,12 +17,11 @@ const MANAGEMENT_NAV = [
   { to: '/reports', label: 'Reports', icon: ReportIcon },
 ];
 const SYSADMIN_NAV = [
-  { to: '/sysadmin/users', label: 'System', icon: ShieldIcon },
+  { to: '/sysadmin/departments', label: 'System', icon: ShieldIcon },
 ];
 
 export default function Sidebar() {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
+  const { user } = useAuth();
 
   const isManagement = user?.role === 'sysadmin' || user?.departments?.includes('Management');
 
@@ -69,18 +69,18 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* User + logout */}
+      {/* User + return home */}
       <div className="flex flex-col items-center pb-5 gap-3 border-t border-rim/30 pt-4">
         <button
-          onClick={() => { logout(); navigate('/login'); }}
-          className="flex flex-col items-center text-fog hover:text-red-400 transition-colors group/out"
-          title="Sign out"
+          onClick={() => { window.location.href = hubUrl(); }}
+          className="flex flex-col items-center text-fog hover:text-cyan transition-colors group/out"
+          title="Return home"
         >
-          <span className="w-5 h-5"><LogoutIcon /></span>
+          <span className="w-5 h-5"><ReturnHomeIcon /></span>
           <span className="max-h-0 opacity-0 group-hover/nav:max-h-4 group-hover/nav:opacity-100 group-hover/nav:mt-1
             transition-all duration-150 delay-75 overflow-hidden whitespace-nowrap
             text-10 font-bold tracking-widest uppercase leading-none">
-            Out
+            Home
           </span>
         </button>
         <div className="w-8 h-8 rounded-full bg-cyan/20 border border-cyan/30 flex items-center justify-center">
@@ -251,11 +251,11 @@ function ReportIcon() {
     </svg>
   );
 }
-function LogoutIcon() {
+function ReturnHomeIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} className="w-full h-full">
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-      <polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className="w-full h-full">
+      <path d="M3 9.5 12 3l9 6.5" />
+      <path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10" />
     </svg>
   );
 }

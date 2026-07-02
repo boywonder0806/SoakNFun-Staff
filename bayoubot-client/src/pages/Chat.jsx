@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAuth } from '../context/AuthContext.jsx';
+import { hubUrl } from '../lib/hub.js';
 import api from '../lib/api.js';
 
 function buildGreeting(user) {
@@ -23,7 +24,7 @@ const QUICK_QUESTIONS = [
 ];
 
 export default function Chat() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const [messages, setMessages]     = useState(() => [{ role: 'assistant', content: buildGreeting(user) }]);
   const [input, setInput]           = useState('');
   const [loading, setLoading]       = useState(false);
@@ -165,11 +166,11 @@ export default function Chat() {
               </div>
             </div>
             <button
-              onClick={logout}
-              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-500 hover:text-red-400 hover:bg-red-900/20 rounded-lg transition-colors"
+              onClick={() => { window.location.href = hubUrl(); }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-500 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
             >
-              <LogoutIcon />
-              Sign Out
+              <HomeIcon />
+              Return Home
             </button>
           </div>
         </div>
@@ -473,12 +474,11 @@ function MenuIcon() {
   );
 }
 
-function LogoutIcon() {
+function HomeIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-      <polyline points="16 17 21 12 16 7" />
-      <line x1="21" y1="12" x2="9" y2="12" />
+      <path d="M3 9.5 12 3l9 6.5" />
+      <path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10" />
     </svg>
   );
 }
