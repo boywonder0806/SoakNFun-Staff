@@ -21,7 +21,7 @@ setInterval(() => {
   for (const [t, d] of footageTokens) if (d.expires < now) footageTokens.delete(t);
 }, 60_000);
 
-function nvrRequest(urlPath, { method = 'GET', body } = {}) {
+function nvrRequest(urlPath, { method = 'GET', body, headers = {} } = {}) {
   const nvrUrl = (process.env.PROTECT_NVR_URL || '').replace(/\/$/, '');
   const apiKey = process.env.PROTECT_API_KEY;
   if (!nvrUrl || !apiKey) return Promise.reject(new Error('Protect NVR not configured'));
@@ -39,11 +39,93 @@ function nvrRequest(urlPath, { method = 'GET', body } = {}) {
         'X-API-KEY': apiKey,
         'Accept-Encoding': 'identity',
         ...(buf ? { 'Content-Type': 'application/json', 'Content-Length': buf.length } : {}),
+        ...headers,
       },
       agent: nvrAgent,
     }, resolve);
     req.on('error', reject);
     if (buf) req.write(buf);
+    req.end();
+  });
+}
+
+// ── UniFi OS session auth (private Protect API) ──────────────────────────────
+// Protect's public Integration API (X-API-KEY) has no historical video export
+// on this NVR version (7.1.x) — export lives on the private API, which only
+// accepts a local UniFi OS user session (TOKEN cookie), the same auth the
+// Protect web UI uses. We log in once and cache the session cookie.
+let protectSession = null; // { cookie, csrf, expires }
+
+async function getProtectSession(forceRefresh = false) {
+  const nvrUrl = (process.env.PROTECT_NVR_URL || '').replace(/\/$/, '');
+  const user   = process.env.PROTECT_LOCAL_USERNAME;
+  const pass   = process.env.PROTECT_LOCAL_PASSWORD;
+  if (!nvrUrl || !user || !pass) {
+    throw new Error('Video export requires PROTECT_LOCAL_USERNAME and PROTECT_LOCAL_PASSWORD (a local UniFi OS user) in the server .env');
+  }
+  if (!forceRefresh && protectSession && Date.now() < protectSession.expires) {
+    return protectSession;
+  }
+
+  const body = Buffer.from(JSON.stringify({ username: user, password: pass, rememberMe: true }));
+  const loginRes = await new Promise((resolve, reject) => {
+    const url = new URL(nvrUrl + '/api/auth/login');
+    const req = https.request({
+      hostname: url.hostname,
+      port:     url.port || 443,
+      path:     url.pathname,
+      method:   'POST',
+      headers:  { 'Content-Type': 'application/json', 'Content-Length': body.length },
+      agent:    nvrAgent,
+    }, resolve);
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+  loginRes.resume(); // drain the body — we only need the headers
+
+  if (loginRes.statusCode !== 200) {
+    protectSession = null;
+    throw new Error(`UniFi OS login failed (status ${loginRes.statusCode}) — check PROTECT_LOCAL_USERNAME / PROTECT_LOCAL_PASSWORD`);
+  }
+
+  const setCookies  = loginRes.headers['set-cookie'] || [];
+  const tokenCookie = setCookies.map(c => c.split(';')[0]).find(c => c.startsWith('TOKEN='));
+  if (!tokenCookie) {
+    protectSession = null;
+    throw new Error('UniFi OS login succeeded but returned no session cookie');
+  }
+
+  protectSession = {
+    cookie:  tokenCookie,
+    csrf:    loginRes.headers['x-csrf-token'] || loginRes.headers['x-updated-csrf-token'] || null,
+    // UniFi OS sessions last hours, but re-login every 30 min to stay safe
+    expires: Date.now() + 30 * 60_000,
+  };
+  return protectSession;
+}
+
+// GET against the private Protect API using the cached session cookie
+function nvrSessionRequest(urlPath, session) {
+  const nvrUrl = (process.env.PROTECT_NVR_URL || '').replace(/\/$/, '');
+  return new Promise((resolve, reject) => {
+    const url = new URL(nvrUrl + urlPath);
+    const req = https.request({
+      hostname: url.hostname,
+      port:     url.port || 443,
+      path:     url.pathname + url.search,
+      method:   'GET',
+      headers: {
+        Cookie: session.cookie,
+        'Accept-Encoding': 'identity',
+        ...(session.csrf ? { 'X-CSRF-Token': session.csrf } : {}),
+      },
+      agent: nvrAgent,
+    }, resolve);
+    // Exports of long clips can take a while to start, but if the NVR goes
+    // quiet for 3 minutes the request is dead — bail instead of hanging
+    req.setTimeout(180_000, () => req.destroy(new Error('NVR export timed out')));
+    req.on('error', reject);
     req.end();
   });
 }
@@ -684,6 +766,9 @@ router.post('/protect/footage-token', requireHR, (req, res) => {
   if (!process.env.PROTECT_NVR_URL || !process.env.PROTECT_API_KEY) {
     return res.status(503).json({ error: 'Protect NVR not configured on this server' });
   }
+  if (!process.env.PROTECT_LOCAL_USERNAME || !process.env.PROTECT_LOCAL_PASSWORD) {
+    return res.status(503).json({ error: 'Video export not configured — add PROTECT_LOCAL_USERNAME and PROTECT_LOCAL_PASSWORD (a local UniFi OS user with Protect access) to the server .env' });
+  }
   const { cameraId, startMs, endMs } = req.body;
   if (!cameraId || !startMs || !endMs) {
     return res.status(400).json({ error: 'cameraId, startMs, and endMs are required' });
@@ -710,13 +795,28 @@ router.get('/protect/footage-stream', async (req, res) => {
   }
 
   try {
-    const nvrRes = await nvrRequest('/proxy/protect/api/video/export', {
-      method: 'POST',
-      body: { camera: data.cameraId, start: data.startMs, end: data.endMs, type: 'video' },
-    });
+    // The private export API is GET with query params (the same call the
+    // Protect web UI makes), authenticated by the UniFi OS session cookie.
+    const qs = `camera=${encodeURIComponent(data.cameraId)}&start=${data.startMs}&end=${data.endMs}&filename=footage.mp4`;
+
+    let session = await getProtectSession();
+    let nvrRes  = await nvrSessionRequest(`/proxy/protect/api/video/export?${qs}`, session);
+
+    // Session may have been revoked server-side — re-login once and retry
+    if (nvrRes.statusCode === 401 || nvrRes.statusCode === 403) {
+      nvrRes.resume();
+      session = await getProtectSession(true);
+      nvrRes  = await nvrSessionRequest(`/proxy/protect/api/video/export?${qs}`, session);
+    }
 
     if (nvrRes.statusCode !== 200) {
-      return res.status(nvrRes.statusCode || 404).send('Footage not available for this time range');
+      nvrRes.resume();
+      console.error(`Protect export failed: status ${nvrRes.statusCode} for camera ${data.cameraId}`);
+      return res.status(502).send(
+        nvrRes.statusCode === 404
+          ? 'No recorded footage exists for this camera in that time range'
+          : `NVR export failed (status ${nvrRes.statusCode})`
+      );
     }
 
     res.setHeader('Content-Type', 'video/mp4');
@@ -726,8 +826,11 @@ router.get('/protect/footage-stream', async (req, res) => {
       res.setHeader('Accept-Ranges', 'bytes');
     }
     nvrRes.pipe(res);
+    // If the browser closes the player mid-stream, stop pulling from the NVR
+    res.on('close', () => nvrRes.destroy());
   } catch (err) {
-    res.status(502).send('Cannot reach Protect NVR');
+    console.error('Protect footage-stream error:', err.message);
+    res.status(502).send(err.message.includes('PROTECT_LOCAL') ? err.message : 'Cannot reach Protect NVR: ' + err.message);
   }
 });
 
