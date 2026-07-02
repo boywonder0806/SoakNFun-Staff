@@ -1664,6 +1664,7 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
   const [windowMin,     setWindowMin]     = useState(5);
   const [loading,       setLoading]       = useState(false);
   const [videoUrl,      setVideoUrl]      = useState(null);
+  const [videoReady,    setVideoReady]    = useState(false);
   const [footageError,  setFootageError]  = useState(null);
 
   const txMs   = date ? new Date(date).getTime() : null;
@@ -1693,6 +1694,7 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
     if (!selectedCam || !txMs) return;
     setFootageError(null);
     setVideoUrl(null);
+    setVideoReady(false);
     setLoading(true);
     try {
       const startMs = txMs - windowMin * 60 * 1000;
@@ -1731,8 +1733,9 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
           </button>
         </div>
 
-        {/* Loading state — Blue Bayou water theme */}
-        {loading && (
+        {/* Loading state — covers both the token fetch and the video buffering,
+            so the browser's native grey spinner never shows */}
+        {(loading || (videoUrl && !videoReady)) && (
           <FootageLoader
             cameraName={displayCameras.find(c => c.id === selectedCam)?.name}
             startTime={startTime}
@@ -1740,10 +1743,22 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
           />
         )}
 
-        {/* Video player */}
-        {videoUrl && !loading && (
-          <div className="bg-black">
-            <video key={videoUrl} controls autoPlay className="w-full max-h-72">
+        {/* Video player — mounted (hidden) while buffering so it can load,
+            revealed once it's actually playable */}
+        {videoUrl && (
+          <div className={`bg-black ${videoReady ? '' : 'hidden'}`}>
+            <video
+              key={videoUrl}
+              controls
+              autoPlay
+              className="w-full max-h-72"
+              onCanPlay={() => setVideoReady(true)}
+              onError={() => {
+                setVideoUrl(null);
+                setVideoReady(false);
+                setFootageError('Could not play footage for this time range — try a different window or camera.');
+              }}
+            >
               <source src={videoUrl} type="video/mp4" />
             </video>
           </div>
