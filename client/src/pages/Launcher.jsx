@@ -27,7 +27,7 @@ export default function Launcher() {
       desc: 'Schedules, shift board, time off, messages, and announcements',
       accent: '#00C8FF',
       Icon: WaveIcon,
-      show: true,
+      show: user?.role === 'sysadmin' || !!user?.hasStaffAccess,
       onClick: () => navigate(user?.role === 'manager' || user?.role === 'sysadmin' ? '/scheduler' : '/home'),
     },
     {
@@ -113,7 +113,9 @@ export default function Launcher() {
               Good {timeOfDay}, {firstName}
             </h1>
             <p className="text-sm text-fog mt-2">
-              {tools.length === 1 ? 'Your tool is ready' : `You have access to ${tools.length} tools`}
+              {tools.length === 0
+                ? 'No tools have been assigned to your account yet — contact your administrator'
+                : tools.length === 1 ? 'Your tool is ready' : `You have access to ${tools.length} tools`}
             </p>
           </div>
 

@@ -26,11 +26,13 @@ import ResetPassword from './pages/ResetPassword.jsx';
 import Reports from './pages/Reports.jsx';
 import Operations from './pages/Operations.jsx';
 
-function ProtectedRoute({ children, adminOnly = false, sysadminOnly = false, managerOnly = false, managementOnly = false }) {
+function ProtectedRoute({ children, adminOnly = false, sysadminOnly = false, managerOnly = false, managementOnly = false, staffPortal = false }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="flex items-center justify-center h-screen text-bb-muted">Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
   if (user.mustChangePassword) return <Navigate to="/change-password" replace />;
+  // Staff portal is gated during early development — sysadmins always pass
+  if (staffPortal && user.role !== 'sysadmin' && !user.hasStaffAccess) return <Navigate to="/apps" replace />;
   if (sysadminOnly && user.role !== 'sysadmin') return <Navigate to="/home" replace />;
   if (adminOnly && user.role !== 'manager' && user.role !== 'sysadmin') return <Navigate to="/home" replace />;
   if (managerOnly && user.role !== 'manager') return <Navigate to="/home" replace />;
@@ -56,7 +58,7 @@ function AppRoutes() {
       <Route
         path="/staff/profile/:id"
         element={
-          <ProtectedRoute adminOnly>
+          <ProtectedRoute adminOnly staffPortal>
             <StaffProfile />
           </ProtectedRoute>
         }
@@ -64,7 +66,7 @@ function AppRoutes() {
       <Route
         path="/"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute staffPortal>
             <Layout />
           </ProtectedRoute>
         }

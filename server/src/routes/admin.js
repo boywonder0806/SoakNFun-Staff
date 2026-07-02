@@ -841,6 +841,7 @@ router.post('/scheduler/plan/publish', requireAdmin, async (req, res) => {
 // Unified per-tool access toggle for the Admin Console.
 // tool: hr | reception | bot | hr_manager | reception_manager
 const ACCESS_COLUMNS = {
+  staff:             'has_staff_access',
   hr:                'has_hr_access',
   reception:         'has_reception_access',
   bot:               'has_bot_access',
@@ -852,7 +853,7 @@ router.patch('/sysadmin/users/:id/access', requireSysAdmin, async (req, res) => 
   const { tool, access } = req.body;
   const column = ACCESS_COLUMNS[tool];
   if (!column || typeof access !== 'boolean') {
-    return res.status(400).json({ error: 'tool (hr|reception|bot|hr_manager|reception_manager) and boolean access are required' });
+    return res.status(400).json({ error: 'tool (staff|hr|reception|bot|hr_manager|reception_manager) and boolean access are required' });
   }
   const empId = parseInt(req.params.id);
   if (empId === req.user.id && !access) {
@@ -866,7 +867,8 @@ router.patch('/sysadmin/users/:id/access', requireSysAdmin, async (req, res) => 
                  COALESCE(is_hr_manager, FALSE) AS "isHrManager",
                  COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess",
                  COALESCE(is_reception_manager, FALSE) AS "isReceptionManager",
-                 COALESCE(has_bot_access, FALSE) AS "hasBotAccess"`,
+                 COALESCE(has_bot_access, FALSE) AS "hasBotAccess",
+                 COALESCE(has_staff_access, FALSE) AS "hasStaffAccess"`,
       [access, empId]
     );
     if (!rows[0]) return res.status(404).json({ error: 'User not found' });
@@ -888,12 +890,38 @@ router.get('/sysadmin/users', requireSysAdmin, async (_req, res) => {
               COALESCE(is_reception_manager, FALSE) AS "isReceptionManager",
               COALESCE(has_hr_access, FALSE) AS "hasHrAccess",
               COALESCE(is_hr_manager, FALSE) AS "isHrManager",
-              COALESCE(has_bot_access, FALSE) AS "hasBotAccess"
+              COALESCE(has_bot_access, FALSE) AS "hasBotAccess",
+              COALESCE(has_staff_access, FALSE) AS "hasStaffAccess"
        FROM employees WHERE role != 'crew_member' ORDER BY name`
     );
     res.json({ users: rows });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// Full profile for the Admin Console drawer — any non-crew user
+router.get('/sysadmin/users/:id(\\d+)', requireSysAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name, email, role, department, departments, position, phone,
+              hire_date AS "hireDate", avatar, photo_url AS "photoUrl",
+              is_active AS "isActive", is_locked AS "isLocked",
+              force_password_reset AS "mustChangePassword",
+              created_at AS "createdAt",
+              COALESCE(has_staff_access, FALSE) AS "hasStaffAccess",
+              COALESCE(has_hr_access, FALSE) AS "hasHrAccess",
+              COALESCE(is_hr_manager, FALSE) AS "isHrManager",
+              COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess",
+              COALESCE(is_reception_manager, FALSE) AS "isReceptionManager",
+              COALESCE(has_bot_access, FALSE) AS "hasBotAccess"
+       FROM employees WHERE id = $1`,
+      [parseInt(req.params.id)]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+    res.json({ user: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch user' });
   }
 });
 
