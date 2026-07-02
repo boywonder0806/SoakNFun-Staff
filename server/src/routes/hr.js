@@ -21,7 +21,7 @@ setInterval(() => {
   for (const [t, d] of footageTokens) if (d.expires < now) footageTokens.delete(t);
 }, 60_000);
 
-function nvrRequest(urlPath, { method = 'GET', body, headers = {} } = {}) {
+export function nvrRequest(urlPath, { method = 'GET', body, headers = {} } = {}) {
   const nvrUrl = (process.env.PROTECT_NVR_URL || '').replace(/\/$/, '');
   const apiKey = process.env.PROTECT_API_KEY;
   if (!nvrUrl || !apiKey) return Promise.reject(new Error('Protect NVR not configured'));

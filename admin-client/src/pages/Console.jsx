@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import api from '../lib/api.js';
+import ApiManagement from './ApiManagement.jsx';
 
 const ROLES = [
   { value: 'crew_member', label: 'Staff' },
@@ -33,6 +34,7 @@ export default function Console() {
   const [roleFilter, setRoleFilter] = useState('all');
   const [showCreate, setShowCreate] = useState(false);
   const [profileId, setProfileId]   = useState(null);
+  const [tab, setTab]         = useState('users');
   const [toast, setToast]     = useState(null);
   const toastTimer = useRef(null);
 
@@ -164,16 +166,27 @@ export default function Console() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-3 py-4">
+        <nav className="flex-1 px-3 py-4 space-y-1">
           <p className="text-[10px] font-bold text-stone-500 uppercase tracking-widest px-3 mb-2">Administration</p>
-          <button
-            className="relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-white bg-white/[0.06] text-left"
-            style={{ boxShadow: 'inset 0 0 0 1px rgba(251,146,60,0.25)' }}
-          >
-            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 rounded-r-full bg-orange-400" />
-            <span className="text-orange-400"><UsersNavIcon /></span>
-            User Management
-          </button>
+          {[
+            { id: 'users', label: 'User Management', Icon: UsersNavIcon },
+            { id: 'api',   label: 'API Management',  Icon: PlugIcon },
+          ].map(({ id, label, Icon }) => {
+            const isActive = tab === id;
+            return (
+              <button
+                key={id}
+                onClick={() => setTab(id)}
+                className={`relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all text-left
+                  ${isActive ? 'text-white bg-white/[0.06]' : 'text-stone-400 hover:bg-white/[0.04] hover:text-white'}`}
+                style={isActive ? { boxShadow: 'inset 0 0 0 1px rgba(251,146,60,0.25)' } : {}}
+              >
+                {isActive && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 rounded-r-full bg-orange-400" />}
+                <span className={isActive ? 'text-orange-400' : ''}><Icon /></span>
+                {label}
+              </button>
+            );
+          })}
         </nav>
 
         {/* User footer */}
@@ -203,19 +216,26 @@ export default function Console() {
         {/* Page header */}
         <div className="bg-white/80 backdrop-blur border-b border-gray-200 px-8 py-4 shrink-0 flex items-center justify-between">
           <div>
-            <h2 className="text-base font-bold text-gray-900">User Management</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Accounts, roles, and tool access across the staff platform</p>
+            <h2 className="text-base font-bold text-gray-900">{tab === 'users' ? 'User Management' : 'API Management'}</h2>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {tab === 'users'
+                ? 'Accounts, roles, and tool access across the staff platform'
+                : 'Live status and billing for every external service the platform depends on'}
+            </p>
           </div>
           <div className="flex items-center gap-4">
             <p className="text-xs text-gray-400 font-medium hidden md:block">{today}</p>
-            <button onClick={() => setShowCreate(true)} className="btn-primary text-xs px-4 py-2.5">
-              <PlusIcon /> New User
-            </button>
+            {tab === 'users' && (
+              <button onClick={() => setShowCreate(true)} className="btn-primary text-xs px-4 py-2.5">
+                <PlusIcon /> New User
+              </button>
+            )}
           </div>
         </div>
 
         {/* Content */}
         <div className="flex-1 min-h-0 overflow-y-auto">
+          {tab === 'api' ? <ApiManagement /> : (
           <div className="max-w-5xl mx-auto px-8 py-6 space-y-5">
 
             {/* Stats */}
@@ -283,6 +303,7 @@ export default function Console() {
               Select a user to manage their access, role, and account. Changes take effect on the user's next sign-in or page refresh.
             </p>
           </div>
+          )}
         </div>
       </main>
 
@@ -676,6 +697,19 @@ function UsersNavIcon() {
       <circle cx="9" cy="7" r="4" />
       <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
       <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+function PlugIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 shrink-0">
+      <path d="M18 8V5a1 1 0 0 0-1-1h-2" />
+      <path d="M9 4H7a1 1 0 0 0-1 1v3" />
+      <path d="M4 8h16v4a8 8 0 0 1-16 0V8z" transform="rotate(180 12 13)" />
+      <line x1="12" y1="2" x2="12" y2="5" />
+      <path d="M6 8h12v3a6 6 0 0 1-12 0V8z" />
+      <line x1="12" y1="17" x2="12" y2="22" />
     </svg>
   );
 }

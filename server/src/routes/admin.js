@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import pool from '../db/index.js';
 import { requireAdmin, requireSysAdmin } from '../middleware/auth.js';
 import { sendWelcomeEmail, sendReceptionWelcomeEmail, resendStaffWelcomeEmail, sendPasswordResetEmail } from '../services/email.js';
+import { nvrRequest } from './hr.js';
 
 const router = Router();
 
@@ -838,6 +839,247 @@ router.post('/scheduler/plan/publish', requireAdmin, async (req, res) => {
 });
 
 // ── SysAdmin ──────────────────────────────────────────────────────────────────
+// ── API integration health & billing (Admin Console) ─────────────────────────
+
+// Fetch with a hard timeout so one dead integration can't stall the board
+async function checkFetch(url, options = {}, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function timedCheck(fn) {
+  const startedAt = Date.now();
+  try {
+    const detail = await fn();
+    return { status: 'operational', latencyMs: Date.now() - startedAt, ...detail };
+  } catch (err) {
+    return {
+      status: err.notConfigured ? 'not_configured' : 'down',
+      latencyMs: Date.now() - startedAt,
+      error: err.notConfigured ? undefined : err.message,
+    };
+  }
+}
+
+function notConfigured(msg) {
+  const e = new Error(msg);
+  e.notConfigured = true;
+  return e;
+}
+
+let integrationsCache = null; // { data, fetchedAt }
+
+router.get('/integrations', requireSysAdmin, async (req, res) => {
+  if (integrationsCache && Date.now() - integrationsCache.fetchedAt < 30_000 && req.query.refresh !== '1') {
+    return res.json(integrationsCache.data);
+  }
+
+  const [anthropic, rocketrez, protect, resend, database, netchex] = await Promise.all([
+
+    // Anthropic — count_tokens is free and exercises real auth
+    timedCheck(async () => {
+      if (!process.env.ANTHROPIC_API_KEY) throw notConfigured('ANTHROPIC_API_KEY not set');
+      const r = await checkFetch('https://api.anthropic.com/v1/messages/count_tokens', {
+        method: 'POST',
+        headers: {
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'ping' }] }),
+      });
+      if (!r.ok) throw new Error(`Anthropic API returned status ${r.status}`);
+      return { details: { 'Models in use': 'Claude Sonnet 5 (BayouBot), Claude Haiku 4.5 (deduction analysis)' } };
+    }),
+
+    // RocketRez — a real OAuth token round-trip
+    timedCheck(async () => {
+      if (!process.env.ROCKETREZ_CLIENT_ID || !process.env.ROCKETREZ_CLIENT_SECRET) {
+        throw notConfigured('RocketRez credentials not set');
+      }
+      const r = await checkFetch(`${process.env.ROCKETREZ_BASE_URL}/v1/oauth2/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_id: process.env.ROCKETREZ_CLIENT_ID,
+          client_secret: process.env.ROCKETREZ_CLIENT_SECRET,
+          scope: 'read_orders',
+          grant_type: 'client_credentials',
+        }),
+      });
+      if (!r.ok) throw new Error(`RocketRez auth returned status ${r.status}`);
+      return { details: { Scope: 'Order data (read only)' } };
+    }),
+
+    // UniFi Protect NVR — over the WireGuard tunnel
+    timedCheck(async () => {
+      if (!process.env.PROTECT_NVR_URL || !process.env.PROTECT_API_KEY) {
+        throw notConfigured('Protect NVR not configured');
+      }
+      const info = await nvrRequest('/proxy/protect/integration/v1/meta/info');
+      if (info.statusCode !== 200) { info.resume(); throw new Error(`NVR returned status ${info.statusCode}`); }
+      const infoBody = await new Promise((resolve, reject) => {
+        const chunks = [];
+        info.on('data', c => chunks.push(c));
+        info.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+        info.on('error', reject);
+      });
+      const camsRes = await nvrRequest('/proxy/protect/integration/v1/cameras');
+      let camsDetail = {};
+      if (camsRes.statusCode === 200) {
+        const raw = await new Promise((resolve, reject) => {
+          const chunks = [];
+          camsRes.on('data', c => chunks.push(c));
+          camsRes.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+          camsRes.on('error', reject);
+        });
+        const cams = JSON.parse(raw);
+        const online = cams.filter(c => c.state === 'CONNECTED').length;
+        camsDetail = { Cameras: `${online} of ${cams.length} online` };
+        if (online < cams.length) camsDetail._degraded = true;
+      } else {
+        camsRes.resume();
+      }
+      const version = JSON.parse(infoBody).applicationVersion;
+      const degraded = camsDetail._degraded;
+      delete camsDetail._degraded;
+      return {
+        ...(degraded ? { status: 'degraded' } : {}),
+        details: { 'Protect version': version, ...camsDetail, Connection: 'WireGuard VPN' },
+      };
+    }),
+
+    // Resend — list verified sending domains
+    timedCheck(async () => {
+      if (!process.env.RESEND_API_KEY) throw notConfigured('RESEND_API_KEY not set');
+      const r = await checkFetch('https://api.resend.com/domains', {
+        headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+      });
+      if (!r.ok) throw new Error(`Resend API returned status ${r.status}`);
+      const data = await r.json();
+      const domains = data.data || [];
+      const verified = domains.filter(d => d.status === 'verified').length;
+      return {
+        details: {
+          'Sending domains': domains.length ? `${verified} of ${domains.length} verified` : 'None',
+          From: process.env.RESEND_FROM_EMAIL || '—',
+        },
+      };
+    }),
+
+    // PostgreSQL (DigitalOcean managed)
+    timedCheck(async () => {
+      const r = await pool.query("SELECT version(), (SELECT COUNT(*) FROM employees) AS employees");
+      return {
+        details: {
+          Engine: r.rows[0].version.split(' on ')[0],
+          'Employee records': r.rows[0].employees,
+        },
+      };
+    }),
+
+    // Netchex — placeholder until credentials exist
+    timedCheck(async () => {
+      if (!process.env.NETCHEX_API_KEY) throw notConfigured('NETCHEX_API_KEY not set');
+      return {};
+    }),
+  ]);
+
+  const data = {
+    checkedAt: new Date().toISOString(),
+    integrations: [
+      { id: 'anthropic', name: 'Anthropic (Claude AI)', description: 'Powers BayouBot and meal deduction analysis', hasBilling: true, ...anthropic },
+      { id: 'rocketrez', name: 'RocketRez',             description: 'Point of sale and order data for both parks', ...rocketrez },
+      { id: 'protect',   name: 'UniFi Protect',         description: 'Camera system for HR footage review', ...protect },
+      { id: 'resend',    name: 'Resend',                description: 'Transactional email — welcome, password reset, digests', ...resend },
+      { id: 'database',  name: 'PostgreSQL Database',   description: 'DigitalOcean managed database for the platform', ...database },
+      { id: 'netchex',   name: 'Netchex HRM',           description: 'Payroll and employee data (integration planned)', ...netchex },
+    ],
+  };
+
+  integrationsCache = { data, fetchedAt: Date.now() };
+  res.json(data);
+});
+
+// Anthropic month-to-date usage and cost. Requires an Admin API key
+// (sk-ant-admin…) — regular API keys cannot read organization reports.
+let anthropicBillingCache = null; // { data, fetchedAt }
+
+router.get('/integrations/anthropic-billing', requireSysAdmin, async (_req, res) => {
+  const adminKey = process.env.ANTHROPIC_ADMIN_KEY;
+  if (!adminKey) {
+    return res.json({
+      configured: false,
+      hint: 'Add ANTHROPIC_ADMIN_KEY to the server .env (create an Admin API key in the Anthropic Console under Settings → API Keys) to see usage and spend here.',
+    });
+  }
+  if (anthropicBillingCache && Date.now() - anthropicBillingCache.fetchedAt < 5 * 60_000) {
+    return res.json(anthropicBillingCache.data);
+  }
+
+  try {
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+    const headers = { 'x-api-key': adminKey, 'anthropic-version': '2023-06-01' };
+    const qs = `starting_at=${encodeURIComponent(monthStart)}&limit=31`;
+
+    const [costRes, usageRes] = await Promise.all([
+      checkFetch(`https://api.anthropic.com/v1/organizations/cost_report?${qs}`, { headers }, 15000),
+      checkFetch(`https://api.anthropic.com/v1/organizations/usage_report/messages?${qs}&bucket_width=1d`, { headers }, 15000),
+    ]);
+
+    // Walk report buckets defensively — sum every numeric field we recognize
+    let costUsd = null;
+    if (costRes.ok) {
+      const cost = await costRes.json();
+      costUsd = 0;
+      for (const bucket of cost.data || []) {
+        for (const item of bucket.results || []) {
+          const amt = parseFloat(item.amount ?? item.cost ?? 0);
+          if (!isNaN(amt)) costUsd += amt;
+        }
+      }
+    }
+
+    let tokens = null;
+    if (usageRes.ok) {
+      const usage = await usageRes.json();
+      tokens = { input: 0, output: 0, cacheRead: 0 };
+      for (const bucket of usage.data || []) {
+        for (const item of bucket.results || []) {
+          tokens.input     += (item.uncached_input_tokens || 0) + (item.cache_creation_input_tokens || 0)
+                            + (item.cache_creation?.ephemeral_5m_input_tokens || 0)
+                            + (item.cache_creation?.ephemeral_1h_input_tokens || 0);
+          tokens.output    += item.output_tokens || 0;
+          tokens.cacheRead += item.cache_read_input_tokens || 0;
+        }
+      }
+    }
+
+    if (costUsd === null && tokens === null) {
+      const status = costRes.status || usageRes.status;
+      return res.json({ configured: true, error: `Anthropic Admin API returned status ${status} — check that the key is an Admin key (sk-ant-admin…)` });
+    }
+
+    const data = {
+      configured: true,
+      month: now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+      costUsd: costUsd !== null ? +costUsd.toFixed(2) : null,
+      tokens,
+      note: 'Remaining prepaid credit balance is not exposed by the Anthropic API — view it in the Anthropic Console under Billing.',
+    };
+    anthropicBillingCache = { data, fetchedAt: Date.now() };
+    res.json(data);
+  } catch (err) {
+    res.json({ configured: true, error: 'Could not reach the Anthropic Admin API: ' + err.message });
+  }
+});
+
 // Unified per-tool access toggle for the Admin Console.
 // tool: hr | reception | bot | hr_manager | reception_manager
 const ACCESS_COLUMNS = {
