@@ -118,6 +118,7 @@ export default function MealDeductions() {
   const [activeView, setActiveView] = useState('employees');
   const [expanded,   setExpanded]   = useState({});
   const [footageTarget, setFootageTarget] = useState(null);
+  const [historyTarget, setHistoryTarget] = useState(null);
   const [showPDFModal,  setShowPDFModal]  = useState(false);
 
   // AI analysis (on demand)
@@ -571,7 +572,15 @@ export default function MealDeductions() {
                                 {b.employeeName.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
                               </div>
                               <div className="min-w-0">
-                                <p className="text-sm font-semibold text-gray-900 truncate">{b.employeeName}</p>
+                                <p className="text-sm font-semibold text-gray-900 truncate">
+                                  <span
+                                    onClick={e => { e.stopPropagation(); setHistoryTarget({ name: b.employeeName, homePark: b.homePark }); }}
+                                    className="hover:text-brand hover:underline cursor-pointer"
+                                    title="View full deduction history"
+                                  >
+                                    {b.employeeName}
+                                  </span>
+                                </p>
                                 {b.crossParkCount > 0 && (
                                   <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-100 text-red-700 inline-block mt-0.5">
                                     ⚠ Cross-park
@@ -692,6 +701,13 @@ export default function MealDeductions() {
           meta={meta}
           period={{ label: periodLabel, transactionCount: meta.totalOrders }}
           onClose={() => setShowPDFModal(false)}
+        />
+      )}
+      {historyTarget && (
+        <HistoryModal
+          name={historyTarget.name}
+          homePark={historyTarget.homePark}
+          onClose={() => setHistoryTarget(null)}
         />
       )}
       {footageTarget && (
@@ -1366,6 +1382,167 @@ function PDFExportModal({ breakdown, meta, period, onClose }) {
           >
             {generating ? <><Spinner /> Generating…</> : <><PDFIcon /> Download PDF</>}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Employee history modal ────────────────────────────────────────────────────
+// Served from the local order database (write-through + nightly 5 AM sync),
+// so browsing months of history costs nothing against RocketRez.
+
+function HistoryModal({ name, homePark, onClose }) {
+  const backdropRef = useRef(null);
+  const [data, setData]     = useState(null);
+  const [error, setError]   = useState(null);
+  const [openMonth, setOpenMonth] = useState(null);
+
+  useEffect(() => {
+    api.get(`/hr/meal-deductions/history?name=${encodeURIComponent(name)}&homePark=${homePark || ''}&months=12`)
+      .then(r => {
+        setData(r.data);
+        const first = r.data.orders[0]?.businessDate?.slice(0, 7);
+        setOpenMonth(first || null);
+      })
+      .catch(err => setError(err.response?.data?.error || 'Failed to load history'));
+  }, [name, homePark]);
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const months = useMemo(() => {
+    if (!data) return [];
+    const map = {};
+    for (const o of data.orders) {
+      const key = o.businessDate.slice(0, 7);
+      if (!map[key]) map[key] = { key, orders: [], payroll: 0, total: 0 };
+      map[key].orders.push(o);
+      map[key].payroll += o.payroll;
+      map[key].total   += o.amount;
+    }
+    return Object.values(map).sort((a, b) => b.key.localeCompare(a.key));
+  }, [data]);
+
+  const grandPayroll = months.reduce((s, m) => s + m.payroll, 0);
+  const grandOrders  = months.reduce((s, m) => s + m.orders.length, 0);
+
+  function monthLabel(key) {
+    const [y, m] = key.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }
+
+  const lastSync = data?.sync?.lastSync?.ranAt
+    ? new Date(data.sync.lastSync.ranAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    : null;
+
+  return (
+    <div ref={backdropRef} onClick={e => e.target === backdropRef.current && onClose()}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="w-full max-w-2xl max-h-[85vh] bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+
+        {/* Header */}
+        <div className="px-6 py-5 shrink-0 flex items-start justify-between"
+          style={{ background: 'linear-gradient(135deg, #0d5c55 0%, #0f766e 60%, #0d9488 100%)' }}>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-bold text-white">{name}</h2>
+              {homePark && (
+                <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-white/20 text-white">
+                  {PARK_LABEL[homePark] || homePark}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-white/70 mt-1">Meal deduction history · last 12 months</p>
+          </div>
+          <button onClick={onClose}
+            className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center text-white transition-colors">
+            ✕
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {error ? (
+            <p className="text-sm text-red-600 text-center py-14">{error}</p>
+          ) : !data ? (
+            <div className="flex items-center justify-center h-40">
+              <div className="w-6 h-6 border-2 border-brand/20 border-t-brand rounded-full animate-spin" />
+            </div>
+          ) : months.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-14">No deductions recorded in the last 12 months.</p>
+          ) : (
+            <>
+              {/* Summary */}
+              <div className="grid grid-cols-2 gap-3 px-6 pt-5 pb-2">
+                <div className="bg-teal-50/60 border border-teal-100 rounded-xl px-4 py-3">
+                  <p className="text-lg font-bold text-teal-700">{fmtCurrency(grandPayroll)}</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">Payroll deductions · 12 months</p>
+                </div>
+                <div className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-3">
+                  <p className="text-lg font-bold text-gray-900">{grandOrders}</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">Orders · 12 months</p>
+                </div>
+              </div>
+
+              {/* Month sections */}
+              <div className="px-6 py-4 space-y-2">
+                {months.map(m => {
+                  const isOpen = openMonth === m.key;
+                  return (
+                    <div key={m.key} className="border border-gray-200 rounded-xl overflow-hidden">
+                      <button
+                        onClick={() => setOpenMonth(isOpen ? null : m.key)}
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+                      >
+                        <ChevronIcon expanded={isOpen} />
+                        <span className="text-sm font-semibold text-gray-800 flex-1">{monthLabel(m.key)}</span>
+                        <span className="text-xs text-gray-400">{m.orders.length} order{m.orders.length !== 1 ? 's' : ''}</span>
+                        <span className="text-sm font-bold text-teal-700 w-24 text-right">{fmtCurrency(m.payroll)}</span>
+                      </button>
+
+                      {isOpen && (
+                        <div className="border-t border-gray-100 bg-gray-50/60">
+                          <table className="w-full text-xs">
+                            <tbody>
+                              {m.orders.map(o => (
+                                <tr key={o.orderId} className="border-b border-gray-100 last:border-0">
+                                  <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap w-32">
+                                    {fmtDate(o.date)}{fmtTime(o.date) ? ` · ${fmtTime(o.date)}` : ''}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-gray-700">
+                                    {(o.items || []).map(i => i.name).join(', ') || '—'}
+                                  </td>
+                                  <td className="px-3 py-2.5 w-20">
+                                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${METHOD_COLORS[o.paymentMethod] || METHOD_COLORS.other}`}>
+                                      {METHOD_LABEL[o.paymentMethod] || o.paymentMethod}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-2.5 text-right font-semibold text-gray-900 w-20">
+                                    {o.paymentMethod === 'comp' ? 'Comp' : fmtCurrency(o.amount)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-3 border-t border-gray-100 shrink-0 bg-gray-50/60">
+          <p className="text-[11px] text-gray-400 text-center">
+            Served from the order history database · re-synced nightly at 5:00 AM to pick up voids and refunds
+            {lastSync ? ` · last sync ${lastSync}` : ''}
+          </p>
         </div>
       </div>
     </div>

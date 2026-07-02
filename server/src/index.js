@@ -18,6 +18,7 @@ import operationsRouter from './routes/operations.js';
 import hrRouter from './routes/hr.js';
 import bayoubotRouter from './routes/bayoubot.js';
 import { startCallbackDigestCron } from './cron/callbackDigest.js';
+import { startCrewOrderSyncCron } from './cron/crewOrderSync.js';
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -106,4 +107,5 @@ if (process.env.NODE_ENV === 'production') {
 app.listen(PORT, () => {
   console.log(`Blue Bayou Staff API running on http://localhost:${PORT}`);
   startCallbackDigestCron();
+  startCrewOrderSyncCron();
 });

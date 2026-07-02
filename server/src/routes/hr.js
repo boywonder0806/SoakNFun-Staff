@@ -841,188 +841,10 @@ router.get('/protect/footage-stream', async (req, res) => {
 });
 
 // ── Live Meal Deductions (RocketRez) ─────────────────────────────────────────
-// Source of truth is the RocketRez orders API. Any order with a
-// contactGroupName is a crew order: "(BB) Name" = Blue Bayou crew,
-// no prefix = Gulf Islands crew. Only Active orders count — Cancelled,
-// Void, Estimate, and Return Processed orders are excluded.
-let rrCachedToken = null;
-let rrTokenExpiry = 0;
-
-async function getRRToken() {
-  if (rrCachedToken && Date.now() < rrTokenExpiry - 60_000) return rrCachedToken;
-  const res = await fetch(`${process.env.ROCKETREZ_BASE_URL}/v1/oauth2/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      client_id: process.env.ROCKETREZ_CLIENT_ID,
-      client_secret: process.env.ROCKETREZ_CLIENT_SECRET,
-      scope: 'read_orders',
-      grant_type: 'client_credentials',
-    }),
-  });
-  if (!res.ok) throw new Error(`RocketRez auth failed: ${res.status}`);
-  const data = await res.json();
-  rrCachedToken = data.data.access_token;
-  rrTokenExpiry = new Date(data.data.expiry).getTime();
-  return rrCachedToken;
-}
-
-// Crew-order cache — today's data refreshes every 5 min, past days hourly
-const crewOrderCache = new Map(); // "start:end" → { orders, fetchedAt }
-const CREW_TTL_TODAY = 5 * 60 * 1000;
-const CREW_TTL_PAST  = 60 * 60 * 1000;
-
-async function fetchCrewOrders(startDate, endDate) {
-  const today  = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
-  const ttl    = endDate >= today ? CREW_TTL_TODAY : CREW_TTL_PAST;
-  const key    = `${startDate}:${endDate}`;
-  const cached = crewOrderCache.get(key);
-  if (cached && Date.now() - cached.fetchedAt < ttl) return cached;
-
-  const token = await getRRToken();
-  const base  = (process.env.ROCKETREZ_BASE_URL || '').replace(/\/$/, '');
-
-  const orders = [];
-  let pageIndex = 0;
-  while (true) {
-    const url = `${base}/v1/orders?startDate=${startDate}&endDate=${endDate}&pageSize=250&pageIndex=${pageIndex}`;
-    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!r.ok) throw new Error(`RocketRez orders API: ${r.status}`);
-    const data  = await r.json();
-    const batch = Array.isArray(data.data) ? data.data : [];
-    orders.push(...batch.filter(o => o.contactGroupName?.trim() && o.status === 'Active'));
-    if (batch.length < 250) break;
-    pageIndex++;
-  }
-
-  const entry = { orders, fetchedAt: Date.now() };
-  crewOrderCache.set(key, entry);
-  for (const [k, v] of crewOrderCache) {
-    if (Date.now() - v.fetchedAt > CREW_TTL_PAST) crewOrderCache.delete(k);
-  }
-  return entry;
-}
-
-// A line item's revenue lives in rateTypes[].subTotal — li.subTotal doesn't
-// exist on RocketRez's response shape (can carry multiple rateTypes).
-function rrLineItemRevenue(li) {
-  return (li.rateTypes || []).reduce((sum, rt) => sum + (rt.subTotal || 0), 0);
-}
-
-// Classify an order's payments into buckets and pick the dominant method
-// using the legacy paymentMethod vocabulary the UI already understands.
-function classifyCrewPayments(paymentMethods, orderTotal) {
-  const buckets = { payroll: 0, card: 0, cash: 0, token: 0, comp: 0 };
-  for (const pm of (paymentMethods || [])) {
-    const m   = (pm.paymentMethod || '').toLowerCase();
-    const amt = pm.paymentAmount || 0;
-    if      (m.includes('payroll'))                                            buckets.payroll += amt;
-    else if (m.includes('token'))                                              buckets.token   += amt;
-    else if (m.includes('cash') && !m.includes('card'))                        buckets.cash    += amt;
-    else if (m.includes('stripe') || m.includes('card') || m.includes('visa') ||
-             m.includes('mastercard') || m.includes('amex') || m.includes('discover') ||
-             m.includes('nayax') || m.includes('paypal') || m.includes('pre-paid')) buckets.card += amt;
-    else                                                                       buckets.comp    += amt;
-  }
-  if (!paymentMethods?.length) buckets.comp += orderTotal || 0;
-
-  const LABEL = { payroll: 'payroll_deduction', card: 'stripe', cash: 'cash', token: 'token', comp: 'comp' };
-  const dominant = Object.entries(buckets).sort((a, b) => b[1] - a[1])[0];
-  return { ...buckets, primary: LABEL[dominant[1] > 0 ? dominant[0] : 'comp'] };
-}
-
-// Which park a transaction happened at, from the sales office prefix
-function orderPark(order) {
-  const office = (order.salesOfficeName || '').trim().toUpperCase();
-  if (office.startsWith('BB')) return 'BB';
-  if (office.startsWith('GI')) return 'GI';
-  return null;
-}
-
-// Build the per-employee breakdown in the exact shape the client renders
-function buildLiveBreakdown(orders) {
-  const grouped = {};
-  const meta = { totalOrders: 0, totalAmount: 0, payrollTotal: 0, cardCashTotal: 0, tokenTotal: 0, compTotal: 0, parkPayroll: {} };
-
-  for (const order of orders) {
-    const rawName  = order.contactGroupName.trim();
-    const homePark = /^\(BB\)/i.test(rawName) ? 'BB' : 'GI';
-    const name     = rawName.replace(/^\(BB\)\s*/i, '').trim();
-    if (!name) continue;
-
-    const pay   = classifyCrewPayments(order.paymentMethods, order.total);
-    const park  = orderPark(order) || homePark;
-    const items = (order.lineItems || [])
-      .map(li => ({
-        name: (li.name || '')
-          .replace(/\s*\((BB|GI)\s*Employee\)/gi, '')
-          .replace(/\s*-\s*Token\b/gi, '')
-          .trim(),
-        amount: +rrLineItemRevenue(li).toFixed(2),
-      }))
-      .filter(li => li.name);
-
-    if (!grouped[name]) {
-      grouped[name] = {
-        employeeName: name, transactionCount: 0, totalAmount: 0, payrollTotal: 0,
-        parks: new Set(), homePark, crossParkCount: 0, transactions: [],
-      };
-    }
-    const g = grouped[name];
-    const crossPark = park !== homePark;
-
-    g.transactionCount++;
-    g.totalAmount   += order.total || 0;
-    g.payrollTotal  += pay.payroll;
-    g.parks.add(park);
-    if (crossPark) g.crossParkCount++;
-    g.transactions.push({
-      date:          order.createdDate,
-      orderId:       order.id,
-      description:   items.map(i => i.name).join(', ') || null,
-      items,
-      amount:        +(order.total || 0).toFixed(2),
-      paymentMethod: pay.primary,
-      payroll:       +pay.payroll.toFixed(2),
-      cardCash:      +(pay.card + pay.cash).toFixed(2),
-      token:         +pay.token.toFixed(2),
-      park,
-      homePark,
-      crossPark,
-      cashier:       [order.salesPersonFirstName, order.salesPersonLastName].filter(Boolean).join(' ')
-                       .replace(/^BB\s*-?\s*/i, '').trim() || null,
-    });
-
-    meta.totalOrders++;
-    meta.totalAmount   += order.total || 0;
-    meta.payrollTotal  += pay.payroll;
-    meta.cardCashTotal += pay.card + pay.cash;
-    meta.tokenTotal    += pay.token;
-    meta.compTotal     += pay.comp;
-    if (pay.payroll > 0) {
-      meta.parkPayroll[park] = +((meta.parkPayroll[park] || 0) + pay.payroll).toFixed(2);
-    }
-  }
-
-  const breakdown = Object.values(grouped)
-    .sort((a, b) => a.employeeName.localeCompare(b.employeeName))
-    .map(g => {
-      const parksArr = [...g.parks].sort();
-      g.transactions.sort((a, b) => new Date(a.date) - new Date(b.date));
-      return {
-        ...g,
-        parks: parksArr,
-        park:  parksArr.length === 1 ? parksArr[0] : (parksArr.length > 1 ? 'MULTI' : null),
-        totalAmount:  g.totalAmount.toFixed(2),
-        payrollTotal: g.payrollTotal.toFixed(2),
-      };
-    });
-
-  for (const k of ['totalAmount', 'payrollTotal', 'cardCashTotal', 'tokenTotal', 'compTotal']) {
-    meta[k] = +meta[k].toFixed(2);
-  }
-  return { meta, breakdown };
-}
+// Fetching, classification, persistence, and the nightly sync all live in
+// services/crewOrders.js. Live requests write through to the crew_orders
+// table so per-employee history is queryable without hitting RocketRez.
+import { fetchCrewOrders, buildLiveBreakdown, getSyncStatus, syncTrailingDays } from '../services/crewOrders.js';
 
 router.get('/meal-deductions/live', requireHR, async (req, res) => {
   const { startDate, endDate } = req.query;
@@ -1086,6 +908,57 @@ router.post('/meal-deductions/live/analyze', requireHR, async (req, res) => {
   } catch (err) {
     console.error('Live AI analysis error:', err.message);
     res.status(502).json({ error: 'Analysis failed: ' + err.message });
+  }
+});
+
+// Per-employee deduction history, served from the local crew_orders table —
+// no RocketRez round-trip. Kept current by write-through + the nightly sync.
+router.get('/meal-deductions/history', requireHR, async (req, res) => {
+  const { name, homePark } = req.query;
+  const months = Math.min(parseInt(req.query.months) || 12, 24);
+  if (!name) return res.status(400).json({ error: 'name is required' });
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT order_id AS "orderId", order_date AS "date", business_date::text AS "businessDate",
+              park, home_park AS "homePark", cross_park AS "crossPark",
+              total::float AS amount, payroll::float AS payroll,
+              card_cash::float AS "cardCash", token_amount::float AS token,
+              payment_method AS "paymentMethod", items, cashier
+       FROM crew_orders
+       WHERE status = 'Active'
+         AND LOWER(employee_name) = LOWER($1)
+         AND ($2::text IS NULL OR home_park = $2)
+         AND business_date >= (CURRENT_DATE - ($3 || ' months')::interval)
+       ORDER BY order_date DESC`,
+      [name.trim(), homePark || null, months]
+    );
+    const status = await getSyncStatus();
+    res.json({ name: name.trim(), homePark: homePark || null, months, orders: rows, sync: status });
+  } catch (err) {
+    console.error('Deduction history error:', err.message);
+    res.status(500).json({ error: 'Failed to load deduction history' });
+  }
+});
+
+// History database status — order count, coverage, last sync
+router.get('/meal-deductions/sync-status', requireHR, async (_req, res) => {
+  try {
+    res.json(await getSyncStatus());
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load sync status' });
+  }
+});
+
+// Manual re-sync of a trailing window (the nightly cron does this at 5 AM)
+router.post('/meal-deductions/sync-now', requireHR, async (req, res) => {
+  const days = Math.min(parseInt(req.body?.days) || 30, 92);
+  try {
+    const ordersSynced = await syncTrailingDays(days, 'manual');
+    res.json({ ok: true, days, ordersSynced });
+  } catch (err) {
+    console.error('Manual crew order sync error:', err.message);
+    res.status(502).json({ error: 'Sync failed: ' + err.message });
   }
 });
 
