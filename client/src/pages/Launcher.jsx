@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import { IS_HUB } from '../lib/host.js';
 
 // Production tool URLs; dev falls back to the Vite ports
 function toolUrl(sub, devPort) {
@@ -28,7 +29,9 @@ export default function Launcher() {
       accent: '#00C8FF',
       Icon: WaveIcon,
       show: user?.role === 'sysadmin' || !!user?.hasStaffAccess,
-      onClick: () => navigate(user?.role === 'manager' || user?.role === 'sysadmin' ? '/scheduler' : '/home'),
+      ...(IS_HUB
+        ? { href: sso(toolUrl('portal', 5173)) }
+        : { onClick: () => navigate(user?.role === 'manager' || user?.role === 'sysadmin' ? '/scheduler' : '/home') }),
     },
     {
       id: 'hr',

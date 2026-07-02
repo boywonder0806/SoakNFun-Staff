@@ -31,6 +31,7 @@ const allowedOrigins = [
   process.env.BOT_URL         || 'http://localhost:5176',
   process.env.ADMIN_URL       || 'http://localhost:5177',
   'https://admin.bluebayoustaff.com',
+  'https://portal.bluebayoustaff.com',
 ];
 
 app.use(cors({
@@ -82,6 +83,7 @@ if (process.env.NODE_ENV === 'production') {
     if (host.startsWith('hr.'))        return serveHR(req, res, next);
     if (host.startsWith('bot.'))       return serveBot(req, res, next);
     if (host.startsWith('admin.'))     return serveAdmin(req, res, next);
+    if (host.startsWith('portal.'))    return serveClient(req, res, next);
     serveClient(req, res, next);
   });
 

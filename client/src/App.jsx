@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { IS_HUB } from './lib/host.js';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import Layout from './components/Layout/Layout.jsx';
 import Login from './pages/Login.jsx';
@@ -42,9 +43,31 @@ function ProtectedRoute({ children, adminOnly = false, sysadminOnly = false, man
 
 function AppRoutes() {
   const { user } = useAuth();
+
+  // The hub (www) is sign-in + launcher only — the staff portal itself lives
+  // at portal.bluebayoustaff.com and receives the session via SSO handoff.
+  if (IS_HUB) {
+    return (
+      <Routes>
+        <Route path="/login" element={user ? <Navigate to="/apps" replace /> : <Login />} />
+        <Route path="/change-password" element={<ChangePassword />} />
+        <Route path="/reset-password"  element={<ResetPassword />} />
+        <Route
+          path="/apps"
+          element={
+            <ProtectedRoute>
+              <Launcher />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="*" element={<Navigate to={user ? '/apps' : '/login'} replace />} />
+      </Routes>
+    );
+  }
+
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to="/apps" replace /> : <Login />} />
+      <Route path="/login" element={user ? <Navigate to="/home" replace /> : <Login />} />
       <Route path="/change-password" element={<ChangePassword />} />
       <Route
         path="/apps"

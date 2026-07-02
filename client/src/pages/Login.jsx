@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { IS_HUB } from '../lib/host.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import api from '../lib/api.js';
 
@@ -74,7 +75,7 @@ export default function Login() {
       if (user.mustChangePassword) {
         navigate('/change-password');
       } else {
-        navigate('/apps');
+        navigate(IS_HUB ? '/apps' : (user.role === 'manager' || user.role === 'sysadmin' ? '/scheduler' : '/home'));
       }
     } catch (err) {
       const msg = err.response?.data?.error || 'Unable to sign in. Please try again.';
