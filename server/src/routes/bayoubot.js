@@ -34,6 +34,20 @@ const orderCache = new Map();
 const TTL_TODAY = 5  * 60 * 1000;
 const TTL_PAST  = 60 * 60 * 1000;
 
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// RocketRez throttles bursts with 429s — honor Retry-After and back off
+async function rrFetch(url, options, attempts = 4) {
+  for (let attempt = 1; ; attempt++) {
+    const r = await fetch(url, options);
+    if (r.status !== 429 || attempt >= attempts) return r;
+    const retryAfter = parseFloat(r.headers.get('retry-after'));
+    const waitMs = !isNaN(retryAfter) ? retryAfter * 1000 : 1000 * 2 ** (attempt - 1);
+    console.warn(`RocketRez 429 (BayouBot) — retrying in ${waitMs}ms (attempt ${attempt}/${attempts})`);
+    await sleep(waitMs);
+  }
+}
+
 // Fetch every order in a date range — no filtering, with caching
 async function fetchAllOrders(startDate, endDate) {
   const today  = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
@@ -52,7 +66,7 @@ async function fetchAllOrders(startDate, endDate) {
 
   while (true) {
     const url = `${base}/v1/orders?startDate=${startDate}&endDate=${endDate}&pageSize=250&pageIndex=${pageIndex}`;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await rrFetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) throw new Error(`RocketRez orders failed: ${res.status}`);
     const json  = await res.json();
     const batch = json.data || [];

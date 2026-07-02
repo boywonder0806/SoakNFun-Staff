@@ -78,6 +78,21 @@ export function centralToday() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
 }
 
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// RocketRez throttles bursts with 429s — honor Retry-After and back off
+// instead of failing the whole request chain.
+async function rrFetch(url, options, attempts = 4) {
+  for (let attempt = 1; ; attempt++) {
+    const r = await fetch(url, options);
+    if (r.status !== 429 || attempt >= attempts) return r;
+    const retryAfter = parseFloat(r.headers.get('retry-after'));
+    const waitMs = !isNaN(retryAfter) ? retryAfter * 1000 : 1000 * 2 ** (attempt - 1);
+    console.warn(`RocketRez 429 — retrying in ${waitMs}ms (attempt ${attempt}/${attempts})`);
+    await sleep(waitMs);
+  }
+}
+
 export async function fetchCrewOrders(startDate, endDate) {
   const ttl    = endDate >= centralToday() ? CREW_TTL_TODAY : CREW_TTL_PAST;
   const key    = `${startDate}:${endDate}`;
@@ -91,7 +106,7 @@ export async function fetchCrewOrders(startDate, endDate) {
   let pageIndex = 0;
   while (true) {
     const url = `${base}/v1/orders?startDate=${startDate}&endDate=${endDate}&pageSize=250&pageIndex=${pageIndex}`;
-    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const r = await rrFetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!r.ok) throw new Error(`RocketRez orders API: ${r.status}`);
     const data  = await r.json();
     const batch = Array.isArray(data.data) ? data.data : [];
@@ -307,6 +322,7 @@ export async function syncTrailingDays(days, source) {
     const { orders } = await fetchCrewOrders(dateStr(cursor), dateStr(chunkEnd));
     totalWritten += await upsertOrders(orders);
     cursor = new Date(chunkEnd.getTime() + 86_400_000);
+    await sleep(1000); // breathe between chunks — background syncs shouldn't crowd out live traffic
   }
 
   await pool.query(
