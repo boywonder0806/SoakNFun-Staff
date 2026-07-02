@@ -1,11 +1,9 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import MealDeductions from './MealDeductions.jsx';
-import RocketRezSync from './RocketRezSync.jsx';
 
 const TABS = [
   { id: 'deductions', label: 'Meal Deductions', icon: ReceiptIcon },
-  { id: 'gen2',       label: 'Live Orders (Gen 2)', icon: SyncTabIcon },
 ];
 
 export default function Dashboard() {
@@ -103,7 +101,6 @@ export default function Dashboard() {
         </div>
         <div className="flex-1 min-h-0 overflow-hidden">
           {tab === 'deductions' && <MealDeductions />}
-          {tab === 'gen2' && <RocketRezSync />}
         </div>
       </main>
     </div>
@@ -127,16 +124,6 @@ function ReceiptIcon() {
       <line x1="8" y1="8" x2="16" y2="8" />
       <line x1="8" y1="12" x2="16" y2="12" />
       <line x1="8" y1="16" x2="12" y2="16" />
-    </svg>
-  );
-}
-
-function SyncTabIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 shrink-0">
-      <polyline points="23 4 23 10 17 10" />
-      <polyline points="1 20 1 14 7 14" />
-      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
     </svg>
   );
 }

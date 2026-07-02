@@ -836,9 +836,11 @@ router.get('/protect/footage-stream', async (req, res) => {
   }
 });
 
-// ── RocketRez Live Sync (Gen 2) ───────────────────────────────────────────────
-// Any order with a contactGroupName is a crew order.
-// "(BB) Name" = Blue Bayou crew; no prefix = GI crew.
+// ── Live Meal Deductions (RocketRez) ─────────────────────────────────────────
+// Source of truth is the RocketRez orders API. Any order with a
+// contactGroupName is a crew order: "(BB) Name" = Blue Bayou crew,
+// no prefix = Gulf Islands crew. Only Active orders count — Cancelled,
+// Void, Estimate, and Return Processed orders are excluded.
 let rrCachedToken = null;
 let rrTokenExpiry = 0;
 
@@ -861,116 +863,225 @@ async function getRRToken() {
   return rrCachedToken;
 }
 
-router.get('/rocketrez/sync', requireHR, async (req, res) => {
+// Crew-order cache — today's data refreshes every 5 min, past days hourly
+const crewOrderCache = new Map(); // "start:end" → { orders, fetchedAt }
+const CREW_TTL_TODAY = 5 * 60 * 1000;
+const CREW_TTL_PAST  = 60 * 60 * 1000;
+
+async function fetchCrewOrders(startDate, endDate) {
+  const today  = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+  const ttl    = endDate >= today ? CREW_TTL_TODAY : CREW_TTL_PAST;
+  const key    = `${startDate}:${endDate}`;
+  const cached = crewOrderCache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < ttl) return cached;
+
+  const token = await getRRToken();
+  const base  = (process.env.ROCKETREZ_BASE_URL || '').replace(/\/$/, '');
+
+  const orders = [];
+  let pageIndex = 0;
+  while (true) {
+    const url = `${base}/v1/orders?startDate=${startDate}&endDate=${endDate}&pageSize=250&pageIndex=${pageIndex}`;
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) throw new Error(`RocketRez orders API: ${r.status}`);
+    const data  = await r.json();
+    const batch = Array.isArray(data.data) ? data.data : [];
+    orders.push(...batch.filter(o => o.contactGroupName?.trim() && o.status === 'Active'));
+    if (batch.length < 250) break;
+    pageIndex++;
+  }
+
+  const entry = { orders, fetchedAt: Date.now() };
+  crewOrderCache.set(key, entry);
+  for (const [k, v] of crewOrderCache) {
+    if (Date.now() - v.fetchedAt > CREW_TTL_PAST) crewOrderCache.delete(k);
+  }
+  return entry;
+}
+
+// A line item's revenue lives in rateTypes[].subTotal — li.subTotal doesn't
+// exist on RocketRez's response shape (can carry multiple rateTypes).
+function rrLineItemRevenue(li) {
+  return (li.rateTypes || []).reduce((sum, rt) => sum + (rt.subTotal || 0), 0);
+}
+
+// Classify an order's payments into buckets and pick the dominant method
+// using the legacy paymentMethod vocabulary the UI already understands.
+function classifyCrewPayments(paymentMethods, orderTotal) {
+  const buckets = { payroll: 0, card: 0, cash: 0, token: 0, comp: 0 };
+  for (const pm of (paymentMethods || [])) {
+    const m   = (pm.paymentMethod || '').toLowerCase();
+    const amt = pm.paymentAmount || 0;
+    if      (m.includes('payroll'))                                            buckets.payroll += amt;
+    else if (m.includes('token'))                                              buckets.token   += amt;
+    else if (m.includes('cash') && !m.includes('card'))                        buckets.cash    += amt;
+    else if (m.includes('stripe') || m.includes('card') || m.includes('visa') ||
+             m.includes('mastercard') || m.includes('amex') || m.includes('discover') ||
+             m.includes('nayax') || m.includes('paypal') || m.includes('pre-paid')) buckets.card += amt;
+    else                                                                       buckets.comp    += amt;
+  }
+  if (!paymentMethods?.length) buckets.comp += orderTotal || 0;
+
+  const LABEL = { payroll: 'payroll_deduction', card: 'stripe', cash: 'cash', token: 'token', comp: 'comp' };
+  const dominant = Object.entries(buckets).sort((a, b) => b[1] - a[1])[0];
+  return { ...buckets, primary: LABEL[dominant[1] > 0 ? dominant[0] : 'comp'] };
+}
+
+// Which park a transaction happened at, from the sales office prefix
+function orderPark(order) {
+  const office = (order.salesOfficeName || '').trim().toUpperCase();
+  if (office.startsWith('BB')) return 'BB';
+  if (office.startsWith('GI')) return 'GI';
+  return null;
+}
+
+// Build the per-employee breakdown in the exact shape the client renders
+function buildLiveBreakdown(orders) {
+  const grouped = {};
+  const meta = { totalOrders: 0, totalAmount: 0, payrollTotal: 0, cardCashTotal: 0, tokenTotal: 0, compTotal: 0, parkPayroll: {} };
+
+  for (const order of orders) {
+    const rawName  = order.contactGroupName.trim();
+    const homePark = /^\(BB\)/i.test(rawName) ? 'BB' : 'GI';
+    const name     = rawName.replace(/^\(BB\)\s*/i, '').trim();
+    if (!name) continue;
+
+    const pay   = classifyCrewPayments(order.paymentMethods, order.total);
+    const park  = orderPark(order) || homePark;
+    const items = (order.lineItems || [])
+      .map(li => ({
+        name: (li.name || '')
+          .replace(/\s*\((BB|GI)\s*Employee\)/gi, '')
+          .replace(/\s*-\s*Token\b/gi, '')
+          .trim(),
+        amount: +rrLineItemRevenue(li).toFixed(2),
+      }))
+      .filter(li => li.name);
+
+    if (!grouped[name]) {
+      grouped[name] = {
+        employeeName: name, transactionCount: 0, totalAmount: 0, payrollTotal: 0,
+        parks: new Set(), homePark, crossParkCount: 0, transactions: [],
+      };
+    }
+    const g = grouped[name];
+    const crossPark = park !== homePark;
+
+    g.transactionCount++;
+    g.totalAmount   += order.total || 0;
+    g.payrollTotal  += pay.payroll;
+    g.parks.add(park);
+    if (crossPark) g.crossParkCount++;
+    g.transactions.push({
+      date:          order.createdDate,
+      orderId:       order.id,
+      description:   items.map(i => i.name).join(', ') || null,
+      items,
+      amount:        +(order.total || 0).toFixed(2),
+      paymentMethod: pay.primary,
+      payroll:       +pay.payroll.toFixed(2),
+      cardCash:      +(pay.card + pay.cash).toFixed(2),
+      token:         +pay.token.toFixed(2),
+      park,
+      homePark,
+      crossPark,
+      cashier:       [order.salesPersonFirstName, order.salesPersonLastName].filter(Boolean).join(' ')
+                       .replace(/^BB\s*-?\s*/i, '').trim() || null,
+    });
+
+    meta.totalOrders++;
+    meta.totalAmount   += order.total || 0;
+    meta.payrollTotal  += pay.payroll;
+    meta.cardCashTotal += pay.card + pay.cash;
+    meta.tokenTotal    += pay.token;
+    meta.compTotal     += pay.comp;
+    if (pay.payroll > 0) {
+      meta.parkPayroll[park] = +((meta.parkPayroll[park] || 0) + pay.payroll).toFixed(2);
+    }
+  }
+
+  const breakdown = Object.values(grouped)
+    .sort((a, b) => a.employeeName.localeCompare(b.employeeName))
+    .map(g => {
+      const parksArr = [...g.parks].sort();
+      g.transactions.sort((a, b) => new Date(a.date) - new Date(b.date));
+      return {
+        ...g,
+        parks: parksArr,
+        park:  parksArr.length === 1 ? parksArr[0] : (parksArr.length > 1 ? 'MULTI' : null),
+        totalAmount:  g.totalAmount.toFixed(2),
+        payrollTotal: g.payrollTotal.toFixed(2),
+      };
+    });
+
+  for (const k of ['totalAmount', 'payrollTotal', 'cardCashTotal', 'tokenTotal', 'compTotal']) {
+    meta[k] = +meta[k].toFixed(2);
+  }
+  return { meta, breakdown };
+}
+
+router.get('/meal-deductions/live', requireHR, async (req, res) => {
   const { startDate, endDate } = req.query;
-  if (!startDate || !endDate) {
-    return res.status(400).json({ error: 'startDate and endDate are required (YYYY-MM-DD)' });
+  if (!startDate || !endDate || endDate < startDate) {
+    return res.status(400).json({ error: 'Valid startDate and endDate are required (YYYY-MM-DD)' });
+  }
+  if ((new Date(endDate) - new Date(startDate)) / 86_400_000 > 92) {
+    return res.status(400).json({ error: 'Date range too large — max 92 days' });
   }
   if (!process.env.ROCKETREZ_CLIENT_ID || !process.env.ROCKETREZ_CLIENT_SECRET) {
     return res.status(503).json({ error: 'RocketRez credentials not configured on this server' });
   }
 
   try {
-    const token = await getRRToken();
-    const base = (process.env.ROCKETREZ_BASE_URL || '').replace(/\/$/, '');
-
-    // Fetch all pages — must paginate because large days have 4000+ orders
-    const crewOrders = [];
-    let pageIndex = 0;
-    while (true) {
-      const url = `${base}/v1/orders?startDate=${startDate}&endDate=${endDate}&pageSize=250&pageIndex=${pageIndex}`;
-      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-      if (!r.ok) throw new Error(`RocketRez orders API: ${r.status}`);
-      const data = await r.json();
-      const batch = Array.isArray(data.data) ? data.data : [];
-      crewOrders.push(...batch.filter(o => o.contactGroupName?.trim()));
-      if (batch.length < 250) break;
-      pageIndex++;
-    }
-
-    // Group by employee
-    const byEmp = {};
-    for (const order of crewOrders) {
-      const rawName = order.contactGroupName.trim();
-      const isBB = /^\(BB\)/i.test(rawName);
-      const park = isBB ? 'BB' : 'GI';
-      const name = rawName.replace(/^\(BB\)\s*/i, '').trim() || null;
-      if (!name) continue;
-      const key = `${park}:${name}`;
-
-      if (!byEmp[key]) {
-        byEmp[key] = {
-          employeeName: name,
-          park,
-          payrollTotal: 0,
-          cashCardTotal: 0,
-          tokenTotal: 0,
-          compTotal: 0,
-          transactionCount: 0,
-          transactions: [],
-        };
-      }
-
-      let payroll = 0, cashCard = 0, token = 0, comp = 0;
-      const methods = order.paymentMethods || [];
-      for (const pm of methods) {
-        const m = (pm.paymentMethod || '').toLowerCase();
-        const amt = pm.paymentAmount || 0;
-        if (m.includes('payroll'))                                    payroll  += amt;
-        else if (m.includes('token'))                                 token    += amt;
-        else if (m.includes('stripe') || m.includes('card') || m.includes('cash') || m.includes('mastercard') || m.includes('visa') || m.includes('amex')) cashCard += amt;
-        else                                                          comp     += amt;
-      }
-      if (methods.length === 0) comp += order.total || 0;
-
-      byEmp[key].payrollTotal   += payroll;
-      byEmp[key].cashCardTotal  += cashCard;
-      byEmp[key].tokenTotal     += token;
-      byEmp[key].compTotal      += comp;
-      byEmp[key].transactionCount++;
-      byEmp[key].transactions.push({
-        orderId: order.id,
-        date: order.createdDate,
-        cashier: [order.salesPersonFirstName, order.salesPersonLastName].filter(Boolean).join(' '),
-        items: (order.lineItems || [])
-          .map(li => ({
-            name: (li.name || '')
-              .replace(/\s*\((BB|GI)\s*Employee\)/gi, '')
-              .replace(/\s*-\s*Token\b/gi, '')
-              .trim(),
-            amount: li.subTotal || 0,
-          }))
-          .filter(li => li.name),
-        payroll,
-        cashCard,
-        token,
-        comp,
-      });
-    }
-
-    const breakdown = Object.values(byEmp)
-      .sort((a, b) => {
-        if (a.park !== b.park) return a.park.localeCompare(b.park);
-        return a.employeeName.localeCompare(b.employeeName);
-      })
-      .map(e => ({
-        ...e,
-        payrollTotal:  +e.payrollTotal.toFixed(2),
-        cashCardTotal: +e.cashCardTotal.toFixed(2),
-        tokenTotal:    +e.tokenTotal.toFixed(2),
-        compTotal:     +e.compTotal.toFixed(2),
-      }));
-
-    const totals = breakdown.reduce((s, e) => ({
-      payroll:  +(s.payroll  + e.payrollTotal).toFixed(2),
-      cashCard: +(s.cashCard + e.cashCardTotal).toFixed(2),
-      token:    +(s.token    + e.tokenTotal).toFixed(2),
-    }), { payroll: 0, cashCard: 0, token: 0 });
-
-    res.json({ startDate, endDate, totalOrders: crewOrders.length, totals, breakdown });
+    const { orders, fetchedAt } = await fetchCrewOrders(startDate, endDate);
+    const { meta, breakdown }   = buildLiveBreakdown(orders);
+    res.json({ startDate, endDate, fetchedAt: new Date(fetchedAt).toISOString(), meta, breakdown });
   } catch (err) {
-    console.error('RocketRez sync error:', err.message);
+    console.error('Live meal deductions error:', err.message);
     res.status(502).json({ error: 'RocketRez sync failed: ' + err.message });
+  }
+});
+
+// On-demand AI anomaly analysis over a live date range
+router.post('/meal-deductions/live/analyze', requireHR, async (req, res) => {
+  const { startDate, endDate } = req.body;
+  if (!startDate || !endDate || endDate < startDate) {
+    return res.status(400).json({ error: 'Valid startDate and endDate are required' });
+  }
+  if ((new Date(endDate) - new Date(startDate)) / 86_400_000 > 31) {
+    return res.status(400).json({ error: 'AI analysis supports ranges up to 31 days' });
+  }
+
+  try {
+    const { orders }    = await fetchCrewOrders(startDate, endDate);
+    const { breakdown } = buildLiveBreakdown(orders);
+
+    // Flatten to the row shape analyzeWithAI expects; cap prompt size
+    const rows = breakdown.flatMap(b => b.transactions.map(t => ({
+      employeeName:  b.employeeName,
+      paymentMethod: t.paymentMethod,
+      amount:        t.amount,
+      description:   (t.description || '').slice(0, 100),
+      park:          t.park,
+      homePark:      t.homePark,
+    }))).slice(0, 800);
+
+    if (!rows.length) return res.json({ aiAnalysis: null });
+
+    const [ai, crossPark] = [await analyzeWithAI(rows), detectCrossParkAnomalies(rows)];
+    const aiAnalysis = ai || { summary: null, anomalies: [], payrollDeductionNote: null };
+
+    // Merge deterministic cross-park flags, skipping employees the AI already flagged
+    const flagged = new Set((aiAnalysis.anomalies || []).filter(a => a.type === 'cross_park').map(a => a.employee));
+    aiAnalysis.anomalies = [
+      ...(aiAnalysis.anomalies || []),
+      ...crossPark.filter(a => !flagged.has(a.employee)),
+    ];
+
+    res.json({ aiAnalysis });
+  } catch (err) {
+    console.error('Live AI analysis error:', err.message);
+    res.status(502).json({ error: 'Analysis failed: ' + err.message });
   }
 });
 
