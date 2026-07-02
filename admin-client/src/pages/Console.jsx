@@ -5,23 +5,23 @@ import api from '../lib/api.js';
 const ROLES = [
   { value: 'crew_member', label: 'Staff' },
   { value: 'manager',     label: 'Manager' },
-  { value: 'sysadmin',    label: 'Sysadmin' },
+  { value: 'sysadmin',    label: 'System Administrator' },
 ];
 
-const ROLE_COLORS = {
-  sysadmin:    'bg-orange-100 text-orange-700',
-  manager:     'bg-blue-100 text-blue-700',
-  crew_member: 'bg-gray-100 text-gray-600',
+const ROLE_BADGES = {
+  sysadmin:    'bg-orange-50 text-orange-700 border-orange-200',
+  manager:     'bg-blue-50 text-blue-700 border-blue-200',
+  crew_member: 'bg-gray-50 text-gray-600 border-gray-200',
 };
 
-// Tool access toggles — { key: user field, tool: API tool name }
+// Tool access definitions — { key: user field, tool: API tool name }
 const TOOLS = [
-  { key: 'hasStaffAccess',      tool: 'staff',             label: 'Staff Portal' },
-  { key: 'hasHrAccess',         tool: 'hr',                label: 'HR' },
-  { key: 'isHrManager',         tool: 'hr_manager',        label: 'HR Mgr' },
-  { key: 'hasReceptionAccess',  tool: 'reception',         label: 'Reception' },
-  { key: 'isReceptionManager',  tool: 'reception_manager', label: 'Rec Mgr' },
-  { key: 'hasBotAccess',        tool: 'bot',               label: 'BayouBot' },
+  { key: 'hasStaffAccess',     tool: 'staff',             label: 'Staff Portal',      badge: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
+  { key: 'hasHrAccess',        tool: 'hr',                label: 'HR Portal',         badge: 'bg-teal-50 text-teal-700 border-teal-200' },
+  { key: 'isHrManager',        tool: 'hr_manager',        label: 'HR Manager',        badge: 'bg-teal-50 text-teal-800 border-teal-300' },
+  { key: 'hasReceptionAccess', tool: 'reception',         label: 'Reception',         badge: 'bg-amber-50 text-amber-700 border-amber-200' },
+  { key: 'isReceptionManager', tool: 'reception_manager', label: 'Reception Manager', badge: 'bg-amber-50 text-amber-800 border-amber-300' },
+  { key: 'hasBotAccess',       tool: 'bot',               label: 'BayouBot',          badge: 'bg-violet-50 text-violet-700 border-violet-200' },
 ];
 
 export default function Console() {
@@ -30,6 +30,7 @@ export default function Console() {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
   const [search, setSearch]   = useState('');
+  const [roleFilter, setRoleFilter] = useState('all');
   const [showCreate, setShowCreate] = useState(false);
   const [profileId, setProfileId]   = useState(null);
   const [toast, setToast]     = useState(null);
@@ -38,7 +39,7 @@ export default function Console() {
   function notify(msg, isError = false) {
     clearTimeout(toastTimer.current);
     setToast({ msg, isError });
-    toastTimer.current = setTimeout(() => setToast(null), 3000);
+    toastTimer.current = setTimeout(() => setToast(null), 3200);
   }
 
   useEffect(() => {
@@ -49,23 +50,24 @@ export default function Console() {
   }, []);
 
   const filtered = useMemo(() => {
-    if (!search) return users;
-    const q = search.toLowerCase();
-    return users.filter(u =>
-      u.name?.toLowerCase().includes(q) ||
-      u.email?.toLowerCase().includes(q) ||
-      u.position?.toLowerCase().includes(q)
-    );
-  }, [users, search]);
+    let list = users;
+    if (roleFilter !== 'all') list = list.filter(u => u.role === roleFilter);
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(u =>
+        u.name?.toLowerCase().includes(q) ||
+        u.email?.toLowerCase().includes(q) ||
+        u.position?.toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [users, search, roleFilter]);
 
   const stats = useMemo(() => ({
     total:    users.length,
     admins:   users.filter(u => u.role === 'sysadmin').length,
+    managers: users.filter(u => u.role === 'manager').length,
     locked:   users.filter(u => u.isLocked).length,
-    staff:    users.filter(u => u.hasStaffAccess).length,
-    hr:       users.filter(u => u.hasHrAccess).length,
-    reception: users.filter(u => u.hasReceptionAccess).length,
-    bot:      users.filter(u => u.hasBotAccess).length,
   }), [users]);
 
   function patchLocal(id, patch) {
@@ -74,12 +76,12 @@ export default function Console() {
 
   async function toggleAccess(u, toolDef) {
     const next = !u[toolDef.key];
-    patchLocal(u.id, { [toolDef.key]: next }); // optimistic
+    patchLocal(u.id, { [toolDef.key]: next });
     try {
       await api.patch(`/admin/sysadmin/users/${u.id}/access`, { tool: toolDef.tool, access: next });
-      notify(`${toolDef.label} access ${next ? 'granted to' : 'revoked from'} ${u.name}`);
+      notify(`${toolDef.label} access ${next ? 'granted to' : 'removed from'} ${u.name}`);
     } catch (err) {
-      patchLocal(u.id, { [toolDef.key]: !next }); // revert
+      patchLocal(u.id, { [toolDef.key]: !next });
       notify(err.response?.data?.error || 'Failed to update access', true);
     }
   }
@@ -89,7 +91,7 @@ export default function Console() {
     patchLocal(u.id, { role });
     try {
       await api.patch(`/admin/employees/${u.id}/role`, { role });
-      notify(`${u.name} is now ${role}`);
+      notify(`${u.name} is now ${ROLES.find(r => r.value === role)?.label || role}`);
     } catch (err) {
       patchLocal(u.id, { role: prev });
       notify(err.response?.data?.error || 'Failed to change role', true);
@@ -101,10 +103,10 @@ export default function Console() {
     patchLocal(u.id, { isLocked: next });
     try {
       await api.patch(`/admin/employees/${u.id}/lock`, { locked: next });
-      notify(`${u.name}'s account ${next ? 'locked' : 'unlocked'}`);
+      notify(`${u.name}'s account has been ${next ? 'locked' : 'unlocked'}`);
     } catch (err) {
       patchLocal(u.id, { isLocked: !next });
-      notify(err.response?.data?.error || 'Failed to update lock', true);
+      notify(err.response?.data?.error || 'Failed to update account lock', true);
     }
   }
 
@@ -113,117 +115,175 @@ export default function Console() {
       await api.post(`/admin/employees/${u.id}/send-password-reset`);
       notify(`Password reset email sent to ${u.email}`);
     } catch (err) {
-      notify(err.response?.data?.error || 'Failed to send reset email', true);
+      notify(err.response?.data?.error || 'Failed to send password reset email', true);
     }
   }
 
   async function resendWelcome(u) {
     try {
       await api.post(`/admin/sysadmin/users/${u.id}/resend-welcome`);
-      notify(`Welcome email resent to ${u.email}`);
+      notify(`Welcome email sent to ${u.email}`);
     } catch (err) {
-      notify(err.response?.data?.error || 'Failed to resend welcome email', true);
+      notify(err.response?.data?.error || 'Failed to send welcome email', true);
     }
   }
 
   function handleCreated(newUser) {
     setUsers(prev => [...prev, {
       ...newUser,
-      hasHrAccess: false, isHrManager: false,
+      hasStaffAccess: false, hasHrAccess: false, isHrManager: false,
       hasReceptionAccess: false, isReceptionManager: false,
       hasBotAccess: false, isLocked: false,
     }].sort((a, b) => a.name.localeCompare(b.name)));
     setShowCreate(false);
-    notify(`${newUser.name} created — welcome email sent`);
+    notify(`Account created for ${newUser.name} — welcome email sent`);
   }
 
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col">
+    <div className="flex h-screen overflow-hidden bg-slate-100">
 
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-6 py-3.5 flex items-center gap-3 sticky top-0 z-20">
-        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-          style={{ background: 'linear-gradient(135deg, #c2410c, #ea580c)', boxShadow: '0 4px 14px rgba(234,88,12,0.3)' }}>
-          <ShieldIcon />
-        </div>
-        <div className="flex-1">
-          <p className="text-[10px] font-bold tracking-widest uppercase text-admin leading-none mb-1">Blue Bayou</p>
-          <h1 className="text-sm font-bold text-gray-900 leading-none">Admin Console</h1>
-        </div>
-        <span className="text-xs text-gray-400 hidden sm:block">{me?.name}</span>
-        <button onClick={logout} className="btn-ghost text-xs py-2">Sign Out</button>
-      </header>
-
-      <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-6 space-y-5">
-
-        {/* Stats */}
-        <div className="grid grid-cols-3 sm:grid-cols-7 gap-3 animate-fade-up">
-          <Stat label="Users" value={stats.total} />
-          <Stat label="Sysadmins" value={stats.admins} accent />
-          <Stat label="Staff Portal" value={stats.staff} />
-          <Stat label="HR Access" value={stats.hr} />
-          <Stat label="Reception" value={stats.reception} />
-          <Stat label="BayouBot" value={stats.bot} />
-          <Stat label="Locked" value={stats.locked} warn={stats.locked > 0} />
-        </div>
-
-        {/* Toolbar */}
-        <div className="flex items-center gap-3">
-          <div className="relative flex-1">
-            <SearchIcon />
-            <input
-              type="text"
-              placeholder="Search by name, email, or position…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="field pl-9"
-            />
+      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
+      <aside
+        className="w-64 shrink-0 flex flex-col text-white"
+        style={{ background: 'linear-gradient(180deg, #1c1310 0%, #140d0a 100%)' }}
+      >
+        {/* Brand */}
+        <div className="px-5 pt-6 pb-5 border-b border-white/5">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+              style={{ background: 'linear-gradient(135deg, #c2410c, #ea580c)', boxShadow: '0 4px 14px rgba(234,88,12,0.35)' }}>
+              <ShieldIcon />
+            </div>
+            <div>
+              <p className="text-[10px] font-bold tracking-widest uppercase text-orange-400/90 leading-none mb-1">Blue Bayou</p>
+              <h1 className="text-base font-bold text-white leading-none">Admin Console</h1>
+            </div>
           </div>
-          <button onClick={() => setShowCreate(true)} className="btn-primary text-xs px-4 py-2.5 whitespace-nowrap">
-            + New User
+        </div>
+
+        {/* Navigation */}
+        <nav className="flex-1 px-3 py-4">
+          <p className="text-[10px] font-bold text-stone-500 uppercase tracking-widest px-3 mb-2">Administration</p>
+          <button
+            className="relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-white bg-white/[0.06] text-left"
+            style={{ boxShadow: 'inset 0 0 0 1px rgba(251,146,60,0.25)' }}
+          >
+            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 rounded-r-full bg-orange-400" />
+            <span className="text-orange-400"><UsersNavIcon /></span>
+            User Management
+          </button>
+        </nav>
+
+        {/* User footer */}
+        <div className="px-4 py-4 border-t border-white/5">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-orange-300 shrink-0 border border-orange-500/30"
+              style={{ background: 'rgba(234,88,12,0.12)' }}>
+              {me?.name?.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase() || '?'}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-white truncate">{me?.name}</p>
+              <p className="text-xs text-stone-500 truncate">System Administrator</p>
+            </div>
+          </div>
+          <button
+            onClick={logout}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-stone-500 hover:text-red-400 hover:bg-red-900/20 rounded-lg transition-colors"
+          >
+            <LogoutIcon /> Sign Out
           </button>
         </div>
+      </aside>
 
-        {/* Users table */}
-        {loading ? (
-          <div className="flex items-center justify-center h-48 bg-white rounded-2xl border border-gray-200">
-            <div className="w-6 h-6 border-2 border-admin/20 border-t-admin rounded-full animate-spin" />
+      {/* ── Main ────────────────────────────────────────────────────────── */}
+      <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
+
+        {/* Page header */}
+        <div className="bg-white/80 backdrop-blur border-b border-gray-200 px-8 py-4 shrink-0 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-bold text-gray-900">User Management</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Accounts, roles, and tool access across the staff platform</p>
           </div>
-        ) : error ? (
-          <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-center text-sm text-red-600">{error}</div>
-        ) : (
-          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-            <div className="hidden md:grid px-5 py-2.5 border-b border-gray-100 bg-gray-50/70 text-xs font-semibold text-gray-400 uppercase tracking-wide"
-              style={{ gridTemplateColumns: 'minmax(220px,1.2fr) 110px 1fr 170px' }}>
-              <span>User</span>
-              <span>Role</span>
-              <span>Tool Access</span>
-              <span className="text-right">Actions</span>
+          <div className="flex items-center gap-4">
+            <p className="text-xs text-gray-400 font-medium hidden md:block">{today}</p>
+            <button onClick={() => setShowCreate(true)} className="btn-primary text-xs px-4 py-2.5">
+              <PlusIcon /> New User
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="max-w-5xl mx-auto px-8 py-6 space-y-5">
+
+            {/* Stats */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 animate-fade-up">
+              <Stat label="Total Users" value={stats.total} />
+              <Stat label="System Administrators" value={stats.admins} accent />
+              <Stat label="Managers" value={stats.managers} />
+              <Stat label="Locked Accounts" value={stats.locked} warn={stats.locked > 0} />
             </div>
 
-            <div className="divide-y divide-gray-100">
-              {filtered.length === 0 ? (
-                <p className="text-center py-12 text-sm text-gray-400">No users match your search.</p>
-              ) : filtered.map(u => (
-                <UserRow
-                  key={u.id}
-                  user={u}
-                  isSelf={u.id === me?.id}
-                  onOpen={() => setProfileId(u.id)}
-                  onToggleAccess={toggleAccess}
-                  onChangeRole={changeRole}
-                  onToggleLock={toggleLock}
-                  onSendReset={sendReset}
-                  onResendWelcome={resendWelcome}
+            {/* Toolbar */}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative flex-1 min-w-[220px]">
+                <SearchIcon />
+                <input
+                  type="text"
+                  placeholder="Search by name, email, or position…"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="field pl-9"
                 />
-              ))}
+              </div>
+              <select
+                value={roleFilter}
+                onChange={e => setRoleFilter(e.target.value)}
+                className="field w-auto text-sm py-2.5"
+              >
+                <option value="all">All Roles</option>
+                {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
             </div>
-          </div>
-        )}
 
-        <p className="text-xs text-gray-400 text-center pb-4">
-          Access changes take effect on the user's next sign-in or page refresh.
-        </p>
+            {/* Users */}
+            {loading ? (
+              <div className="flex items-center justify-center h-48 bg-white rounded-2xl border border-gray-200">
+                <div className="w-6 h-6 border-2 border-admin/20 border-t-admin rounded-full animate-spin" />
+              </div>
+            ) : error ? (
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-center text-sm text-red-600">{error}</div>
+            ) : (
+              <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+                {/* Column headers */}
+                <div className="hidden md:grid px-6 py-3 border-b border-gray-100 bg-gray-50/70 text-xs font-semibold text-gray-400 uppercase tracking-wide items-center"
+                  style={{ gridTemplateColumns: 'minmax(240px, 1.1fr) 150px 1fr 110px 32px' }}>
+                  <span>User</span>
+                  <span>Role</span>
+                  <span>Tool Access</span>
+                  <span>Status</span>
+                  <span />
+                </div>
+
+                <div className="divide-y divide-gray-100">
+                  {filtered.length === 0 ? (
+                    <p className="text-center py-14 text-sm text-gray-400">
+                      {users.length === 0 ? 'No user accounts yet.' : 'No users match your search.'}
+                    </p>
+                  ) : filtered.map(u => (
+                    <UserRow key={u.id} user={u} isSelf={u.id === me?.id} onOpen={() => setProfileId(u.id)} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <p className="text-xs text-gray-400 text-center pb-4">
+              Select a user to manage their access, role, and account. Changes take effect on the user's next sign-in or page refresh.
+            </p>
+          </div>
+        </div>
       </main>
 
       {/* Toast */}
@@ -252,29 +312,22 @@ export default function Console() {
   );
 }
 
-// ── User row ──────────────────────────────────────────────────────────────────
+// ── User row (read-only — editing happens in the profile drawer) ─────────────
 
-function UserRow({ user: u, isSelf, onOpen, onToggleAccess, onChangeRole, onToggleLock, onSendReset, onResendWelcome }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    function onClick(e) {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
-    }
-    document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
-  }, [menuOpen]);
-
+function UserRow({ user: u, isSelf, onOpen }) {
   const initials = u.name?.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase() || '?';
+  const granted = TOOLS.filter(t => u[t.key]);
+  const role = ROLES.find(r => r.value === u.role);
 
   return (
-    <div className={`md:grid px-5 py-4 items-center gap-3 flex flex-col md:flex-row ${u.isLocked ? 'bg-red-50/40' : 'hover:bg-gray-50/60'} transition-colors`}
-      style={{ gridTemplateColumns: 'minmax(220px,1.2fr) 110px 1fr 170px' }}>
-
-      {/* Identity — click to open the full profile */}
-      <button onClick={onOpen} className="flex items-center gap-3 min-w-0 w-full md:w-auto text-left group/id">
+    <button
+      onClick={onOpen}
+      className={`w-full text-left md:grid flex flex-col gap-3 px-6 py-4 items-center transition-colors
+        ${u.isLocked ? 'bg-red-50/40 hover:bg-red-50/70' : 'hover:bg-gray-50/70'}`}
+      style={{ gridTemplateColumns: 'minmax(240px, 1.1fr) 150px 1fr 110px 32px' }}
+    >
+      {/* Identity */}
+      <div className="flex items-center gap-3 min-w-0 w-full md:w-auto">
         <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0
           ${u.isLocked ? 'bg-red-100 text-red-600' : 'bg-admin/10 text-admin'}`}>
           {initials}
@@ -282,157 +335,50 @@ function UserRow({ user: u, isSelf, onOpen, onToggleAccess, onChangeRole, onTogg
         <div className="min-w-0">
           <p className="text-sm font-semibold text-gray-900 truncate flex items-center gap-1.5">
             {u.name}
-            {isSelf && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">you</span>}
-            {u.isLocked && <LockIcon />}
+            {isSelf && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-500 border border-gray-200">You</span>}
           </p>
-          <p className="text-xs text-gray-400 truncate group-hover/id:text-admin transition-colors">{u.email}{u.position ? ` · ${u.position}` : ''}</p>
+          <p className="text-xs text-gray-400 truncate">{u.email}{u.position ? ` · ${u.position}` : ''}</p>
         </div>
-      </button>
+      </div>
 
       {/* Role */}
       <div>
-        <select
-          value={u.role}
-          disabled={isSelf}
-          onChange={e => onChangeRole(u, e.target.value)}
-          className={`text-xs font-semibold rounded-lg px-2 py-1.5 border-0 cursor-pointer disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-admin/30
-            ${ROLE_COLORS[u.role] || ROLE_COLORS.crew_member}`}
-        >
-          {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-        </select>
+        <span className={`inline-block text-xs font-semibold px-2.5 py-1 rounded-lg border ${ROLE_BADGES[u.role] || ROLE_BADGES.crew_member}`}>
+          {role?.label || u.role}
+        </span>
       </div>
 
-      {/* Tool access pills */}
+      {/* Tool access summary */}
       <div className="flex flex-wrap gap-1.5">
-        {TOOLS.map(t => {
-          const on = !!u[t.key];
-          return (
-            <button
-              key={t.tool}
-              onClick={() => onToggleAccess(u, t)}
-              title={`${on ? 'Revoke' : 'Grant'} ${t.label} access`}
-              className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all active:scale-95
-                ${on
-                  ? 'bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100'
-                  : 'bg-white border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600'}`}
-            >
-              {t.label}{on ? ' ✓' : ''}
-            </button>
-          );
-        })}
+        {granted.length === 0 ? (
+          <span className="text-xs text-gray-300">No tools assigned</span>
+        ) : granted.map(t => (
+          <span key={t.tool} className={`text-[11px] font-medium px-2 py-0.5 rounded-md border ${t.badge}`}>
+            {t.label}
+          </span>
+        ))}
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center justify-end gap-2 relative w-full md:w-auto" ref={menuRef}>
-        <button
-          onClick={() => onToggleLock(u)}
-          disabled={isSelf}
-          className={`text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed
-            ${u.isLocked
-              ? 'bg-red-50 border-red-200 text-red-600 hover:bg-red-100'
-              : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
-        >
-          {u.isLocked ? 'Unlock' : 'Lock'}
-        </button>
-        <button
-          onClick={() => setMenuOpen(p => !p)}
-          className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-        >
-          <DotsIcon />
-        </button>
-        {menuOpen && (
-          <div className="absolute right-0 top-full mt-1 w-56 bg-white border border-gray-200 rounded-xl shadow-xl z-30 overflow-hidden py-1">
-            <button onClick={() => { setMenuOpen(false); onSendReset(u); }}
-              className="w-full text-left px-4 py-2.5 text-xs text-gray-700 hover:bg-gray-50">
-              Send password reset email
-            </button>
-            <button onClick={() => { setMenuOpen(false); onResendWelcome(u); }}
-              className="w-full text-left px-4 py-2.5 text-xs text-gray-700 hover:bg-gray-50">
-              Resend welcome email
-            </button>
-          </div>
+      {/* Status */}
+      <div>
+        {u.isLocked ? (
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-600">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> Locked
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Active
+          </span>
         )}
       </div>
-    </div>
-  );
-}
 
-// ── Create user modal ─────────────────────────────────────────────────────────
-
-function CreateUserModal({ onClose, onCreated }) {
-  const backdropRef = useRef(null);
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'manager', position: '', phone: '' });
-  const [error, setError] = useState(null);
-  const [saving, setSaving] = useState(false);
-
-  function set(k, v) { setForm(prev => ({ ...prev, [k]: v })); }
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setError(null);
-    setSaving(true);
-    try {
-      const { data } = await api.post('/admin/sysadmin/users', form);
-      onCreated(data.user);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create user');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div ref={backdropRef} onClick={e => e.target === backdropRef.current && onClose()}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
-        <div className="px-6 py-5 flex items-center justify-between"
-          style={{ background: 'linear-gradient(135deg, #7c2d12, #ea580c)' }}>
-          <h2 className="text-base font-bold text-white">New User</h2>
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white transition-colors">
-            ✕
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {error && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3">{error}</p>}
-
-          <div>
-            <label className="label">Full Name</label>
-            <input className="field" required value={form.name} onChange={e => set('name', e.target.value)} placeholder="Jane Smith" />
-          </div>
-          <div>
-            <label className="label">Email</label>
-            <input className="field" type="email" required value={form.email} onChange={e => set('email', e.target.value)} placeholder="jane@bluebayou.com" />
-          </div>
-          <div>
-            <label className="label">Temporary Password</label>
-            <input className="field" required minLength={6} value={form.password} onChange={e => set('password', e.target.value)} placeholder="Sent in the welcome email" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label">Role</label>
-              <select className="field" value={form.role} onChange={e => set('role', e.target.value)}>
-                {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="label">Position</label>
-              <input className="field" value={form.position} onChange={e => set('position', e.target.value)} placeholder="Optional" />
-            </div>
-          </div>
-
-          <button type="submit" disabled={saving} className="btn-primary w-full py-2.5">
-            {saving ? 'Creating…' : 'Create User & Send Welcome Email'}
-          </button>
-          <p className="text-[11px] text-gray-400 text-center">
-            Grant tool access from the console after creating the account.
-          </p>
-        </form>
+      {/* Chevron */}
+      <div className="hidden md:flex justify-end text-gray-300">
+        <ChevronIcon />
       </div>
-    </div>
+    </button>
   );
 }
-
 
 // ── Profile drawer ────────────────────────────────────────────────────────────
 
@@ -480,7 +426,7 @@ function ProfileDrawer({ user: u, isSelf, onClose, onToggleAccess, onChangeRole,
             </div>
             <button onClick={onClose}
               className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center text-white transition-colors">
-              ✕
+              <CloseIcon />
             </button>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -511,11 +457,11 @@ function ProfileDrawer({ user: u, isSelf, onClose, onToggleAccess, onChangeRole,
                 <DetailField label="Position"   value={detail.position || '—'} />
                 <DetailField label="Phone"      value={detail.phone || '—'} />
                 <DetailField label="Department" value={(detail.departments?.length ? detail.departments.join(', ') : detail.department) || '—'} />
-                <DetailField label="Hired"      value={fmtD(detail.hireDate)} />
-                <DetailField label="Account created" value={fmtD(detail.createdAt)} />
+                <DetailField label="Hire Date"  value={fmtD(detail.hireDate)} />
+                <DetailField label="Account Created" value={fmtD(detail.createdAt)} />
                 <DetailField label="Status" value={
                   detail.isActive
-                    ? (detail.mustChangePassword ? 'Active — must change password' : 'Active')
+                    ? (detail.mustChangePassword ? 'Active — password change required' : 'Active')
                     : 'Deactivated'
                 } />
               </div>
@@ -524,7 +470,8 @@ function ProfileDrawer({ user: u, isSelf, onClose, onToggleAccess, onChangeRole,
 
           {/* Access */}
           <div className="px-6 py-5 border-b border-gray-100">
-            <p className="label mb-3">Tool Access</p>
+            <p className="label mb-1">Tool Access</p>
+            <p className="text-[11px] text-gray-400 mb-3">Click a tool to grant or remove access. Changes apply on the user's next sign-in.</p>
             <div className="flex flex-wrap gap-2">
               {TOOLS.map(t => {
                 const on = !!u[t.key];
@@ -546,50 +493,54 @@ function ProfileDrawer({ user: u, isSelf, onClose, onToggleAccess, onChangeRole,
 
           {/* Actions */}
           <div className="px-6 py-5 border-b border-gray-100">
-            <p className="label mb-3">Actions</p>
-            <div className="flex flex-wrap gap-2">
-              <select
-                value={u.role}
-                disabled={isSelf}
-                onChange={e => onChangeRole(u, e.target.value)}
-                className={`text-xs font-semibold rounded-lg px-2.5 py-2 border-0 cursor-pointer disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-admin/30
-                  ${ROLE_COLORS[u.role] || ROLE_COLORS.crew_member}`}
-              >
-                {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
+            <p className="label mb-3">Account Actions</p>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="col-span-2">
+                <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide block mb-1">Role</label>
+                <select
+                  value={u.role}
+                  disabled={isSelf}
+                  onChange={e => onChangeRole(u, e.target.value)}
+                  className="field text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
               <button onClick={() => onToggleLock(u)} disabled={isSelf}
-                className="btn-ghost text-xs py-2 disabled:opacity-40">
-                {u.isLocked ? 'Unlock account' : 'Lock account'}
+                className={`text-xs font-semibold px-3 py-2.5 rounded-xl border transition-colors disabled:opacity-40 disabled:cursor-not-allowed
+                  ${u.isLocked
+                    ? 'bg-red-50 border-red-200 text-red-600 hover:bg-red-100'
+                    : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                {u.isLocked ? 'Unlock Account' : 'Lock Account'}
               </button>
-              <button onClick={() => onSendReset(u)} className="btn-ghost text-xs py-2">
-                Send password reset
+              <button onClick={() => onSendReset(u)} className="btn-ghost text-xs py-2.5">
+                Send Password Reset
               </button>
-              <button onClick={() => onResendWelcome(u)} className="btn-ghost text-xs py-2">
-                Resend welcome
+              <button onClick={() => onResendWelcome(u)} className="btn-ghost text-xs py-2.5 col-span-2">
+                Resend Welcome Email
               </button>
             </div>
           </div>
 
           {/* Activity log */}
           <div className="px-6 py-5">
-            <p className="label mb-3">Account Activity <span className="normal-case font-normal text-gray-400">(last 50 events)</span></p>
+            <p className="label mb-3">Account Activity <span className="normal-case font-normal text-gray-400">(most recent 50 events)</span></p>
             {logs === null ? (
               <div className="h-16 flex items-center justify-center">
                 <div className="w-5 h-5 border-2 border-admin/20 border-t-admin rounded-full animate-spin" />
               </div>
             ) : logs === false ? (
-              <p className="text-xs text-red-500">Could not load activity.</p>
+              <p className="text-xs text-red-500">Could not load account activity.</p>
             ) : logs.length === 0 ? (
               <p className="text-xs text-gray-400 bg-gray-50 rounded-xl px-4 py-6 text-center">No activity recorded yet.</p>
             ) : (
               <div className="relative pl-4">
-                {/* Timeline rail */}
                 <div className="absolute left-[5px] top-1 bottom-1 w-px bg-gray-200" />
                 <div className="space-y-4">
                   {logs.map(l => (
                     <div key={l.id} className="relative">
                       <span className={`absolute -left-4 top-1 w-[11px] h-[11px] rounded-full border-2 border-white
-                        ${/lock|revoked|deactivat/i.test(l.event) ? 'bg-red-400'
+                        ${/lock|revoked|removed|deactivat/i.test(l.event) ? 'bg-red-400'
                           : /granted|created|welcome/i.test(l.event) ? 'bg-emerald-400'
                           : /login/i.test(l.event) ? 'bg-sky-400' : 'bg-gray-300'}`}
                         style={{ boxShadow: '0 0 0 1px rgba(0,0,0,0.06)' }} />
@@ -620,21 +571,121 @@ function DetailField({ label, value }) {
   );
 }
 
+// ── Create user modal ─────────────────────────────────────────────────────────
+
+function CreateUserModal({ onClose, onCreated }) {
+  const backdropRef = useRef(null);
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'manager', position: '', phone: '' });
+  const [error, setError] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  function set(k, v) { setForm(prev => ({ ...prev, [k]: v })); }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError(null);
+    setSaving(true);
+    try {
+      const { data } = await api.post('/admin/sysadmin/users', form);
+      onCreated(data.user);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to create the account');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div ref={backdropRef} onClick={e => e.target === backdropRef.current && onClose()}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
+        <div className="px-6 py-5 flex items-center justify-between"
+          style={{ background: 'linear-gradient(135deg, #7c2d12, #ea580c)' }}>
+          <div>
+            <h2 className="text-base font-bold text-white">New User Account</h2>
+            <p className="text-xs text-white/70 mt-0.5">A welcome email with sign-in details is sent automatically</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white transition-colors">
+            <CloseIcon />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {error && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3">{error}</p>}
+
+          <div>
+            <label className="label">Full Name</label>
+            <input className="field" required value={form.name} onChange={e => set('name', e.target.value)} placeholder="Jane Smith" />
+          </div>
+          <div>
+            <label className="label">Email Address</label>
+            <input className="field" type="email" required value={form.email} onChange={e => set('email', e.target.value)} placeholder="jane@bluebayou.com" />
+          </div>
+          <div>
+            <label className="label">Temporary Password</label>
+            <input className="field" required minLength={6} value={form.password} onChange={e => set('password', e.target.value)} placeholder="Included in the welcome email" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Role</label>
+              <select className="field" value={form.role} onChange={e => set('role', e.target.value)}>
+                {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">Position</label>
+              <input className="field" value={form.position} onChange={e => set('position', e.target.value)} placeholder="Optional" />
+            </div>
+          </div>
+
+          <button type="submit" disabled={saving} className="btn-primary w-full py-2.5">
+            {saving ? 'Creating account…' : 'Create Account'}
+          </button>
+          <p className="text-[11px] text-gray-400 text-center">
+            New accounts start with no tool access — grant tools from the user's profile after creation.
+          </p>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Bits ──────────────────────────────────────────────────────────────────────
 
 function Stat({ label, value, accent, warn }) {
   return (
-    <div className={`bg-white rounded-2xl border p-4 ${warn ? 'border-red-200' : accent ? 'border-admin/30' : 'border-gray-200'}`}>
-      <p className={`text-xl font-bold ${warn ? 'text-red-600' : accent ? 'text-admin' : 'text-gray-900'}`}>{value}</p>
-      <p className="text-[11px] text-gray-500 mt-1 font-medium">{label}</p>
+    <div className={`bg-white rounded-2xl border p-5 ${warn ? 'border-red-200' : accent ? 'border-admin/30' : 'border-gray-200'}`}>
+      <p className={`text-2xl font-bold ${warn ? 'text-red-600' : accent ? 'text-admin' : 'text-gray-900'}`}>{value}</p>
+      <p className="text-xs text-gray-500 mt-1.5 font-medium">{label}</p>
     </div>
   );
 }
 
 function ShieldIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-4.5 h-4.5" style={{ width: 18, height: 18 }}>
+    <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ width: 18, height: 18 }}>
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  );
+}
+
+function UsersNavIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 shrink-0">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+function LogoutIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
     </svg>
   );
 }
@@ -647,19 +698,26 @@ function SearchIcon() {
   );
 }
 
-function LockIcon() {
+function PlusIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-3 h-3 text-red-500 shrink-0">
-      <rect x="3" y="11" width="18" height="11" rx="2" />
-      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" className="w-3.5 h-3.5">
+      <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
     </svg>
   );
 }
 
-function DotsIcon() {
+function ChevronIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-      <circle cx="12" cy="5" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="12" cy="19" r="1.6" />
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" className="w-4 h-4">
+      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
     </svg>
   );
 }
