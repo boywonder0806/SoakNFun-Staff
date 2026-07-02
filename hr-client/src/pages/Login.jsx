@@ -53,13 +53,28 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-brand-dark via-brand to-brand-light flex flex-col items-center justify-center px-4">
+    <div className="relative min-h-screen flex flex-col items-center justify-center px-4 overflow-hidden"
+      style={{ background: 'linear-gradient(145deg, #042f2e 0%, #0d5c55 45%, #0f766e 100%)' }}>
 
-      <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden">
+      {/* Subtle dot texture + glow accents */}
+      <div
+        className="absolute inset-0 opacity-[0.15] pointer-events-none"
+        style={{
+          backgroundImage: 'radial-gradient(rgba(255,255,255,0.35) 1px, transparent 1px)',
+          backgroundSize: '28px 28px',
+        }}
+      />
+      <div className="absolute -top-24 -left-24 w-96 h-96 rounded-full bg-teal-400/15 blur-[100px] pointer-events-none" />
+      <div className="absolute -bottom-24 -right-24 w-96 h-96 rounded-full bg-emerald-400/10 blur-[100px] pointer-events-none" />
+
+      <div className="relative w-full max-w-sm bg-white rounded-3xl overflow-hidden animate-fade-up"
+        style={{ boxShadow: '0 24px 60px rgba(2, 44, 34, 0.45), 0 0 0 1px rgba(255,255,255,0.08)' }}>
 
         {/* Header */}
-        <div className="bg-brand px-8 py-8 text-center">
-          <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="px-8 py-8 text-center"
+          style={{ background: 'linear-gradient(135deg, #0d5c55 0%, #0f766e 60%, #0d9488 100%)' }}>
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
+            style={{ background: 'rgba(255,255,255,0.15)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.2)' }}>
             <BriefcaseIcon />
           </div>
           <h1 className="text-xl font-bold text-white">Blue Bayou</h1>
@@ -150,7 +165,7 @@ export default function Login() {
         </form>
       </div>
 
-      <p className="mt-6 text-sm text-white/60">
+      <p className="relative mt-6 text-sm text-white/60">
         Contact your administrator if you need access.
       </p>
     </div>

@@ -34,6 +34,10 @@ html, body, #root { height: 100%; margin: 0; }
   from { opacity: 0; transform: translateY(12px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+@keyframes message-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.99); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
 @keyframes spin-slow {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
@@ -50,6 +54,7 @@ html, body, #root { height: 100%; margin: 0; }
   .animate-blob-3     { animation: blob-move 10s ease-in-out 6s infinite; }
   .animate-float      { animation: float 6s ease-in-out infinite; }
   .animate-fade-up    { animation: fade-up 0.6s ease-out forwards; }
+  .animate-message-in { animation: message-in 0.35s ease-out forwards; }
   .animate-scan       { animation: scan-line 4s ease-in-out infinite; }
   .animate-spin-slow  { animation: spin-slow 20s linear infinite; }
   .animate-blink      { animation: blink 1s step-end infinite; }
@@ -81,8 +86,8 @@ html, body, #root { height: 100%; margin: 0; }
 .bot-prose h2            { font-size: 1rem; }
 .bot-prose h3            { font-size: 0.9rem; }
 
-/* Dark-themed markdown table */
-.bot-prose table         { border-collapse: collapse; width: 100%; margin: 0.75rem 0; font-size: 0.8rem; }
+/* Dark-themed markdown table — scrolls horizontally instead of breaking the layout */
+.bot-prose table         { border-collapse: collapse; width: 100%; margin: 0.75rem 0; font-size: 0.8rem; display: block; overflow-x: auto; }
 .bot-prose th            { background: rgba(99,102,241,0.15); color: #a5b4fc; padding: 0.45rem 0.75rem; text-align: left; font-weight: 600; border: 1px solid rgba(99,102,241,0.2); white-space: nowrap; }
 .bot-prose td            { padding: 0.45rem 0.75rem; border: 1px solid rgba(99,102,241,0.1); color: #cbd5e1; }
 .bot-prose tr:nth-child(even) td { background: rgba(99,102,241,0.05); }

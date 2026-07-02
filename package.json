@@ -9,7 +9,8 @@
     "dev:reception": "npm --prefix reception-client run dev",
     "dev:hr": "npm --prefix hr-client run dev",
     "install:all": "npm install && npm --prefix server install && npm --prefix client install && npm --prefix reception-client install && npm --prefix hr-client install",
-    "build:all": "npm --prefix client run build && npm --prefix reception-client run build && npm --prefix hr-client run build"
+    "build:all": "npm --prefix client run build && npm --prefix reception-client run build && npm --prefix hr-client run build",
+    "build:bot": "npm --prefix bayoubot-client run build"
   },
   "devDependencies": {
     "concurrently": "^8.2.0"

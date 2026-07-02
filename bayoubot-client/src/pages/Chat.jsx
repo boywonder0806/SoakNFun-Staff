@@ -27,7 +27,9 @@ export default function Chat() {
   const [messages, setMessages]     = useState(() => [{ role: 'assistant', content: buildGreeting(user) }]);
   const [input, setInput]           = useState('');
   const [loading, setLoading]       = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    typeof window === 'undefined' || window.innerWidth >= 1024
+  );
   const bottomRef   = useRef(null);
   const inputRef    = useRef(null);
   const textareaRef = useRef(null);
@@ -222,6 +224,23 @@ export default function Chat() {
             {messages.map((msg, i) => (
               <MessageBubble key={i} message={msg} />
             ))}
+
+            {/* Starter chips — shown before the first question so new users see
+                what to ask even when the sidebar is collapsed (e.g. mobile) */}
+            {messages.length <= 1 && !loading && (
+              <div className="flex flex-wrap gap-2 pl-11 animate-fade-up">
+                {QUICK_QUESTIONS.slice(0, 4).map((q, i) => (
+                  <button
+                    key={i}
+                    onClick={() => sendMessage(q)}
+                    className="text-xs text-indigo-300/90 bg-indigo-500/10 border border-indigo-500/25 rounded-full px-3.5 py-2 hover:bg-indigo-500/20 hover:border-indigo-400/40 hover:text-white transition-all active:scale-95"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {loading && <TypingIndicator />}
             <div ref={bottomRef} />
           </div>
@@ -277,7 +296,7 @@ export default function Chat() {
 function MessageBubble({ message }) {
   if (message.role === 'user') {
     return (
-      <div className="flex justify-end">
+      <div className="flex justify-end animate-message-in">
         <div
           className="max-w-xl rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-white leading-relaxed"
           style={{
@@ -292,7 +311,7 @@ function MessageBubble({ message }) {
   }
 
   return (
-    <div className="flex gap-3">
+    <div className="flex gap-3 animate-message-in group">
       {/* Bot avatar */}
       <div className="shrink-0 mt-0.5">
         <div className="w-8 h-8 rounded-xl bg-[#0d1117] border border-indigo-500/30 flex items-center justify-center"
@@ -301,21 +320,74 @@ function MessageBubble({ message }) {
         </div>
       </div>
 
-      <div
-        className={`flex-1 min-w-0 rounded-2xl rounded-tl-sm px-4 py-3 text-sm leading-relaxed ${
-          message.error
-            ? 'bg-red-950/50 border border-red-500/20 text-red-300'
-            : 'bg-[#0d1117]/80 border border-white/6 text-slate-200'
-        }`}
-        style={!message.error ? { boxShadow: '0 4px 20px rgba(0,0,0,0.3)' } : {}}
-      >
-        <div className="bot-prose">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {message.content}
-          </ReactMarkdown>
+      <div className="flex-1 min-w-0">
+        <div
+          className={`rounded-2xl rounded-tl-sm px-4 py-3 text-sm leading-relaxed ${
+            message.error
+              ? 'bg-red-950/50 border border-red-500/20 text-red-300'
+              : 'bg-[#0d1117]/80 border border-white/6 text-slate-200'
+          }`}
+          style={!message.error ? { boxShadow: '0 4px 20px rgba(0,0,0,0.3)' } : {}}
+        >
+          <div className="bot-prose">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {message.content}
+            </ReactMarkdown>
+          </div>
         </div>
+        {!message.error && <CopyButton text={message.content} />}
       </div>
     </div>
+  );
+}
+
+/* Copy-to-clipboard for bot answers — fades in on hover */
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard unavailable (http, old browser) — silently skip */ }
+  }
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-600 hover:text-indigo-300 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all px-1.5 py-1 rounded-md hover:bg-white/5"
+      title="Copy response"
+    >
+      {copied ? (
+        <>
+          <CheckIcon />
+          Copied
+        </>
+      ) : (
+        <>
+          <CopyIcon />
+          Copy
+        </>
+      )}
+    </button>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 text-emerald-400">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
   );
 }
 
