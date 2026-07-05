@@ -287,15 +287,17 @@ export default function MealDeductions() {
             className="btn-primary text-xs px-3.5 py-2 gap-1.5"
           >
             <SyncIcon spinning={loading} />
-            {loading ? 'Syncing…' : 'Sync'}
+            {loading ? 'Searching…' : 'Search'}
           </button>
         </div>
 
         <div className="flex items-center gap-2 ml-auto">
           {syncedAt && !loading && (
             <span className="flex items-center gap-1.5 text-[11px] text-gray-400 mr-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Live · synced {syncedAt}
+              <span className={`w-1.5 h-1.5 rounded-full ${data?.source === 'database' ? 'bg-sky-400' : 'bg-emerald-400 animate-pulse'}`} />
+              {data?.source === 'database'
+                ? 'From order history · updated nightly'
+                : `Live · synced ${syncedAt}`}
             </span>
           )}
           {breakdown?.length > 0 && (
@@ -339,7 +341,7 @@ export default function MealDeductions() {
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="max-w-md w-full bg-red-50 border border-red-200 rounded-2xl p-6 text-center">
             <AlertIcon className="text-red-400 mx-auto mb-3 w-6 h-6" />
-            <p className="text-sm font-semibold text-red-700 mb-1">Sync failed</p>
+            <p className="text-sm font-semibold text-red-700 mb-1">Couldn't load orders</p>
             <p className="text-xs text-red-500 mb-4">{error}</p>
             <button onClick={() => load(startDate, endDate)} className="btn-primary text-xs px-4 py-2">
               Try Again
@@ -728,8 +730,8 @@ function SyncLoadingCard({ inline }) {
   const body = (
     <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center animate-fade-up">
       <SyncIcon spinning className="w-6 h-6 text-brand mx-auto mb-3" />
-      <p className="text-sm text-gray-500">Fetching crew orders from RocketRez…</p>
-      <p className="text-xs text-gray-400 mt-1">Paginating through all records, this may take a few seconds</p>
+      <p className="text-sm text-gray-500">Loading crew orders…</p>
+      <p className="text-xs text-gray-400 mt-1">Past dates come straight from the order database; today's sales are pulled live</p>
     </div>
   );
   if (inline) return body;
@@ -858,7 +860,7 @@ function CalendarView({ breakdown, loading }) {
   if (!breakdown) {
     return (
       <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
-        Sync a date range to view the calendar
+        Search a date range to view the calendar
       </div>
     );
   }

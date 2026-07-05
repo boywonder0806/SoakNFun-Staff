@@ -203,15 +203,65 @@ function mapOrder(order) {
 
 // ── Live breakdown (Active orders only) ───────────────────────────────────────
 
+// ── Range loader — database for past days, RocketRez only for today ──────────
+// Past business dates are already in crew_orders (write-through + nightly 5 AM
+// re-sync), so a date-range search shouldn't re-pull them from RocketRez. Only
+// today can't be served from the table, since sales are still coming in.
+
+async function queryStoredRows(startDate, endDate) {
+  const { rows } = await pool.query(
+    `SELECT order_id AS "orderId", order_date AS "date", business_date::text AS "businessDate",
+            employee_name AS "employeeName", home_park AS "homePark", park,
+            total::float AS total, payroll::float AS payroll, card_cash::float AS "cardCash",
+            token_amount::float AS token, comp::float AS comp,
+            payment_method AS "paymentMethod", items, cashier, cross_park AS "crossPark"
+     FROM crew_orders
+     WHERE status = 'Active' AND business_date BETWEEN $1 AND $2`,
+    [startDate, endDate]
+  );
+  return rows;
+}
+
+function mapActiveOrders(orders) {
+  return orders.filter(o => o.status === 'Active').map(mapOrder).filter(Boolean);
+}
+
+export async function getOrdersForRange(startDate, endDate) {
+  const today = centralToday();
+  const { rows: [cov] } = await pool.query(
+    `SELECT MIN(business_date)::text AS earliest FROM crew_orders`
+  );
+  // The table is only authoritative from its earliest synced date — ranges
+  // reaching further back still need a full RocketRez pull.
+  const dbCanServe = cov.earliest && startDate >= cov.earliest;
+
+  if (dbCanServe && endDate < today) {
+    return { rows: await queryStoredRows(startDate, endDate), source: 'database', fetchedAt: Date.now() };
+  }
+
+  if (dbCanServe && startDate < today) {
+    const yesterday = new Date(new Date(`${today}T12:00:00Z`).getTime() - 86_400_000)
+      .toISOString().slice(0, 10);
+    const [stored, live] = await Promise.all([
+      queryStoredRows(startDate, yesterday),
+      fetchCrewOrders(today, endDate),
+    ]);
+    return { rows: [...stored, ...mapActiveOrders(live.orders)], source: 'database+live', fetchedAt: live.fetchedAt };
+  }
+
+  const { orders, fetchedAt } = await fetchCrewOrders(startDate, endDate);
+  return { rows: mapActiveOrders(orders), source: 'live', fetchedAt };
+}
+
 export function buildLiveBreakdown(orders) {
+  return buildBreakdownFromRows(mapActiveOrders(orders));
+}
+
+export function buildBreakdownFromRows(rows) {
   const grouped = {};
   const meta = { totalOrders: 0, totalAmount: 0, payrollTotal: 0, cardCashTotal: 0, tokenTotal: 0, compTotal: 0, parkPayroll: {} };
 
-  for (const order of orders) {
-    if (order.status !== 'Active') continue;
-    const m = mapOrder(order);
-    if (!m) continue;
-
+  for (const m of rows) {
     if (!grouped[m.employeeName]) {
       grouped[m.employeeName] = {
         employeeName: m.employeeName, transactionCount: 0, totalAmount: 0, payrollTotal: 0,

@@ -872,7 +872,7 @@ router.get('/protect/footage-stream', async (req, res) => {
 // Fetching, classification, persistence, and the nightly sync all live in
 // services/crewOrders.js. Live requests write through to the crew_orders
 // table so per-employee history is queryable without hitting RocketRez.
-import { fetchCrewOrders, buildLiveBreakdown, getSyncStatus, syncTrailingDays } from '../services/crewOrders.js';
+import { getOrdersForRange, buildBreakdownFromRows, getSyncStatus, syncTrailingDays } from '../services/crewOrders.js';
 
 router.get('/meal-deductions/live', requireHR, async (req, res) => {
   const { startDate, endDate } = req.query;
@@ -887,12 +887,12 @@ router.get('/meal-deductions/live', requireHR, async (req, res) => {
   }
 
   try {
-    const { orders, fetchedAt } = await fetchCrewOrders(startDate, endDate);
-    const { meta, breakdown }   = buildLiveBreakdown(orders);
-    res.json({ startDate, endDate, fetchedAt: new Date(fetchedAt).toISOString(), meta, breakdown });
+    const { rows, source, fetchedAt } = await getOrdersForRange(startDate, endDate);
+    const { meta, breakdown }         = buildBreakdownFromRows(rows);
+    res.json({ startDate, endDate, source, fetchedAt: new Date(fetchedAt).toISOString(), meta, breakdown });
   } catch (err) {
     console.error('Live meal deductions error:', err.message);
-    res.status(502).json({ error: 'RocketRez sync failed: ' + err.message });
+    res.status(502).json({ error: 'Failed to load orders: ' + err.message });
   }
 });
 
@@ -907,8 +907,8 @@ router.post('/meal-deductions/live/analyze', requireHR, async (req, res) => {
   }
 
   try {
-    const { orders }    = await fetchCrewOrders(startDate, endDate);
-    const { breakdown } = buildLiveBreakdown(orders);
+    const { rows: rangeRows } = await getOrdersForRange(startDate, endDate);
+    const { breakdown }       = buildBreakdownFromRows(rangeRows);
 
     // Flatten to the row shape analyzeWithAI expects; cap prompt size
     const rows = breakdown.flatMap(b => b.transactions.map(t => ({
