@@ -229,6 +229,73 @@ router.patch('/employees/:id/lock', requireAdmin, async (req, res) => {
   }
 });
 
+// Permanently deletes an account and its personal data (shifts, timecards,
+// time-off history, certifications, notes about them, sent messages).
+// Records that merely reference them (announcements they authored, timecards
+// they approved for someone else, etc.) are kept but stripped of attribution
+// since those aren't the deleted person's own data.
+router.delete('/employees/:id', requireSysAdmin, async (req, res) => {
+  const empId = parseInt(req.params.id);
+  const { confirmEmail } = req.body;
+  if (empId === req.user.id) {
+    return res.status(400).json({ error: 'You cannot delete your own account.' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT id, name, email, role FROM employees WHERE id = $1 FOR UPDATE`,
+      [empId]
+    );
+    const emp = rows[0];
+    if (!emp) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'User not found.' });
+    }
+    if (!confirmEmail || confirmEmail.trim().toLowerCase() !== emp.email.toLowerCase()) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Email confirmation did not match.' });
+    }
+    if (emp.role === 'sysadmin') {
+      const { rows: admins } = await client.query(
+        `SELECT COUNT(*)::int AS count FROM employees WHERE role = 'sysadmin' AND is_active = TRUE AND id <> $1`,
+        [empId]
+      );
+      if (admins[0].count < 1) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Cannot delete the last remaining system administrator.' });
+      }
+    }
+    // Detach references that lack ON DELETE CASCADE/SET NULL and would
+    // otherwise block deletion with a foreign-key violation.
+    await client.query(`UPDATE announcements SET author_id = NULL WHERE author_id = $1`, [empId]);
+    await client.query(`UPDATE netchex_shifts SET employee_id = NULL WHERE employee_id = $1`, [empId]);
+    await client.query(`UPDATE open_shifts SET claimed_by = NULL WHERE claimed_by = $1`, [empId]);
+    await client.query(`DELETE FROM open_shifts WHERE posted_by = $1`, [empId]);
+    await client.query(`UPDATE time_off_requests SET reviewed_by = NULL WHERE reviewed_by = $1`, [empId]);
+    await client.query(`UPDATE timecards SET approved_by = NULL WHERE approved_by = $1`, [empId]);
+    await client.query(`DELETE FROM employee_notes WHERE author_id = $1`, [empId]);
+    await client.query(`DELETE FROM messages WHERE sender_id = $1`, [empId]);
+    // Snapshot identity into the log details before the row (and its
+    // employee_id/actor_id references) disappear.
+    await client.query(
+      `INSERT INTO activity_logs (employee_id, event, details, actor_id, ip_address)
+       VALUES (NULL, 'Account permanently deleted', $1, $2, $3)`,
+      [JSON.stringify({ deletedId: emp.id, deletedName: emp.name, deletedEmail: emp.email, deletedRole: emp.role }),
+       req.user.id, req.ip]
+    );
+    await client.query(`DELETE FROM employees WHERE id = $1`, [empId]);
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Delete employee error:', err.message);
+    res.status(500).json({ error: 'Failed to delete account.' });
+  } finally {
+    client.release();
+  }
+});
+
 // ── Staff management (crew members) ──────────────────────────────────────────
 router.get('/staff/check', requireAdmin, async (req, res) => {
   const { name, email } = req.query;

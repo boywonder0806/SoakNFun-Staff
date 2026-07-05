@@ -42,6 +42,7 @@ export default function StaffProfile() {
       <StaffProfileContent
         emp={emp}
         onUpdated={setEmp}
+        onDeleted={() => window.close()}
         currentUser={currentUser}
         onClose={() => window.close()}
         popoutHref={null}

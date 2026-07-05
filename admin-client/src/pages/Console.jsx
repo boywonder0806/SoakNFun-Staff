@@ -131,6 +131,14 @@ export default function Console() {
     }
   }
 
+  // Throws on failure so the confirmation modal can show the error inline.
+  async function deleteUser(u, confirmEmail) {
+    await api.delete(`/admin/employees/${u.id}`, { data: { confirmEmail } });
+    setUsers(prev => prev.filter(x => x.id !== u.id));
+    setProfileId(null);
+    notify(`${u.name}'s account has been permanently deleted`);
+  }
+
   function handleCreated(newUser) {
     setUsers(prev => [...prev, {
       ...newUser,
@@ -328,6 +336,7 @@ export default function Console() {
           onToggleLock={toggleLock}
           onSendReset={sendReset}
           onResendWelcome={resendWelcome}
+          onDelete={deleteUser}
         />
       )}
     </div>
@@ -404,9 +413,10 @@ function UserRow({ user: u, isSelf, onOpen }) {
 
 // ── Profile drawer ────────────────────────────────────────────────────────────
 
-function ProfileDrawer({ user: u, isSelf, onClose, onToggleAccess, onChangeRole, onToggleLock, onSendReset, onResendWelcome }) {
+function ProfileDrawer({ user: u, isSelf, onClose, onToggleAccess, onChangeRole, onToggleLock, onSendReset, onResendWelcome, onDelete }) {
   const [detail, setDetail] = useState(null);
   const [logs, setLogs]     = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     if (!u?.id) return;
@@ -544,6 +554,21 @@ function ProfileDrawer({ user: u, isSelf, onClose, onToggleAccess, onChangeRole,
             </div>
           </div>
 
+          {/* Danger zone */}
+          <div className="px-6 py-5 border-b border-gray-100">
+            <p className="label mb-1 text-red-500">Danger Zone</p>
+            <p className="text-[11px] text-gray-400 mb-3">
+              Permanently deletes this account along with their shifts, timecards, time-off history, and certifications. This cannot be undone.
+            </p>
+            <button
+              onClick={() => setConfirmDelete(true)}
+              disabled={isSelf}
+              className="w-full text-xs font-semibold px-3 py-2.5 rounded-xl border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Delete Account
+            </button>
+          </div>
+
           {/* Activity log */}
           <div className="px-6 py-5">
             <p className="label mb-3">Account Activity <span className="normal-case font-normal text-gray-400">(most recent 50 events)</span></p>
@@ -577,6 +602,71 @@ function ProfileDrawer({ user: u, isSelf, onClose, onToggleAccess, onChangeRole,
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      </div>
+
+      {confirmDelete && (
+        <DeleteConfirmModal
+          user={u}
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={email => onDelete(u, email)}
+        />
+      )}
+    </div>
+  );
+}
+
+function DeleteConfirmModal({ user: u, onCancel, onConfirm }) {
+  const [value, setValue]     = useState('');
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState('');
+  const matches = value.trim().toLowerCase() === u.email.toLowerCase();
+
+  async function handleConfirm() {
+    if (!matches) return;
+    setSaving(true);
+    setError('');
+    try {
+      await onConfirm(value.trim());
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete account');
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden">
+        <div className="px-6 py-5 bg-red-600">
+          <h2 className="text-base font-bold text-white">Delete {u.name}'s Account?</h2>
+          <p className="text-xs text-white/80 mt-1">
+            This permanently removes their login, shifts, timecards, time-off history, and certifications. It cannot be undone.
+          </p>
+        </div>
+        <div className="p-6 space-y-3">
+          {error && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3">{error}</p>}
+          <label className="label">
+            Type <span className="font-mono text-gray-700">{u.email}</span> to confirm
+          </label>
+          <input
+            className="field"
+            autoFocus
+            value={value}
+            onChange={e => setValue(e.target.value)}
+            placeholder={u.email}
+          />
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button onClick={onCancel} disabled={saving} className="btn-ghost text-xs py-2.5">
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={!matches || saving}
+              className="text-xs font-semibold py-2.5 rounded-xl bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {saving ? 'Deleting…' : 'Delete Permanently'}
+            </button>
           </div>
         </div>
       </div>

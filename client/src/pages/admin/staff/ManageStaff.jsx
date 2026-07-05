@@ -60,6 +60,11 @@ export default function ManageStaff() {
     setSelected(emp);
   }
 
+  function handleDeleted(id) {
+    setStaff(prev => prev.filter(s => s.id !== id));
+    setSelected(null);
+  }
+
   return (
     <div className="flex flex-col gap-5" style={{ height: 'calc(100vh - 3rem)' }}>
 
@@ -142,6 +147,7 @@ export default function ManageStaff() {
           emp={selected}
           onClose={() => setSelected(null)}
           onUpdated={handleUpdated}
+          onDeleted={handleDeleted}
         />
       )}
       {adding && (
@@ -199,7 +205,7 @@ function StaffCard({ emp, onClick }) {
 }
 
 // ── Profile modal — nearly full-screen, wraps shared content ──────────────────
-function ProfileModal({ emp, onClose, onUpdated }) {
+function ProfileModal({ emp, onClose, onUpdated, onDeleted }) {
   const { user: currentUser } = useAuth();
   const backdropRef = useRef(null);
 
@@ -217,6 +223,7 @@ function ProfileModal({ emp, onClose, onUpdated }) {
         <StaffProfileContent
           emp={emp}
           onUpdated={onUpdated}
+          onDeleted={onDeleted}
           currentUser={currentUser}
           onClose={onClose}
           popoutHref={`/staff/profile/${emp.id}`}

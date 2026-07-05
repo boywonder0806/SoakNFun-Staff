@@ -32,7 +32,7 @@ const TABS = [
 // ── Main shared component ─────────────────────────────────────────────────────
 // onClose: null = no close button | fn = show close button
 // popoutHref: null = already in popup (hide button) | string = show popout link
-export default function StaffProfileContent({ emp, onUpdated, currentUser, onClose, popoutHref }) {
+export default function StaffProfileContent({ emp, onUpdated, onDeleted, currentUser, onClose, popoutHref }) {
   const [tab, setTab] = useState('info');
 
   // Info tab
@@ -76,6 +76,10 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
   const [lockSaving, setLockSaving]       = useState(false);
   const [statusSaving, setStatusSaving]   = useState(false);
   const [deactivateConfirm, setDeactivateConfirm] = useState(false);
+  const [deleteConfirm, setDeleteConfirm]         = useState(false);
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('');
+  const [deleting, setDeleting]                   = useState(false);
+  const [deleteError, setDeleteError]             = useState('');
   const [receptionSaving, setReceptionSaving] = useState(false);
   const [receptionManagerSaving, setReceptionManagerSaving] = useState(false);
   const [inviteSending, setInviteSending] = useState(false);
@@ -199,6 +203,18 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
       onUpdated({ ...emp, isActive: !emp.isActive });
     } catch {}
     finally { setStatusSaving(false); setDeactivateConfirm(false); }
+  }
+
+  async function handleDeleteAccount() {
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      await api.delete(`/admin/employees/${emp.id}`, { data: { confirmEmail: deleteConfirmEmail } });
+      if (onDeleted) onDeleted(emp.id); else onClose();
+    } catch (err) {
+      setDeleteError(err.response?.data?.error || 'Failed to delete account.');
+      setDeleting(false);
+    }
   }
 
   async function handleDeleteNote(noteId) {
@@ -735,6 +751,61 @@ export default function StaffProfileContent({ emp, onUpdated, currentUser, onClo
                   )}
                 </div>
 
+              </div>
+
+              {/* Delete account permanently */}
+              <div className="panel p-4 border-red-500/30 bg-red-950/10 mt-4">
+                {deleteConfirm ? (
+                  <div className="space-y-3">
+                    <p className="text-sm font-semibold text-red-400">Permanently Delete Account</p>
+                    <p className="text-10 text-fog">
+                      This removes their login and all shifts, timecards, time-off history, and certifications. This cannot be undone.
+                    </p>
+                    {deleteError && <p className="text-10 text-red-400">{deleteError}</p>}
+                    <label className="label-xs block">
+                      Type <span className="font-mono text-ink">{emp.email}</span> to confirm
+                    </label>
+                    <input
+                      className="field text-xs"
+                      value={deleteConfirmEmail}
+                      onChange={e => setDeleteConfirmEmail(e.target.value)}
+                      placeholder={emp.email}
+                      autoFocus
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleDeleteAccount}
+                        disabled={deleting || deleteConfirmEmail.trim().toLowerCase() !== emp.email.toLowerCase()}
+                        className="flex-1 text-xs py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {deleting ? 'Deleting…' : 'Delete Permanently'}
+                      </button>
+                      <button
+                        onClick={() => { setDeleteConfirm(false); setDeleteConfirmEmail(''); setDeleteError(''); }}
+                        disabled={deleting}
+                        className="btn-ghost border border-rim/60 rounded-md flex-1 text-xs py-1.5"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-ink">Delete Account</p>
+                      <p className="text-10 text-fog mt-0.5">Permanently remove this account and all of their data</p>
+                    </div>
+                    <button
+                      onClick={() => setDeleteConfirm(true)}
+                      disabled={currentUser?.role !== 'sysadmin'}
+                      title={currentUser?.role !== 'sysadmin' ? 'Only a system administrator can delete accounts' : undefined}
+                      className="rounded-md px-3 py-1.5 text-xs shrink-0 ml-3 border font-semibold transition-colors
+                        bg-red-950/20 border-red-500/30 text-red-400 hover:bg-red-950/40 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
