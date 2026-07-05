@@ -54,35 +54,63 @@ export function nvrRequest(urlPath, { method = 'GET', body, headers = {} } = {})
 // on this NVR version (7.1.x) — export lives on the private API, which only
 // accepts a local UniFi OS user session (TOKEN cookie), the same auth the
 // Protect web UI uses. We log in once and cache the session cookie.
-let protectSession = null; // { cookie, csrf, expires }
+let protectSession   = null; // { cookie, csrf, expires }
+let loginInFlight     = null; // shared promise so concurrent requests don't
+                               // each fire their own login — UniFi OS can
+                               // momentarily 403 one of two near-simultaneous
+                               // logins from the same local account
 
 async function getProtectSession(forceRefresh = false) {
+  if (!forceRefresh && protectSession && Date.now() < protectSession.expires) {
+    return protectSession;
+  }
+  if (loginInFlight) return loginInFlight;
+
+  loginInFlight = doProtectLogin();
+  try {
+    return await loginInFlight;
+  } finally {
+    loginInFlight = null;
+  }
+}
+
+async function doProtectLogin() {
   const nvrUrl = (process.env.PROTECT_NVR_URL || '').replace(/\/$/, '');
   const user   = process.env.PROTECT_LOCAL_USERNAME;
   const pass   = process.env.PROTECT_LOCAL_PASSWORD;
   if (!nvrUrl || !user || !pass) {
     throw new Error('Video export requires PROTECT_LOCAL_USERNAME and PROTECT_LOCAL_PASSWORD (a local UniFi OS user) in the server .env');
   }
-  if (!forceRefresh && protectSession && Date.now() < protectSession.expires) {
-    return protectSession;
-  }
 
   const body = Buffer.from(JSON.stringify({ username: user, password: pass, rememberMe: true }));
-  const loginRes = await new Promise((resolve, reject) => {
-    const url = new URL(nvrUrl + '/api/auth/login');
-    const req = https.request({
-      hostname: url.hostname,
-      port:     url.port || 443,
-      path:     url.pathname,
-      method:   'POST',
-      headers:  { 'Content-Type': 'application/json', 'Content-Length': body.length },
-      agent:    nvrAgent,
-    }, resolve);
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
-  loginRes.resume(); // drain the body — we only need the headers
+
+  async function attemptLogin() {
+    const loginRes = await new Promise((resolve, reject) => {
+      const url = new URL(nvrUrl + '/api/auth/login');
+      const req = https.request({
+        hostname: url.hostname,
+        port:     url.port || 443,
+        path:     url.pathname,
+        method:   'POST',
+        headers:  { 'Content-Type': 'application/json', 'Content-Length': body.length },
+        agent:    nvrAgent,
+      }, resolve);
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+    loginRes.resume(); // drain the body — we only need the headers
+    return loginRes;
+  }
+
+  let loginRes = await attemptLogin();
+  // A 403 here (as opposed to 401) has been observed when two logins for the
+  // same local account land on UniFi OS within milliseconds of each other —
+  // not a bad password. One short retry clears it without surfacing an error.
+  if (loginRes.statusCode === 403) {
+    await new Promise(r => setTimeout(r, 1500));
+    loginRes = await attemptLogin();
+  }
 
   if (loginRes.statusCode !== 200) {
     protectSession = null;
