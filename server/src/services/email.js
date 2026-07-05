@@ -58,6 +58,21 @@ export async function sendWelcomeEmail({ toEmail, toName, tempPassword }) {
   }
 }
 
+export async function sendAccountSetupEmail({ toEmail, toName, setupToken }) {
+  if (!resend || !toEmail) return;
+  const setupUrl = `${APP_URL}/reset-password?token=${setupToken}`;
+  try {
+    await resend.emails.send({
+      from:    FROM,
+      to:      toEmail,
+      subject: 'Welcome to the Blue Bayou Staff Portal — Set Up Your Account',
+      html:    buildAccountSetupEmail({ toName, setupUrl }),
+    });
+  } catch (err) {
+    console.error('Account setup email failed:', err.message);
+  }
+}
+
 export async function resendStaffWelcomeEmail({ toEmail, toName }) {
   if (!resend || !toEmail) return;
   try {
@@ -117,6 +132,23 @@ function buildWelcomeEmail({ toName, toEmail, tempPassword, loginUrl }) {
         </table>
         <p style="color:#6b7280;font-size:13px;margin:0 0 20px">You will be asked to set a new password the first time you sign in.</p>
         <a href="${loginUrl}" style="display:inline-block;background:#0077B6;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;font-size:14px">Sign In to Staff Portal</a>
+        <p style="margin:24px 0 0;color:#9ca3af;font-size:12px">Blue Bayou Water Park · Baton Rouge, LA</p>
+      </div>
+    </div>
+  `;
+}
+
+function buildAccountSetupEmail({ toName, setupUrl }) {
+  return `
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto">
+      <div style="background:#0077B6;padding:24px 28px;border-radius:12px 12px 0 0">
+        <p style="color:#90e0ff;margin:0;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase">Blue Bayou Water Park</p>
+        <h1 style="color:#fff;margin:4px 0 0;font-size:20px">Welcome to the Staff Portal</h1>
+      </div>
+      <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
+        <p style="color:#374151;margin:0 0 20px">Hi ${toName || 'there'}, an account has been created for you. Click below to set up your password and sign in.</p>
+        <a href="${setupUrl}" style="display:inline-block;background:#0077B6;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;font-size:14px">Set Up Your Password</a>
+        <p style="color:#6b7280;font-size:13px;margin:20px 0 0">This link expires in <strong>7 days</strong>. If you weren't expecting this email, you can safely ignore it.</p>
         <p style="margin:24px 0 0;color:#9ca3af;font-size:12px">Blue Bayou Water Park · Baton Rouge, LA</p>
       </div>
     </div>

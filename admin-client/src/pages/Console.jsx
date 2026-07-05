@@ -597,7 +597,7 @@ function DetailField({ label, value }) {
 
 function CreateUserModal({ onClose, onCreated }) {
   const backdropRef = useRef(null);
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'manager', position: '', phone: '' });
+  const [form, setForm] = useState({ name: '', email: '', role: 'manager', position: '', phone: '' });
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -625,7 +625,7 @@ function CreateUserModal({ onClose, onCreated }) {
           style={{ background: 'linear-gradient(135deg, #7c2d12, #ea580c)' }}>
           <div>
             <h2 className="text-base font-bold text-white">New User Account</h2>
-            <p className="text-xs text-white/70 mt-0.5">A welcome email with sign-in details is sent automatically</p>
+            <p className="text-xs text-white/70 mt-0.5">A welcome email with a password setup link is sent automatically</p>
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white transition-colors">
             <CloseIcon />
@@ -644,8 +644,8 @@ function CreateUserModal({ onClose, onCreated }) {
             <input className="field" type="email" required value={form.email} onChange={e => set('email', e.target.value)} placeholder="jane@bluebayou.com" />
           </div>
           <div>
-            <label className="label">Temporary Password</label>
-            <input className="field" required minLength={6} value={form.password} onChange={e => set('password', e.target.value)} placeholder="Included in the welcome email" />
+            <label className="label">Phone Number</label>
+            <input className="field" type="tel" value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="Optional" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

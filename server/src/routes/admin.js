@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import pool from '../db/index.js';
 import { requireAdmin, requireSysAdmin } from '../middleware/auth.js';
-import { sendWelcomeEmail, sendReceptionWelcomeEmail, resendStaffWelcomeEmail, sendPasswordResetEmail } from '../services/email.js';
+import { sendWelcomeEmail, sendReceptionWelcomeEmail, resendStaffWelcomeEmail, sendPasswordResetEmail, sendAccountSetupEmail } from '../services/email.js';
 import { nvrRequest } from './hr.js';
 
 const router = Router();
@@ -1168,20 +1168,30 @@ router.get('/sysadmin/users/:id(\\d+)', requireSysAdmin, async (req, res) => {
 });
 
 router.post('/sysadmin/users', requireSysAdmin, async (req, res) => {
-  const { email, password, name, role, department, departments, position, avatar, phone, hireDate } = req.body;
-  if (!email || !password || !name) {
-    return res.status(400).json({ error: 'email, password, and name are required.' });
+  const { email, name, role, department, departments, position, avatar, phone, hireDate } = req.body;
+  if (!email || !name) {
+    return res.status(400).json({ error: 'email and name are required.' });
   }
   try {
-    const hash = await bcrypt.hash(password, 10);
+    // No password is set at creation — a random unusable hash is stored as a
+    // placeholder, and the account owner sets their own password via the
+    // emailed setup link (same token flow as password reset).
+    const placeholderHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10);
     const { rows } = await pool.query(
-      `INSERT INTO employees (email,password_hash,name,role,department,departments,position,avatar,phone,hire_date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      `INSERT INTO employees (email,password_hash,name,role,department,departments,position,avatar,phone,hire_date,force_password_reset)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,TRUE)
        RETURNING id, email, name, role, department, departments, position, avatar, phone, hire_date AS "hireDate"`,
-      [email.toLowerCase().trim(), hash, name, role||'crew_member',
+      [email.toLowerCase().trim(), placeholderHash, name, role||'crew_member',
        department||null, departments||[], position||null, avatar||null, phone||null, hireDate||null]
     );
-    sendWelcomeEmail({ toEmail: rows[0].email, toName: rows[0].name, tempPassword: password });
+    const token     = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    await pool.query(
+      `INSERT INTO password_reset_tokens (employee_id, token_hash, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '7 days')`,
+      [rows[0].id, tokenHash]
+    );
+    sendAccountSetupEmail({ toEmail: rows[0].email, toName: rows[0].name, setupToken: token });
     res.status(201).json({ user: rows[0] });
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Email already exists.' });
@@ -1197,7 +1207,14 @@ router.post('/sysadmin/users/:id/resend-welcome', requireSysAdmin, async (req, r
       [empId]
     );
     if (!rows[0]) return res.status(404).json({ error: 'User not found.' });
-    await resendStaffWelcomeEmail({ toEmail: rows[0].email, toName: rows[0].name });
+    const token     = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    await pool.query(
+      `INSERT INTO password_reset_tokens (employee_id, token_hash, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '7 days')`,
+      [empId, tokenHash]
+    );
+    await sendAccountSetupEmail({ toEmail: rows[0].email, toName: rows[0].name, setupToken: token });
     logEvent(empId, 'Welcome email resent', {}, req.user.id, req.ip);
     res.json({ ok: true });
   } catch (err) {
