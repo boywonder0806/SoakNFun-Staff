@@ -346,10 +346,14 @@ function parseRocketRezReport(rows) {
 // ── Deterministic cross-park detection ───────────────────────────────────────
 // Flags any transaction where an employee's home park (from name prefix) differs
 // from the park where the transaction was actually processed (from PaymentHistory).
-function detectCrossParkAnomalies(deductions) {
+// Employees whose cross-park purchasing has been reviewed and approved are
+// skipped, as are comp orders.
+function detectCrossParkAnomalies(deductions, reviews = new Map()) {
   const byEmployee = {};
   for (const d of deductions) {
     if (!d.homePark || !d.park || d.homePark === d.park) continue;
+    if (d.paymentMethod === 'comp') continue;
+    if (reviews.get(crossParkReviewKey(d.employeeName, d.homePark)) === 'approved') continue;
     if (!byEmployee[d.employeeName]) {
       byEmployee[d.employeeName] = { homePark: d.homePark, crossParks: new Set(), count: 0 };
     }
@@ -368,87 +372,77 @@ function detectCrossParkAnomalies(deductions) {
 
 // ── AI anomaly analysis ───────────────────────────────────────────────────────
 
-async function analyzeWithAI(deductions) {
+async function analyzeWithAI(deductions, reviews = new Map()) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey || deductions.length === 0) return null;
+  // Comp orders are excluded from analysis entirely — they're $0 and not a
+  // payroll concern here.
+  const rows = deductions.filter(d => d.paymentMethod !== 'comp');
+  if (!apiKey || rows.length === 0) return null;
 
-  // Build per-employee totals and item price variation map
   const byEmployee = {};
-  const itemPriceMap = {};
-
-  for (const d of deductions) {
+  for (const d of rows) {
     if (!byEmployee[d.employeeName]) {
       byEmployee[d.employeeName] = {
-        payrollTotal: 0, stripeTotal: 0, cashTotal: 0, compTotal: 0, otherTotal: 0,
-        parks: new Set(), homePark: null, items: [],
+        payrollTotal: 0, stripeTotal: 0, cashTotal: 0, otherTotal: 0,
+        parks: new Set(), homePark: null, orders: [],
       };
     }
     const g = byEmployee[d.employeeName];
     if      (d.paymentMethod === 'payroll_deduction') g.payrollTotal += d.amount;
     else if (d.paymentMethod === 'stripe')            g.stripeTotal  += d.amount;
     else if (d.paymentMethod === 'cash')              g.cashTotal    += d.amount;
-    else if (d.paymentMethod === 'comp')              g.compTotal    += d.amount;
     else                                              g.otherTotal   += d.amount;
     if (d.park) g.parks.add(d.park);
     if (d.homePark && !g.homePark) g.homePark = d.homePark;
-    g.items.push({ item: d.description, amount: d.amount, method: d.paymentMethod, park: d.park });
-
-    if (d.description && d.amount > 0) {
-      if (!itemPriceMap[d.description]) itemPriceMap[d.description] = new Set();
-      itemPriceMap[d.description].add(+d.amount.toFixed(2));
-    }
+    g.orders.push({
+      date: d.date ? String(d.date).slice(0, 16) : undefined,
+      amount: d.amount, method: d.paymentMethod, park: d.park,
+    });
   }
 
   const employeeSummaries = Object.entries(byEmployee).map(([name, g]) => {
-    const transParks = [...g.parks];
-    const crossParkItems = g.homePark
-      ? g.items.filter(t => t.park && t.park !== g.homePark)
+    const crossParkOrders = g.homePark
+      ? g.orders.filter(t => t.park && t.park !== g.homePark)
       : [];
     return {
       name,
       homePark: g.homePark,
-      transactionParks: transParks,
-      crossParkTransactionCount: crossParkItems.length,
+      transactionParks: [...g.parks],
+      crossParkTransactionCount: crossParkOrders.length,
+      crossParkApproved: reviews.get(crossParkReviewKey(name, g.homePark)) === 'approved',
       payrollDeduction: +g.payrollTotal.toFixed(2),
       paidViaCreditCard: +g.stripeTotal.toFixed(2),
       paidViaCash: +g.cashTotal.toFixed(2),
-      comped: +g.compTotal.toFixed(2),
-      itemCount: g.items.length,
-      items: g.items,
+      orderCount: g.orders.length,
+      orders: g.orders,
     };
   });
 
-  const priceVariations = Object.entries(itemPriceMap)
-    .filter(([, set]) => set.size > 1)
-    .map(([item, set]) => ({ item, prices: [...set].sort((a, b) => a - b) }));
+  const prompt = `You are an HR analyst reviewing employee crew-meal purchase records from a waterpark. Your job is to flag employee purchasing BEHAVIOR that needs HR review — not menu or pricing issues.
 
-  const prompt = `You are an HR analyst reviewing employee meal purchase records from a waterpark. Analyze for anomalies.
-
-EMPLOYEE SUMMARIES (${employeeSummaries.length} employees, ${deductions.length} transactions):
+EMPLOYEE SUMMARIES (${employeeSummaries.length} employees, ${rows.length} transactions):
 ${JSON.stringify(employeeSummaries, null, 2)}
-
-MENU ITEM PRICE VARIATIONS (same item seen at different prices):
-${priceVariations.length ? JSON.stringify(priceVariations, null, 2) : 'None detected'}
 
 Context:
 - This is a multi-park waterpark company with two locations: Blue Bayou Waterpark (BB) and Gulf Islands Waterpark (GI)
-- Park is determined by the payment method prefix: "BB -" = Blue Bayou, "GI -" = Gulf Islands
-- Some employee names have a "(BB)" prefix in the system but the payment history park code is the authoritative source
 - Each park runs its own payroll, so BB transactions must be separated from GI transactions
+- Employees marked "crossParkApproved": true have been reviewed by HR and are ALLOWED to purchase at the other park — never flag them for cross-park activity
 
 Payment method key:
 - payroll_deduction = will be deducted from paycheck at their respective park
 - stripe/credit card = employee already paid by credit card (do NOT also deduct from payroll)
 - cash = employee already paid with cash (do NOT also deduct from payroll)
-- comp = $0 charge / free item (needs manager authorization)
 
-Identify and flag:
-1. Employees with payroll deductions significantly higher than the median (over-purchasing)
-2. Price inconsistencies for the same menu item across employees
-3. $0 comp items that need manager justification (who authorized a free item?)
-4. Employees who paid via credit card or cash (do NOT deduct from payroll — they already paid)
-5. Employees whose transactions span both BB and GI parks (may indicate data mixup or inter-park work)
-6. Any other patterns worth HR attention
+Identify and flag ONLY these kinds of issues:
+1. Cross-park purchases — employee bought at a park other than their home park (skip anyone with crossParkApproved: true)
+2. Payroll deduction totals significantly higher than their peers (over-purchasing)
+3. Unusual transaction patterns — e.g. an unusually high number of orders in the range, or repeated orders close together
+4. Employees who paid via credit card or cash (already paid — make sure payroll is NOT also deducted)
+
+Do NOT flag:
+- Item names, item naming inconsistencies, or menu price differences — not an HR concern
+- Comp/free orders — they are already excluded from this data
+- Anything about what food was purchased
 
 Report at most 12 anomalies — the most important ones — and keep each description under 30 words.
 
@@ -457,7 +451,7 @@ Reply ONLY with valid JSON, no markdown, no explanation outside the JSON:
   "summary": "1-2 sentence overview of key findings including park breakdown",
   "anomalies": [
     {
-      "type": "high_total|price_inconsistency|comp_item|already_paid|cross_park|other",
+      "type": "cross_park|high_total|unusual_pattern|already_paid|other",
       "employee": "Employee Name or null for report-level",
       "description": "Clear, concise description of the issue",
       "severity": "low|medium|high"
@@ -684,14 +678,16 @@ router.post('/meal-deductions/upload', requireHR, upload.single('file'), async (
 
   // ── AI analysis (best-effort, non-blocking) ──────────────────────────────────
   let aiAnalysis = null;
+  let cpReviews  = new Map();
+  try { cpReviews = await getCrossParkReviews(); } catch {}
   try {
-    aiAnalysis = await analyzeWithAI(deductions);
+    aiAnalysis = await analyzeWithAI(deductions, cpReviews);
   } catch (err) {
     console.error('AI analysis skipped:', err.message);
   }
 
   // Always inject server-detected cross-park anomalies — deterministic, not AI-dependent
-  const crossParkAnomalies = detectCrossParkAnomalies(deductions);
+  const crossParkAnomalies = detectCrossParkAnomalies(deductions, cpReviews);
   if (crossParkAnomalies.length > 0) {
     if (aiAnalysis) {
       // Remove any AI-generated cross_park entries for the same employees to avoid dupes
@@ -872,7 +868,7 @@ router.get('/protect/footage-stream', async (req, res) => {
 // Fetching, classification, persistence, and the nightly sync all live in
 // services/crewOrders.js. Live requests write through to the crew_orders
 // table so per-employee history is queryable without hitting RocketRez.
-import { getOrdersForRange, buildBreakdownFromRows, getSyncStatus, syncTrailingDays } from '../services/crewOrders.js';
+import { getOrdersForRange, buildBreakdownFromRows, getSyncStatus, syncTrailingDays, getCrossParkReviews, crossParkReviewKey } from '../services/crewOrders.js';
 
 router.get('/meal-deductions/live', requireHR, async (req, res) => {
   const { startDate, endDate } = req.query;
@@ -887,8 +883,14 @@ router.get('/meal-deductions/live', requireHR, async (req, res) => {
   }
 
   try {
-    const { rows, source, fetchedAt } = await getOrdersForRange(startDate, endDate);
-    const { meta, breakdown }         = buildBreakdownFromRows(rows);
+    const [{ rows, source, fetchedAt }, reviews] = await Promise.all([
+      getOrdersForRange(startDate, endDate),
+      getCrossParkReviews(),
+    ]);
+    const { meta, breakdown } = buildBreakdownFromRows(rows);
+    for (const b of breakdown) {
+      b.crossParkStatus = reviews.get(crossParkReviewKey(b.employeeName, b.homePark)) || null;
+    }
     res.json({ startDate, endDate, source, fetchedAt: new Date(fetchedAt).toISOString(), meta, breakdown });
   } catch (err) {
     console.error('Live meal deductions error:', err.message);
@@ -915,14 +917,15 @@ router.post('/meal-deductions/live/analyze', requireHR, async (req, res) => {
       employeeName:  b.employeeName,
       paymentMethod: t.paymentMethod,
       amount:        t.amount,
-      description:   (t.description || '').slice(0, 100),
+      date:          t.date,
       park:          t.park,
       homePark:      t.homePark,
     }))).slice(0, 800);
 
     if (!rows.length) return res.json({ aiAnalysis: null });
 
-    const [ai, crossPark] = [await analyzeWithAI(rows), detectCrossParkAnomalies(rows)];
+    const reviews = await getCrossParkReviews();
+    const [ai, crossPark] = [await analyzeWithAI(rows, reviews), detectCrossParkAnomalies(rows, reviews)];
     const aiAnalysis = ai || { summary: null, anomalies: [], payrollDeductionNote: null };
 
     // Merge deterministic cross-park flags, skipping employees the AI already flagged
@@ -966,6 +969,39 @@ router.get('/meal-deductions/history', requireHR, async (req, res) => {
   } catch (err) {
     console.error('Deduction history error:', err.message);
     res.status(500).json({ error: 'Failed to load deduction history' });
+  }
+});
+
+// Record an HR decision on an employee's cross-park purchasing.
+// status: 'approved' (allowed — stop flagging), 'denied' (keep flagging),
+// or null to clear the review back to unreviewed.
+router.put('/meal-deductions/cross-park-review', requireHR, async (req, res) => {
+  const { employeeName, homePark, status } = req.body;
+  if (!employeeName?.trim() || !['BB', 'GI'].includes(homePark)) {
+    return res.status(400).json({ error: 'employeeName and homePark (BB|GI) are required' });
+  }
+  if (status !== null && !['approved', 'denied'].includes(status)) {
+    return res.status(400).json({ error: "status must be 'approved', 'denied', or null" });
+  }
+  try {
+    if (status === null) {
+      await pool.query(
+        `DELETE FROM crew_crosspark_reviews WHERE LOWER(employee_name) = LOWER($1) AND home_park = $2`,
+        [employeeName.trim(), homePark]
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO crew_crosspark_reviews (employee_name, home_park, status, reviewed_by)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (employee_name, home_park) DO UPDATE SET
+           status = EXCLUDED.status, reviewed_by = EXCLUDED.reviewed_by, reviewed_at = NOW()`,
+        [employeeName.trim(), homePark, status, req.user.id]
+      );
+    }
+    res.json({ employeeName: employeeName.trim(), homePark, status });
+  } catch (err) {
+    console.error('Cross-park review error:', err.message);
+    res.status(500).json({ error: 'Failed to save cross-park review' });
   }
 });
 

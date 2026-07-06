@@ -42,6 +42,19 @@ pool.query(`CREATE TABLE IF NOT EXISTS crew_order_sync_log (
   ran_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`).catch(e => console.error('crew_order_sync_log migration:', e.message));
 
+// HR review decisions on cross-park purchasing: 'approved' means the employee
+// is allowed to buy at the other park and is no longer flagged; 'denied' keeps
+// the flag and records that it was reviewed. No row = not yet reviewed.
+pool.query(`CREATE TABLE IF NOT EXISTS crew_crosspark_reviews (
+  id            SERIAL PRIMARY KEY,
+  employee_name TEXT NOT NULL,
+  home_park     TEXT NOT NULL,
+  status        TEXT NOT NULL CHECK (status IN ('approved','denied')),
+  reviewed_by   INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  reviewed_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (employee_name, home_park)
+)`).catch(e => console.error('crew_crosspark_reviews migration:', e.message));
+
 // ── RocketRez auth ────────────────────────────────────────────────────────────
 
 let rrCachedToken = null;
@@ -255,6 +268,18 @@ export async function getOrdersForRange(startDate, endDate) {
 
 export function buildLiveBreakdown(orders) {
   return buildBreakdownFromRows(mapActiveOrders(orders));
+}
+
+// Map of "name|homePark" (name lowercased) → 'approved' | 'denied'
+export async function getCrossParkReviews() {
+  const { rows } = await pool.query(
+    `SELECT employee_name, home_park, status FROM crew_crosspark_reviews`
+  );
+  return new Map(rows.map(r => [`${r.employee_name.toLowerCase()}|${r.home_park}`, r.status]));
+}
+
+export function crossParkReviewKey(employeeName, homePark) {
+  return `${(employeeName || '').toLowerCase()}|${homePark}`;
 }
 
 export function buildBreakdownFromRows(rows) {

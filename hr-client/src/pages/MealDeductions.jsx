@@ -115,7 +115,6 @@ export default function MealDeductions() {
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState(null);
 
-  const [activeView, setActiveView] = useState('employees');
   const [expanded,   setExpanded]   = useState({});
   const [footageTarget, setFootageTarget] = useState(null);
   const [historyTarget, setHistoryTarget] = useState(null);
@@ -166,6 +165,25 @@ export default function MealDeductions() {
   function handleSort(col) {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortCol(col); setSortDir('asc'); }
+  }
+
+  // Review decision on cross-park purchasing; clicking the active choice clears
+  // it back to unreviewed. The decision persists so future searches remember it.
+  async function setCrossParkReview(b, status) {
+    const next = b.crossParkStatus === status ? null : status;
+    try {
+      await api.put('/hr/meal-deductions/cross-park-review', {
+        employeeName: b.employeeName, homePark: b.homePark, status: next,
+      });
+      setData(d => ({
+        ...d,
+        breakdown: d.breakdown.map(x =>
+          x.employeeName === b.employeeName ? { ...x, crossParkStatus: next } : x
+        ),
+      }));
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to save cross-park review');
+    }
   }
 
   const breakdown = data?.breakdown || null;
@@ -292,6 +310,7 @@ export default function MealDeductions() {
         </div>
 
         <div className="flex items-center gap-2 ml-auto">
+          <span className="text-xs text-gray-400 font-medium hidden lg:block mr-1">{periodLabel}</span>
           {syncedAt && !loading && (
             <span className="flex items-center gap-1.5 text-[11px] text-gray-400 mr-1">
               <span className={`w-1.5 h-1.5 rounded-full ${data?.source === 'database' ? 'bg-sky-400' : 'bg-emerald-400 animate-pulse'}`} />
@@ -316,26 +335,6 @@ export default function MealDeductions() {
         </div>
       </div>
 
-      {/* ── Sub-nav ───────────────────────────────────────────────────────── */}
-      <div className="bg-white border-b border-gray-200 px-6 flex items-center shrink-0">
-        {[
-          { id: 'employees', label: 'Employees', Icon: UsersIcon },
-          { id: 'calendar',  label: 'Calendar',  Icon: CalendarIcon },
-        ].map(({ id, label, Icon }) => (
-          <button
-            key={id}
-            onClick={() => setActiveView(id)}
-            className={`flex items-center gap-2 px-4 py-3 text-sm font-semibold border-b-2 transition-colors mr-1
-              ${activeView === id
-                ? 'border-brand text-brand'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
-          >
-            <Icon /> {label}
-          </button>
-        ))}
-        <span className="ml-auto text-xs text-gray-400 font-medium py-3">{periodLabel}</span>
-      </div>
-
       {/* ── Main content ──────────────────────────────────────────────────── */}
       {error ? (
         <div className="flex-1 flex items-center justify-center p-6">
@@ -350,8 +349,6 @@ export default function MealDeductions() {
         </div>
       ) : loading && !data ? (
         <SyncLoadingCard />
-      ) : activeView === 'calendar' ? (
-        <CalendarView breakdown={breakdown} loading={loading} />
       ) : (
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="max-w-6xl mx-auto px-6 py-6 space-y-5">
@@ -584,9 +581,19 @@ export default function MealDeductions() {
                                   </span>
                                 </p>
                                 {b.crossParkCount > 0 && (
-                                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-100 text-red-700 inline-block mt-0.5">
-                                    ⚠ Cross-park
-                                  </span>
+                                  b.crossParkStatus === 'approved' ? (
+                                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 inline-block mt-0.5">
+                                      ✓ Cross-park allowed
+                                    </span>
+                                  ) : b.crossParkStatus === 'denied' ? (
+                                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-100 text-red-700 inline-block mt-0.5">
+                                      ⚠ Cross-park · not allowed
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 inline-block mt-0.5">
+                                      ⚠ Cross-park · needs review
+                                    </span>
+                                  )
                                 )}
                               </div>
                             </div>
@@ -616,6 +623,42 @@ export default function MealDeductions() {
                             </div>
                           </button>
 
+                          {/* Cross-park review */}
+                          {isOpen && b.crossParkCount > 0 && (
+                            <div className={`border-t border-gray-100 px-5 py-3 flex flex-wrap items-center justify-between gap-3
+                              ${b.crossParkStatus === 'approved' ? 'bg-emerald-50/70' : b.crossParkStatus === 'denied' ? 'bg-red-50/70' : 'bg-amber-50/70'}`}>
+                              <p className="text-xs text-gray-600">
+                                <span className="font-semibold">{b.crossParkCount} cross-park order{b.crossParkCount !== 1 ? 's' : ''}</span>
+                                {' — '}
+                                {b.crossParkStatus === 'approved'
+                                  ? `${b.employeeName} is approved to purchase at other parks; this is no longer flagged.`
+                                  : b.crossParkStatus === 'denied'
+                                    ? `${b.employeeName} is not allowed to purchase at other parks; these orders stay flagged.`
+                                    : `is ${b.employeeName} allowed to purchase at the other park?`}
+                              </p>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={e => { e.stopPropagation(); setCrossParkReview(b, 'approved'); }}
+                                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors
+                                    ${b.crossParkStatus === 'approved'
+                                      ? 'bg-emerald-600 border-emerald-600 text-white'
+                                      : 'bg-white border-emerald-300 text-emerald-700 hover:bg-emerald-50'}`}
+                                >
+                                  {b.crossParkStatus === 'approved' ? '✓ Approved' : 'Approve'}
+                                </button>
+                                <button
+                                  onClick={e => { e.stopPropagation(); setCrossParkReview(b, 'denied'); }}
+                                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors
+                                    ${b.crossParkStatus === 'denied'
+                                      ? 'bg-red-600 border-red-600 text-white'
+                                      : 'bg-white border-red-300 text-red-600 hover:bg-red-50'}`}
+                                >
+                                  {b.crossParkStatus === 'denied' ? '✕ Not allowed' : 'Not allowed'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
                           {/* Order detail */}
                           {isOpen && b.transactions?.length > 0 && (
                             <div className="border-t border-gray-100 bg-gray-50/60">
@@ -633,7 +676,7 @@ export default function MealDeductions() {
                                 </thead>
                                 <tbody>
                                   {b.transactions.map((t, i) => (
-                                    <tr key={i} className={`border-b border-gray-100 last:border-0 ${t.crossPark ? 'bg-red-50/60' : 'hover:bg-white/70'}`}>
+                                    <tr key={i} className={`border-b border-gray-100 last:border-0 ${t.crossPark && b.crossParkStatus !== 'approved' ? 'bg-red-50/60' : 'hover:bg-white/70'}`}>
                                       <td className="px-5 py-3 whitespace-nowrap">
                                         <p className="text-gray-600">{fmtDate(t.date)}{fmtTime(t.date) ? ` · ${fmtTime(t.date)}` : ''}</p>
                                         {t.cashier && <p className="text-[10px] text-gray-400 mt-0.5">by {t.cashier}</p>}
@@ -658,7 +701,9 @@ export default function MealDeductions() {
                                             </span>
                                           ) : '—'}
                                           {t.crossPark && (
-                                            <span className="text-[10px] font-bold px-1 py-0.5 rounded bg-red-100 text-red-600" title={`Home park: ${t.homePark}`}>⚠</span>
+                                            b.crossParkStatus === 'approved'
+                                              ? <span className="text-[10px] font-bold px-1 py-0.5 rounded bg-emerald-100 text-emerald-600" title={`Home park: ${t.homePark} — cross-park approved`}>✓</span>
+                                              : <span className="text-[10px] font-bold px-1 py-0.5 rounded bg-red-100 text-red-600" title={`Home park: ${t.homePark}`}>⚠</span>
                                           )}
                                         </div>
                                       </td>
@@ -789,246 +834,6 @@ function SortArrow({ dir }) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-3 h-3">
       {dir === 'asc' ? <path d="M5 15l7-7 7 7"/> : <path d="M19 9l-7 7-7-7"/>}
     </svg>
-  );
-}
-
-// ── Calendar View ─────────────────────────────────────────────────────────────
-
-function CalendarView({ breakdown, loading }) {
-  const allTransactions = useMemo(() => {
-    if (!breakdown) return [];
-    return breakdown.flatMap(b =>
-      b.transactions.map(t => ({ ...t, employeeName: b.employeeName }))
-    );
-  }, [breakdown]);
-
-  const byDate = useMemo(() => {
-    const map = {};
-    for (const t of allTransactions) {
-      if (!t.date) continue;
-      const day = t.date.slice(0, 10);
-      if (!map[day]) map[day] = [];
-      map[day].push(t);
-    }
-    for (const day of Object.keys(map)) {
-      map[day].sort((a, b) => new Date(a.date) - new Date(b.date));
-    }
-    return map;
-  }, [allTransactions]);
-
-  const defaultMonth = useMemo(() => {
-    const keys = Object.keys(byDate).sort();
-    if (!keys.length) return new Date();
-    const [y, m] = keys[0].split('-').map(Number);
-    return new Date(y, m - 1, 1);
-  }, [byDate]);
-
-  const [calMonth, setCalMonth] = useState(null);
-  const [selectedDay, setSelectedDay] = useState(null);
-
-  const base = calMonth || defaultMonth;
-  const year = base.getFullYear();
-  const month = base.getMonth();
-
-  const calDays = useMemo(() => {
-    const first = new Date(year, month, 1).getDay();
-    const total = new Date(year, month + 1, 0).getDate();
-    const days = Array(first).fill(null);
-    for (let d = 1; d <= total; d++) days.push(d);
-    while (days.length % 7 !== 0) days.push(null);
-    return days;
-  }, [year, month]);
-
-  const monthLabel = new Date(year, month, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  const dayKey = (d) => `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-  const todayKey = new Date().toISOString().slice(0, 10);
-
-  const selectedTxns = selectedDay ? (byDate[selectedDay] || []) : [];
-  const hasTime = selectedTxns.some(t => fmtTime(t.date));
-
-  const totalForDay = selectedTxns.reduce((s, t) => s + (t.paymentMethod !== 'comp' ? parseFloat(t.amount || 0) : 0), 0);
-  const payrollForDay = selectedTxns.reduce((s, t) => s + parseFloat(t.payroll || 0), 0);
-
-  if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-brand/20 border-t-brand rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (!breakdown) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
-        Search a date range to view the calendar
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex-1 min-h-0 flex overflow-hidden">
-
-      {/* ── Left: Calendar ── */}
-      <div className="w-96 shrink-0 flex flex-col border-r border-gray-200 bg-white overflow-y-auto">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <button
-            onClick={() => { setCalMonth(new Date(year, month - 1, 1)); setSelectedDay(null); }}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100 transition-colors"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4"><polyline points="15 18 9 12 15 6"/></svg>
-          </button>
-          <span className="text-sm font-bold text-gray-800">{monthLabel}</span>
-          <button
-            onClick={() => { setCalMonth(new Date(year, month + 1, 1)); setSelectedDay(null); }}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-500 hover:bg-gray-100 transition-colors"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4"><polyline points="9 18 15 12 9 6"/></svg>
-          </button>
-        </div>
-
-        <div className="grid grid-cols-7 px-3 pt-3 pb-1">
-          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-            <div key={d} className="text-center text-[10px] font-semibold text-gray-400 uppercase tracking-wide py-1">{d}</div>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-7 gap-y-1 px-3 pb-4">
-          {calDays.map((d, i) => {
-            if (!d) return <div key={`e${i}`} />;
-            const key = dayKey(d);
-            const txns = byDate[key] || [];
-            const count = txns.length;
-            const isSelected = selectedDay === key;
-            const isToday = key === todayKey;
-            const parks = [...new Set(txns.map(t => t.park).filter(Boolean))];
-            return (
-              <button
-                key={key}
-                onClick={() => setSelectedDay(isSelected ? null : key)}
-                className={`flex flex-col items-center py-1.5 px-1 rounded-xl transition-colors relative
-                  ${isSelected ? 'bg-brand text-white' : count > 0 ? 'hover:bg-brand/5 text-gray-800' : 'text-gray-300 cursor-default'}`}
-                disabled={count === 0}
-              >
-                <span className={`text-xs font-semibold ${isToday && !isSelected ? 'text-brand' : ''}`}>{d}</span>
-                {count > 0 && (
-                  <span className={`text-[9px] font-bold mt-0.5 ${isSelected ? 'text-white/80' : 'text-gray-500'}`}>
-                    {count}
-                  </span>
-                )}
-                {count > 0 && !isSelected && (
-                  <div className="flex gap-0.5 mt-0.5">
-                    {parks.slice(0, 2).map(p => (
-                      <span key={p} className={`w-1.5 h-1.5 rounded-full ${p === 'BB' ? 'bg-sky-400' : p === 'GI' ? 'bg-emerald-400' : 'bg-gray-400'}`} />
-                    ))}
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="mt-auto px-5 py-4 border-t border-gray-100 space-y-2">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Legend</p>
-          <div className="flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-1.5 text-xs text-gray-600">
-              <span className="w-2 h-2 rounded-full bg-sky-400" /> Blue Bayou
-            </div>
-            <div className="flex items-center gap-1.5 text-xs text-gray-600">
-              <span className="w-2 h-2 rounded-full bg-emerald-400" /> Gulf Islands
-            </div>
-            <div className="flex items-center gap-1.5 text-xs text-gray-600">
-              <span className="text-[9px] font-bold text-gray-500">12</span> Order count
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Right: Day detail ── */}
-      <div className="flex-1 min-w-0 bg-gray-50 overflow-y-auto">
-        {!selectedDay ? (
-          <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-6">
-            <CalendarIcon className="w-12 h-12 text-gray-200" />
-            <p className="text-sm font-semibold text-gray-400">Select a day to view orders</p>
-            <p className="text-xs text-gray-400">Days with orders are shown with a count and park color dots</p>
-          </div>
-        ) : (
-          <div className="max-w-3xl mx-auto px-6 py-6">
-            <div className="flex items-start justify-between mb-5">
-              <div>
-                <h2 className="text-lg font-bold text-gray-900">
-                  {new Date(selectedDay + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-                </h2>
-                <p className="text-sm text-gray-500 mt-0.5">{selectedTxns.length} order{selectedTxns.length !== 1 ? 's' : ''}</p>
-              </div>
-              <div className="flex gap-3 text-right">
-                <div>
-                  <p className="text-xs text-gray-500">Payroll</p>
-                  <p className="text-sm font-bold text-teal-700">{fmtCurrency(payrollForDay)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500">Total</p>
-                  <p className="text-sm font-bold text-gray-800">{fmtCurrency(totalForDay)}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50/70">
-                    {hasTime && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide w-24">Time</th>}
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Employee</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Items</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide w-20">Park</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide w-24">Method</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-400 uppercase tracking-wide w-24">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedTxns.map((t, i) => {
-                    const time = fmtTime(t.date);
-                    return (
-                      <tr key={i} className={`border-b border-gray-100 last:border-0 ${t.crossPark ? 'bg-red-50/60' : 'hover:bg-gray-50/50'}`}>
-                        {hasTime && (
-                          <td className="px-4 py-3 text-xs text-gray-400 font-mono whitespace-nowrap">{time || '—'}</td>
-                        )}
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full bg-brand/10 flex items-center justify-center text-[10px] font-bold text-brand shrink-0">
-                              {t.employeeName.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
-                            </div>
-                            <span className="text-sm font-medium text-gray-800 truncate">{t.employeeName}</span>
-                            {t.crossPark && (
-                              <span className="text-[10px] font-bold px-1 py-0.5 rounded bg-red-100 text-red-600 shrink-0" title={`Home: ${t.homePark}`}>⚠</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-600">{t.description || '—'}</td>
-                        <td className="px-4 py-3">
-                          {t.park ? (
-                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${PARK_COLORS[t.park] || 'bg-gray-100 text-gray-600'}`}>
-                              {t.park}
-                            </span>
-                          ) : '—'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${METHOD_COLORS[t.paymentMethod] || METHOD_COLORS.other}`}>
-                            {METHOD_LABEL[t.paymentMethod] || t.paymentMethod}
-                          </span>
-                        </td>
-                        <td className={`px-4 py-3 text-right font-semibold ${t.paymentMethod === 'comp' ? 'text-purple-600' : 'text-gray-900'}`}>
-                          {t.paymentMethod === 'comp' ? 'Comp' : fmtCurrency(t.amount)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -1188,7 +993,7 @@ function PDFExportModal({ breakdown, meta, period, onClose }) {
         return data.map(b => [
           b.employeeName,
           PARK_NAME[b.park] || b.park || '—',
-          b.crossParkCount > 0 ? '⚠ Yes' : 'No',
+          b.crossParkCount > 0 ? (b.crossParkStatus === 'approved' ? 'Approved' : '⚠ Yes') : 'No',
           String(b.transactionCount),
           '$' + parseFloat(b.totalAmount).toFixed(2),
           '$' + parseFloat(b.payrollTotal || 0).toFixed(2),
@@ -1250,7 +1055,7 @@ function PDFExportModal({ breakdown, meta, period, onClose }) {
             didParseCell: (data) => {
               if (data.section === 'body') {
                 const row = groupRows[data.row.index];
-                if (row?.crossParkCount > 0) data.cell.styles.textColor = [185, 28, 28];
+                if (row?.crossParkCount > 0 && row?.crossParkStatus !== 'approved') data.cell.styles.textColor = [185, 28, 28];
               }
             },
           });
@@ -1270,7 +1075,7 @@ function PDFExportModal({ breakdown, meta, period, onClose }) {
           didParseCell: (data) => {
             if (data.section === 'body') {
               const row = rows[data.row.index];
-              if (row?.crossParkCount > 0) data.cell.styles.textColor = [185, 28, 28];
+              if (row?.crossParkCount > 0 && row?.crossParkStatus !== 'approved') data.cell.styles.textColor = [185, 28, 28];
             }
           },
         });
@@ -1847,12 +1652,6 @@ function CameraIcon() {
 }
 function PDFIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-3.5 h-3.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>;
-}
-function UsersIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
-}
-function CalendarIcon({ className = '' }) {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={`w-4 h-4 ${className}`}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>;
 }
 function SyncIcon({ spinning, className = '' }) {
   return (
