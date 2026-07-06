@@ -430,16 +430,16 @@ Context:
 
 Payment method key:
 - payroll_deduction = will be deducted from paycheck at their respective park
-- stripe/credit card = employee already paid by credit card (do NOT also deduct from payroll)
-- cash = employee already paid with cash (do NOT also deduct from payroll)
+- stripe/credit card = employee paid by credit card at the register
+- cash = employee paid with cash at the register
 
 Identify and flag ONLY these kinds of issues:
 1. Cross-park purchases — employee bought at a park other than their home park (skip anyone with crossParkApproved: true)
 2. Payroll deduction totals significantly higher than their peers (over-purchasing)
 3. Unusual transaction patterns — e.g. an unusually high number of orders in the range, or repeated orders close together
-4. Employees who paid via credit card or cash (already paid — make sure payroll is NOT also deducted)
 
 Do NOT flag:
+- Employees paying by credit card or cash instead of payroll, or mixing payment methods — how they pay is a normal personal choice, not an anomaly
 - Item names, item naming inconsistencies, or menu price differences — not an HR concern
 - Comp/free orders — they are already excluded from this data
 - Anything about what food was purchased
@@ -451,13 +451,13 @@ Reply ONLY with valid JSON, no markdown, no explanation outside the JSON:
   "summary": "1-2 sentence overview of key findings including park breakdown",
   "anomalies": [
     {
-      "type": "cross_park|high_total|unusual_pattern|already_paid|other",
+      "type": "cross_park|high_total|unusual_pattern|other",
       "employee": "Employee Name or null for report-level",
       "description": "Clear, concise description of the issue",
       "severity": "low|medium|high"
     }
   ],
-  "payrollDeductionNote": "Note covering total payroll split by park (BB vs GI) and any already-paid transactions"
+  "payrollDeductionNote": "Note covering total payroll deductions split by park (BB vs GI)"
 }`;
 
   try {

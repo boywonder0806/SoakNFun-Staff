@@ -130,6 +130,7 @@ export default function MealDeductions() {
   const [search,       setSearch]       = useState('');
   const [filterMethod, setFilterMethod] = useState('all');
   const [filterPark,   setFilterPark]   = useState('all');
+  const [filterCrossPark, setFilterCrossPark] = useState('all');
   const [payrollOnly,  setPayrollOnly]  = useState(false);
   const [sortCol, setSortCol] = useState('name');
   const [sortDir, setSortDir] = useState('asc');
@@ -221,6 +222,12 @@ export default function MealDeductions() {
       if (search && !b.employeeName.toLowerCase().includes(search.toLowerCase())) return false;
       if (filterMethod !== 'all' && !b.transactions.some(t => t.paymentMethod === filterMethod)) return false;
       if (filterPark !== 'all' && !(b.parks || []).includes(filterPark)) return false;
+      if (filterCrossPark !== 'all') {
+        if (!(b.crossParkCount > 0)) return false;
+        if (filterCrossPark === 'unreviewed' && b.crossParkStatus) return false;
+        if (filterCrossPark === 'approved'   && b.crossParkStatus !== 'approved') return false;
+        if (filterCrossPark === 'denied'     && b.crossParkStatus !== 'denied') return false;
+      }
       if (payrollOnly && parseFloat(b.payrollTotal) <= 0) return false;
       return true;
     });
@@ -235,9 +242,9 @@ export default function MealDeductions() {
         default:        return 0;
       }
     });
-  }, [breakdown, search, filterMethod, filterPark, payrollOnly, sortCol, sortDir]);
+  }, [breakdown, search, filterMethod, filterPark, filterCrossPark, payrollOnly, sortCol, sortDir]);
 
-  const hasFilters = search || filterMethod !== 'all' || filterPark !== 'all' || payrollOnly;
+  const hasFilters = search || filterMethod !== 'all' || filterPark !== 'all' || filterCrossPark !== 'all' || payrollOnly;
 
   const highCount   = aiAnalysis?.anomalies?.filter(a => a.severity === 'high').length   || 0;
   const mediumCount = aiAnalysis?.anomalies?.filter(a => a.severity === 'medium').length || 0;
@@ -506,6 +513,19 @@ export default function MealDeductions() {
                   </select>
                 )}
 
+                <select
+                  value={filterCrossPark}
+                  onChange={e => setFilterCrossPark(e.target.value)}
+                  className={`text-sm border rounded-xl bg-white px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand
+                    ${filterCrossPark !== 'all' ? 'border-amber-300 text-amber-800' : 'border-gray-200 text-gray-700'}`}
+                >
+                  <option value="all">Cross-park: All</option>
+                  <option value="any">All cross-park orders</option>
+                  <option value="unreviewed">Needs review</option>
+                  <option value="approved">Approved</option>
+                  <option value="denied">Not allowed</option>
+                </select>
+
                 <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none whitespace-nowrap">
                   <input
                     type="checkbox"
@@ -518,7 +538,7 @@ export default function MealDeductions() {
 
                 {hasFilters && (
                   <button
-                    onClick={() => { setSearch(''); setFilterMethod('all'); setFilterPark('all'); setPayrollOnly(false); }}
+                    onClick={() => { setSearch(''); setFilterMethod('all'); setFilterPark('all'); setFilterCrossPark('all'); setPayrollOnly(false); }}
                     className="text-sm px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 whitespace-nowrap"
                   >
                     Clear
