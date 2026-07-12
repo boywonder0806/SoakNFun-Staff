@@ -61,6 +61,15 @@ export default function Launcher() {
       href: sso(toolUrl('bot', 5176)),
     },
     {
+      id: 'tickets',
+      name: 'Ticket Manager',
+      desc: 'Generate custom park tickets with scannable Code 39 barcodes',
+      accent: '#FF4D6D',
+      Icon: TicketIcon,
+      show: user?.role === 'sysadmin' || !!user?.hasTicketsAccess,
+      href: sso(toolUrl('tickets', 5178)),
+    },
+    {
       id: 'admin',
       name: 'Admin Console',
       desc: 'User accounts, tool access, and platform administration',
@@ -198,6 +207,17 @@ function BotIcon({ color = 'currentColor' }) {
       <circle cx="15.5" cy="15" r="1.25" fill={color} stroke="none" />
       <path d="M12 3a2 2 0 1 1 0 4 2 2 0 0 1 0-4z" />
       <line x1="12" y1="7" x2="12" y2="9" />
+    </svg>
+  );
+}
+
+function TicketIcon({ color = 'currentColor' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+      <path d="M2 9a3 3 0 0 1 0 6v3a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1v-3a3 3 0 0 1 0-6V6a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v3z" />
+      <line x1="13" y1="5" x2="13" y2="7" />
+      <line x1="13" y1="11" x2="13" y2="13" />
+      <line x1="13" y1="17" x2="13" y2="19" />
     </svg>
   );
 }

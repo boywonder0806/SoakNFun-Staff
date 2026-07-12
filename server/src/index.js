@@ -31,8 +31,10 @@ const allowedOrigins = [
   process.env.HR_URL          || 'http://localhost:5175',
   process.env.BOT_URL         || 'http://localhost:5176',
   process.env.ADMIN_URL       || 'http://localhost:5177',
+  process.env.TICKETS_URL     || 'http://localhost:5178',
   'https://admin.bluebayoustaff.com',
   'https://portal.bluebayoustaff.com',
+  'https://tickets.bluebayoustaff.com',
 ];
 
 app.use(cors({
@@ -74,12 +76,14 @@ if (process.env.NODE_ENV === 'production') {
   const hrBuild        = path.join(__dirname, '../../hr-client/dist');
   const botBuild       = path.join(__dirname, '../../bayoubot-client/dist');
   const adminBuild     = path.join(__dirname, '../../admin-client/dist');
+  const ticketsBuild   = path.join(__dirname, '../../tickets-client/dist');
 
   const serveClient    = express.static(clientBuild);
   const serveReception = express.static(receptionBuild);
   const serveHR        = express.static(hrBuild);
   const serveBot       = express.static(botBuild);
   const serveAdmin     = express.static(adminBuild);
+  const serveTickets   = express.static(ticketsBuild);
 
   app.use((req, res, next) => {
     const host = req.get('host') || '';
@@ -87,6 +91,7 @@ if (process.env.NODE_ENV === 'production') {
     if (host.startsWith('hr.'))        return serveHR(req, res, next);
     if (host.startsWith('bot.'))       return serveBot(req, res, next);
     if (host.startsWith('admin.'))     return serveAdmin(req, res, next);
+    if (host.startsWith('tickets.'))   return serveTickets(req, res, next);
     if (host.startsWith('portal.'))    return serveClient(req, res, next);
     serveClient(req, res, next);
   });
@@ -101,6 +106,8 @@ if (process.env.NODE_ENV === 'production') {
       res.sendFile(path.join(botBuild, 'index.html'));
     } else if (host.startsWith('admin.')) {
       res.sendFile(path.join(adminBuild, 'index.html'));
+    } else if (host.startsWith('tickets.')) {
+      res.sendFile(path.join(ticketsBuild, 'index.html'));
     } else {
       res.sendFile(path.join(clientBuild, 'index.html'));
     }

@@ -31,6 +31,9 @@ pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_bot_access BOOLEA
   .then(() => pool.query(`UPDATE employees SET has_bot_access = COALESCE(has_hr_access, FALSE) WHERE has_bot_access IS NULL`))
   .then(() => pool.query('ALTER TABLE employees ALTER COLUMN has_bot_access SET DEFAULT FALSE'))
   .catch(e => console.error('auth migration (has_bot_access):', e.message));
+pool.query(
+  'ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_tickets_access BOOLEAN NOT NULL DEFAULT FALSE'
+).catch(e => console.error('auth migration (has_tickets_access):', e.message));
 
 pool.query(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id          SERIAL PRIMARY KEY,
@@ -59,6 +62,7 @@ router.post('/login', async (req, res) => {
                 COALESCE(has_hr_access, FALSE) AS "hasHrAccess",
                 COALESCE(is_hr_manager, FALSE) AS "isHrManager",
                 COALESCE(has_bot_access, FALSE) AS "hasBotAccess",
+                COALESCE(has_tickets_access, FALSE) AS "hasTicketsAccess",
                 COALESCE(has_staff_access, FALSE) AS "hasStaffAccess"
          FROM employees WHERE email = $1`,
         [email.toLowerCase().trim()]
@@ -78,6 +82,7 @@ router.post('/login', async (req, res) => {
           rows[0].hasHrAccess = false;
           rows[0].isHrManager = false;
           rows[0].hasBotAccess = false;
+          rows[0].hasTicketsAccess = false;
           rows[0].hasStaffAccess = false;
         }
       } else {
@@ -141,6 +146,7 @@ router.post('/change-password', requireAuth, async (req, res) => {
                  COALESCE(has_hr_access, FALSE) AS "hasHrAccess",
                  COALESCE(is_hr_manager, FALSE) AS "isHrManager",
                  COALESCE(has_bot_access, FALSE) AS "hasBotAccess",
+                 COALESCE(has_tickets_access, FALSE) AS "hasTicketsAccess",
                  COALESCE(has_staff_access, FALSE) AS "hasStaffAccess"`,
       [hash, req.user.id]
     );

@@ -1154,6 +1154,7 @@ const ACCESS_COLUMNS = {
   hr:                'has_hr_access',
   reception:         'has_reception_access',
   bot:               'has_bot_access',
+  tickets:           'has_tickets_access',
   hr_manager:        'is_hr_manager',
   reception_manager: 'is_reception_manager',
 };
@@ -1162,7 +1163,7 @@ router.patch('/sysadmin/users/:id/access', requireSysAdmin, async (req, res) => 
   const { tool, access } = req.body;
   const column = ACCESS_COLUMNS[tool];
   if (!column || typeof access !== 'boolean') {
-    return res.status(400).json({ error: 'tool (staff|hr|reception|bot|hr_manager|reception_manager) and boolean access are required' });
+    return res.status(400).json({ error: 'tool (staff|hr|reception|bot|tickets|hr_manager|reception_manager) and boolean access are required' });
   }
   const empId = parseInt(req.params.id);
   if (empId === req.user.id && !access) {
@@ -1177,6 +1178,7 @@ router.patch('/sysadmin/users/:id/access', requireSysAdmin, async (req, res) => 
                  COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess",
                  COALESCE(is_reception_manager, FALSE) AS "isReceptionManager",
                  COALESCE(has_bot_access, FALSE) AS "hasBotAccess",
+                 COALESCE(has_tickets_access, FALSE) AS "hasTicketsAccess",
                  COALESCE(has_staff_access, FALSE) AS "hasStaffAccess"`,
       [access, empId]
     );
@@ -1200,6 +1202,7 @@ router.get('/sysadmin/users', requireSysAdmin, async (_req, res) => {
               COALESCE(has_hr_access, FALSE) AS "hasHrAccess",
               COALESCE(is_hr_manager, FALSE) AS "isHrManager",
               COALESCE(has_bot_access, FALSE) AS "hasBotAccess",
+              COALESCE(has_tickets_access, FALSE) AS "hasTicketsAccess",
               COALESCE(has_staff_access, FALSE) AS "hasStaffAccess"
        FROM employees WHERE role != 'crew_member' ORDER BY name`
     );
@@ -1223,7 +1226,8 @@ router.get('/sysadmin/users/:id(\\d+)', requireSysAdmin, async (req, res) => {
               COALESCE(is_hr_manager, FALSE) AS "isHrManager",
               COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess",
               COALESCE(is_reception_manager, FALSE) AS "isReceptionManager",
-              COALESCE(has_bot_access, FALSE) AS "hasBotAccess"
+              COALESCE(has_bot_access, FALSE) AS "hasBotAccess",
+              COALESCE(has_tickets_access, FALSE) AS "hasTicketsAccess"
        FROM employees WHERE id = $1`,
       [parseInt(req.params.id)]
     );

@@ -24,6 +24,7 @@ const TOOLS = [
   { key: 'hasReceptionAccess', tool: 'reception',         label: 'Reception',         badge: 'bg-amber-50 text-amber-700 border-amber-200' },
   { key: 'isReceptionManager', tool: 'reception_manager', label: 'Reception Manager', badge: 'bg-amber-50 text-amber-800 border-amber-300' },
   { key: 'hasBotAccess',       tool: 'bot',               label: 'BayouBot',          badge: 'bg-violet-50 text-violet-700 border-violet-200' },
+  { key: 'hasTicketsAccess',   tool: 'tickets',           label: 'Ticket Manager',    badge: 'bg-rose-50 text-rose-700 border-rose-200' },
 ];
 
 export default function Console() {
@@ -144,7 +145,7 @@ export default function Console() {
       ...newUser,
       hasStaffAccess: false, hasHrAccess: false, isHrManager: false,
       hasReceptionAccess: false, isReceptionManager: false,
-      hasBotAccess: false, isLocked: false,
+      hasBotAccess: false, hasTicketsAccess: false, isLocked: false,
     }].sort((a, b) => a.name.localeCompare(b.name)));
     setShowCreate(false);
     notify(`Account created for ${newUser.name} — welcome email sent`);
