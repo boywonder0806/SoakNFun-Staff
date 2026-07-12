@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { hubUrl } from '../lib/hub.js';
 import { sanitizeCode39 } from '../lib/code39.js';
@@ -12,19 +12,19 @@ const BATCH_KEY    = 'tickets_batch_v1';
 // are intentionally left behind on the old keys.
 const TEMPLATE_KEY = 'tickets_template_v3';
 
-const EMPTY_FORM = {
+// What the designer shows when the batch is empty
+const SAMPLE_TICKET = {
   title:   'General Admission',
-  note:    '',
-  guest:   '',
+  note:    'Valid one day only',
+  guest:   'Sample Guest',
   date:    '',
-  price:   '',
-  barcode: '',
-  qty:     1,
+  price:   '$44.99',
+  order:   '418012',
+  barcode: 'SAMPLE-0001',
 };
 
 export default function TicketStudio() {
   const { user, logout } = useAuth();
-  const [form, setForm]   = useState(EMPTY_FORM);
   const [batch, setBatch] = useState(() => {
     try { return JSON.parse(localStorage.getItem(BATCH_KEY)) || []; }
     catch { return []; }
@@ -38,7 +38,6 @@ export default function TicketStudio() {
   });
   const [selectedId, setSelectedId] = useState(null);
   const [snap, setSnap] = useState(true);
-  const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkText, setBulkText] = useState('');
   const [toast, setToast]       = useState(null);
 
@@ -76,24 +75,10 @@ export default function TicketStudio() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  const cleanBarcode = useMemo(() => sanitizeCode39(form.barcode), [form.barcode]);
-  const barcodeDirty = form.barcode.toUpperCase() !== cleanBarcode && form.barcode.length > 0;
-
-  function set(key, value) { setForm(f => ({ ...f, [key]: value })); }
-
-  function ticketFromForm() {
-    return {
-      title: form.title.trim() || 'Admission',
-      note:  form.note.trim(),
-      guest: form.guest.trim(),
-      date:  form.date,
-      price: form.price.trim(),
-      order: '',
-      barcode: cleanBarcode,
-    };
-  }
-
-  const previewData = { ...ticketFromForm(), index: batch.length + 1 };
+  // The designer previews the first real ticket, or a sample when empty
+  const previewData = batch.length > 0
+    ? { ...batch[0], index: 1 }
+    : { ...SAMPLE_TICKET, index: 1 };
 
   /* ── Template editing ─────────────────────────────────────────────────── */
 
@@ -144,22 +129,12 @@ export default function TicketStudio() {
 
   /* ── Batch ────────────────────────────────────────────────────────────── */
 
-  function addToBatch() {
-    if (!cleanBarcode) return;
-    const base = ticketFromForm();
-    const qty = Math.min(Math.max(parseInt(form.qty) || 1, 1), 100);
-    const items = Array.from({ length: qty }, () => ({ ...base, id: crypto.randomUUID() }));
-    setBatch(b => [...b, ...items]);
-    setToast(`Added ${qty} ticket${qty > 1 ? 's' : ''} to the batch`);
-  }
-
   function importOrderTickets(tickets, orderId) {
     setBatch(b => [...b, ...tickets.map(t => ({ ...t, id: crypto.randomUUID() }))]);
     setToast(`Imported ${tickets.length} ticket${tickets.length === 1 ? '' : 's'} from order #${orderId}`);
   }
 
   function importBulk() {
-    const defaults = ticketFromForm();
     let added = 0, skipped = 0;
     const items = [];
     for (const rawLine of bulkText.split('\n')) {
@@ -170,11 +145,11 @@ export default function TicketStudio() {
       if (!barcode) { skipped++; continue; }
       items.push({
         id: crypto.randomUUID(),
-        title: title || defaults.title,
-        note:  defaults.note,
+        title: title || 'Admission',
+        note:  '',
         guest: guest || '',
-        date:  date  || defaults.date,
-        price: price || defaults.price,
+        date:  date  || '',
+        price: price || '',
         order: '',
         barcode,
       });
@@ -182,17 +157,11 @@ export default function TicketStudio() {
     }
     setBatch(b => [...b, ...items]);
     setBulkText('');
-    setBulkOpen(false);
-    setToast(`Imported ${added} ticket${added === 1 ? '' : 's'}${skipped ? ` · ${skipped} line${skipped === 1 ? '' : 's'} skipped` : ''}`);
+    setToast(`Added ${added} ticket${added === 1 ? '' : 's'}${skipped ? ` · ${skipped} line${skipped === 1 ? '' : 's'} skipped` : ''}`);
   }
 
   function printBatch() {
     setSelectedId(null);
-    if (batch.length === 0 && cleanBarcode) {
-      setBatch([{ ...ticketFromForm(), id: crypto.randomUUID() }]);
-      setTimeout(() => window.print(), 50);
-      return;
-    }
     setTimeout(() => window.print(), 50);
   }
 
@@ -233,75 +202,20 @@ export default function TicketStudio() {
           <OrderImport onImport={importOrderTickets} />
 
           <section className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 animate-fade-up">
-            <h2 className="text-sm font-bold text-gray-900 mb-4">Manual Ticket</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="label">Ticket Title</label>
-                <input className="field" value={form.title} placeholder="General Admission"
-                  onChange={e => set('title', e.target.value)} />
-              </div>
-              <div>
-                <label className="label">Barcode Data <span className="text-tix">*</span></label>
-                <input className="field font-mono" value={form.barcode} placeholder="e.g. GA-2026-0001"
-                  onChange={e => set('barcode', e.target.value.toUpperCase())} />
-                <p className="text-[11px] mt-1.5 leading-relaxed text-gray-400">
-                  {barcodeDirty
-                    ? <>Unsupported characters removed — will encode as <span className="font-mono font-semibold text-gray-600">{cleanBarcode || '(empty)'}</span></>
-                    : <>Code 39: letters, numbers, space and <span className="font-mono">- . $ / + %</span></>}
-                  {cleanBarcode.length > 20 && <span className="block text-amber-600 font-medium mt-0.5">Long values print thinner bars — keep under ~20 characters for reliable scans.</span>}
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Guest Name</label>
-                  <input className="field" value={form.guest} placeholder="Optional"
-                    onChange={e => set('guest', e.target.value)} />
-                </div>
-                <div>
-                  <label className="label">Valid Date</label>
-                  <input type="date" className="field" value={form.date}
-                    onChange={e => set('date', e.target.value)} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Price</label>
-                  <input className="field" value={form.price} placeholder="$39.99"
-                    onChange={e => set('price', e.target.value)} />
-                </div>
-                <div>
-                  <label className="label">Quantity</label>
-                  <input type="number" min="1" max="100" className="field" value={form.qty}
-                    onChange={e => set('qty', e.target.value)} />
-                </div>
-              </div>
-              <div>
-                <label className="label">Fine Print</label>
-                <input className="field" value={form.note} placeholder="e.g. Valid one day only · Non-transferable"
-                  onChange={e => set('note', e.target.value)} />
-              </div>
-              <div className="flex gap-2 pt-1">
-                <button onClick={addToBatch} disabled={!cleanBarcode} className="btn-primary flex-1">
-                  Add to Batch
-                </button>
-                <button onClick={() => setBulkOpen(o => !o)} className="btn-ghost">Bulk</button>
-              </div>
-              {bulkOpen && (
-                <div className="border-t border-gray-100 pt-4 animate-fade-up">
-                  <label className="label">Bulk Import — one ticket per line</label>
-                  <textarea
-                    className="field font-mono !text-xs h-32 resize-y"
-                    placeholder={'BARCODE, Guest, Title, Date, Price\nGA-0001, John Smith\nGA-0002'}
-                    value={bulkText}
-                    onChange={e => setBulkText(e.target.value)}
-                  />
-                  <p className="text-[11px] text-gray-400 mt-1.5">Only the barcode is required — other fields fall back to the form above.</p>
-                  <button onClick={importBulk} disabled={!bulkText.trim()} className="btn-primary w-full mt-3">
-                    Import Lines
-                  </button>
-                </div>
-              )}
-            </div>
+            <h2 className="text-sm font-bold text-gray-900 mb-1">Quick Add</h2>
+            <p className="text-xs text-gray-400 mb-3">One ticket per line — for barcodes that aren't in RocketRez</p>
+            <textarea
+              className="field font-mono !text-xs h-28 resize-y"
+              placeholder={'BARCODE, Guest, Title, Date, Price\nGA-0001, John Smith\nGA-0002'}
+              value={bulkText}
+              onChange={e => setBulkText(e.target.value)}
+            />
+            <p className="text-[11px] text-gray-400 mt-1.5">
+              Only the barcode is required. Code 39: letters, numbers, space and <span className="font-mono">- . $ / + %</span>
+            </p>
+            <button onClick={importBulk} disabled={!bulkText.trim()} className="btn-primary w-full mt-3">
+              Add to Batch
+            </button>
           </section>
         </div>
 
@@ -389,8 +303,8 @@ export default function TicketStudio() {
                 {batch.length > 0 && (
                   <button onClick={() => setBatch([])} className="btn-ghost text-xs !py-1.5">Clear All</button>
                 )}
-                <button onClick={printBatch} disabled={batch.length === 0 && !cleanBarcode} className="btn-primary !py-1.5 text-xs">
-                  <PrinterIcon /> Print {batch.length > 0 ? `Batch (${batch.length})` : 'Ticket'}
+                <button onClick={printBatch} disabled={batch.length === 0} className="btn-primary !py-1.5 text-xs">
+                  <PrinterIcon /> Print Batch ({batch.length})
                 </button>
               </div>
             </div>
