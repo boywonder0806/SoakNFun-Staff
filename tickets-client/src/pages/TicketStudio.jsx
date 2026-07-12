@@ -201,6 +201,9 @@ export default function TicketStudio() {
   return (
     <div className="min-h-screen bg-slate-100">
 
+      {/* BOCA printing: the page itself is the ticket — size follows the template */}
+      <style>{`@media print { @page { size: ${(template.width / DPI).toFixed(3)}in ${(template.height / DPI).toFixed(3)}in; margin: 0; } }`}</style>
+
       <header className="no-print sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-gray-200">
         <div className="max-w-[1280px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
