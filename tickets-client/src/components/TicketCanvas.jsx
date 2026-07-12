@@ -4,10 +4,10 @@ import { fillText, allPlaceholdersEmpty } from '../lib/template.js';
 
 /**
  * Renders a ticket template. With `editable`, elements can be selected,
- * dragged, and rotated (via the handle above the selection); position changes
- * flow back through onChange(updaterFn).
+ * dragged, rotated (handle above the selection), and resized (handle at the
+ * bottom-right corner); changes flow back through onChange(updaterFn).
  */
-export default function TicketCanvas({ template, data, editable = false, selectedId, onSelect, onChange, className = '' }) {
+export default function TicketCanvas({ template, data, editable = false, selectedId, onSelect, onChange, snap = false, className = '' }) {
   const nodeRefs = useRef({});
 
   function patchElement(id, patch) {
@@ -17,6 +17,8 @@ export default function TicketCanvas({ template, data, editable = false, selecte
     }));
   }
 
+  const snapTo = v => (snap ? Math.round(v / 4) * 4 : Math.round(v));
+
   function startDrag(e, el) {
     if (!editable) return;
     e.preventDefault();
@@ -24,9 +26,45 @@ export default function TicketCanvas({ template, data, editable = false, selecte
     onSelect(el.id);
     const sx = e.clientX, sy = e.clientY, ox = el.x, oy = el.y;
     const move = ev => patchElement(el.id, {
-      x: Math.round(ox + ev.clientX - sx),
-      y: Math.round(oy + ev.clientY - sy),
+      x: snapTo(ox + ev.clientX - sx),
+      y: snapTo(oy + ev.clientY - sy),
     });
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  // Corner handle: pointer deltas are inverse-rotated into the element's own
+  // axes so resizing behaves naturally even when the element is rotated.
+  function startResize(e, el) {
+    e.preventDefault();
+    e.stopPropagation();
+    const sx = e.clientX, sy = e.clientY;
+    const rad = ((el.rotation || 0) * Math.PI) / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const orig = { w: el.w, h: el.h, fontSize: el.fontSize };
+    const move = ev => {
+      const dx = ev.clientX - sx, dy = ev.clientY - sy;
+      const ldx = dx * cos + dy * sin;
+      const ldy = -dx * sin + dy * cos;
+      if (el.type === 'text') {
+        const fontSize = Math.min(120, Math.max(5, Math.round(orig.fontSize + (ldx + ldy) / 4)));
+        patchElement(el.id, { fontSize });
+      } else if (el.type === 'line') {
+        patchElement(el.id, {
+          w: Math.max(8, snapTo(orig.w + ldx)),
+          h: Math.min(24, Math.max(1, Math.round(orig.h + ldy))),
+        });
+      } else {
+        patchElement(el.id, {
+          w: Math.max(16, snapTo(orig.w + ldx)),
+          h: Math.max(12, snapTo(orig.h + ldy)),
+        });
+      }
+    };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
@@ -62,8 +100,17 @@ export default function TicketCanvas({ template, data, editable = false, selecte
 
   return (
     <div
-      className={`relative bg-white border border-gray-300 rounded-2xl overflow-hidden ${className}`}
-      style={{ width: template.width, height: template.height, background: template.bg || '#fff' }}
+      className={`relative bg-white border border-gray-300 rounded-xl overflow-hidden ${className}`}
+      style={{
+        width: template.width,
+        height: template.height,
+        background: template.bg || '#fff',
+        // Faint dot grid in the designer only — never printed
+        backgroundImage: editable
+          ? 'radial-gradient(circle, rgba(148,163,184,0.35) 1px, transparent 1px)'
+          : undefined,
+        backgroundSize: editable ? '16px 16px' : undefined,
+      }}
       onPointerDown={() => editable && onSelect(null)}
     >
       {template.elements.map(el => {
@@ -90,17 +137,25 @@ export default function TicketCanvas({ template, data, editable = false, selecte
           >
             {content}
             {selected && (
-              <div
-                className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center"
-                style={{ top: -26, transformOrigin: 'bottom center' }}
-              >
+              <>
                 <div
-                  onPointerDown={e => startRotate(e, el)}
-                  title="Drag to rotate"
-                  className="w-4 h-4 rounded-full bg-white border-2 border-tix shadow cursor-grab active:cursor-grabbing"
+                  className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center"
+                  style={{ top: -26, transformOrigin: 'bottom center' }}
+                >
+                  <div
+                    onPointerDown={e => startRotate(e, el)}
+                    title="Drag to rotate"
+                    className="w-4 h-4 rounded-full bg-white border-2 border-tix shadow cursor-grab active:cursor-grabbing"
+                  />
+                  <div className="w-px h-2 bg-tix" />
+                </div>
+                <div
+                  onPointerDown={e => startResize(e, el)}
+                  title={el.type === 'text' ? 'Drag to scale text' : 'Drag to resize'}
+                  className="absolute w-3.5 h-3.5 bg-white border-2 border-tix rounded-[3px] shadow cursor-nwse-resize"
+                  style={{ right: -8, bottom: -8 }}
                 />
-                <div className="w-px h-2 bg-tix" />
-              </div>
+              </>
             )}
           </div>
         );
@@ -158,6 +213,26 @@ function renderContent(el, data, editable) {
             borderRadius: el.radius,
             background: el.fill || 'transparent',
           }}
+        />
+      );
+    case 'image':
+      if (!el.src) {
+        if (!editable) return null;
+        return (
+          <div
+            className="flex items-center justify-center border-2 border-dashed border-gray-300 rounded text-[9px] text-gray-400 uppercase tracking-widest text-center px-1"
+            style={{ width: el.w, height: el.h }}
+          >
+            Image — upload below
+          </div>
+        );
+      }
+      return (
+        <img
+          src={el.src}
+          alt=""
+          draggable={false}
+          style={{ width: el.w, height: el.h, objectFit: 'contain', pointerEvents: 'none' }}
         />
       );
     default:

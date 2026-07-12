@@ -2,13 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { hubUrl } from '../lib/hub.js';
 import { sanitizeCode39 } from '../lib/code39.js';
-import { defaultTemplate, newElement, PLACEHOLDERS } from '../lib/template.js';
+import { defaultTemplate, newElement, PLACEHOLDERS, DPI } from '../lib/template.js';
 import TicketCanvas from '../components/TicketCanvas.jsx';
 import OrderImport from '../components/OrderImport.jsx';
 import { TicketIcon } from './Login.jsx';
 
 const BATCH_KEY    = 'tickets_batch_v1';
-const TEMPLATE_KEY = 'tickets_template_v1';
+// v2: base ticket became true 5.5in × 2in stock — older saved layouts
+// (640×250) are intentionally left behind on the old key.
+const TEMPLATE_KEY = 'tickets_template_v2';
 
 const EMPTY_FORM = {
   title:   'General Admission',
@@ -35,12 +37,16 @@ export default function TicketStudio() {
     return defaultTemplate();
   });
   const [selectedId, setSelectedId] = useState(null);
+  const [snap, setSnap] = useState(true);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkText, setBulkText] = useState('');
   const [toast, setToast]       = useState(null);
 
   useEffect(() => { localStorage.setItem(BATCH_KEY, JSON.stringify(batch)); }, [batch]);
-  useEffect(() => { localStorage.setItem(TEMPLATE_KEY, JSON.stringify(template)); }, [template]);
+  useEffect(() => {
+    // Logo images ride along as data URLs — tolerate a blown quota rather than crash
+    try { localStorage.setItem(TEMPLATE_KEY, JSON.stringify(template)); } catch { /* ignore */ }
+  }, [template]);
 
   useEffect(() => {
     if (!toast) return;
@@ -82,6 +88,7 @@ export default function TicketStudio() {
       guest: form.guest.trim(),
       date:  form.date,
       price: form.price.trim(),
+      order: '',
       barcode: cleanBarcode,
     };
   }
@@ -168,6 +175,7 @@ export default function TicketStudio() {
         guest: guest || '',
         date:  date  || defaults.date,
         price: price || defaults.price,
+        order: '',
         barcode,
       });
       added++;
@@ -301,22 +309,39 @@ export default function TicketStudio() {
           <section className="no-print bg-white border border-gray-200 rounded-2xl shadow-sm p-6 animate-fade-up">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <div>
-                <h2 className="text-sm font-bold text-gray-900">Ticket Designer</h2>
-                <p className="text-xs text-gray-400 mt-0.5">Drag to move · handle above the selection rotates · arrows nudge · Delete removes</p>
+                <h2 className="text-sm font-bold text-gray-900">
+                  Ticket Designer
+                  <span className="ml-2 font-medium text-gray-400 text-xs">
+                    {(template.width / DPI).toFixed(2)}in × {(template.height / DPI).toFixed(2)}in
+                  </span>
+                </h2>
+                <p className="text-xs text-gray-400 mt-0.5">Drag to move · top handle rotates · corner handle resizes · arrows nudge · Delete removes</p>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 <button onClick={() => addElement('text')}    className="btn-ghost !px-3 !py-1.5 text-xs">+ Text</button>
                 <button onClick={() => addElement('barcode')} className="btn-ghost !px-3 !py-1.5 text-xs">+ Barcode</button>
                 <button onClick={() => addElement('line')}    className="btn-ghost !px-3 !py-1.5 text-xs">+ Line</button>
                 <button onClick={() => addElement('box')}     className="btn-ghost !px-3 !py-1.5 text-xs">+ Box</button>
+                <button onClick={() => addElement('image')}   className="btn-ghost !px-3 !py-1.5 text-xs">+ Image</button>
                 <span className="w-px h-5 bg-gray-200 mx-1" />
-                <label className="text-[11px] text-gray-400 flex items-center gap-1">
-                  W <input type="number" className="field !w-[70px] !px-2 !py-1 !text-xs" value={template.width}
-                    onChange={e => setTemplate(t => ({ ...t, width: clampInt(e.target.value, 240, 1100) }))} />
+                <label className="text-[11px] text-gray-400 flex items-center gap-1" title="Ticket stock color">
+                  Stock <input type="color" className="w-7 h-7 rounded border border-gray-200 cursor-pointer bg-white p-0.5"
+                    value={template.bg || '#ffffff'}
+                    onChange={e => setTemplate(t => ({ ...t, bg: e.target.value }))} />
                 </label>
                 <label className="text-[11px] text-gray-400 flex items-center gap-1">
-                  H <input type="number" className="field !w-[70px] !px-2 !py-1 !text-xs" value={template.height}
-                    onChange={e => setTemplate(t => ({ ...t, height: clampInt(e.target.value, 100, 800) }))} />
+                  W (in) <input type="number" step="0.05" min="1" max="11" className="field !w-[70px] !px-2 !py-1 !text-xs"
+                    value={+(template.width / DPI).toFixed(2)}
+                    onChange={e => setTemplate(t => ({ ...t, width: Math.round(clampFloat(e.target.value, 1, 11) * DPI) }))} />
+                </label>
+                <label className="text-[11px] text-gray-400 flex items-center gap-1">
+                  H (in) <input type="number" step="0.05" min="0.5" max="8" className="field !w-[70px] !px-2 !py-1 !text-xs"
+                    value={+(template.height / DPI).toFixed(2)}
+                    onChange={e => setTemplate(t => ({ ...t, height: Math.round(clampFloat(e.target.value, 0.5, 8) * DPI) }))} />
+                </label>
+                <label className="text-[11px] text-gray-500 flex items-center gap-1 cursor-pointer select-none px-1">
+                  <input type="checkbox" className="accent-tix" checked={snap} onChange={e => setSnap(e.target.checked)} />
+                  Snap
                 </label>
                 <button onClick={resetTemplate} className="btn-ghost !px-3 !py-1.5 text-xs text-gray-400">Reset</button>
               </div>
@@ -327,6 +352,7 @@ export default function TicketStudio() {
                 template={template}
                 data={previewData}
                 editable
+                snap={snap}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 onChange={setTemplate}
@@ -411,6 +437,11 @@ function clampInt(v, min, max) {
   return Math.min(Math.max(n, min), max);
 }
 
+function clampFloat(v, min, max) {
+  const n = parseFloat(v);
+  return Math.min(Math.max(isNaN(n) ? min : n, min), max);
+}
+
 function Num({ label, value, onChange, min = -2000, max = 2000, w = 76 }) {
   return (
     <label className="text-[11px] text-gray-400 flex items-center gap-1.5">
@@ -441,8 +472,26 @@ function Color({ label, value, onChange }) {
   );
 }
 
+// Downscale uploads so a phone photo of the logo doesn't blow the saved template
+function loadImageFile(file, cb) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, 800 / img.width);
+      const c = document.createElement('canvas');
+      c.width  = Math.max(1, Math.round(img.width * scale));
+      c.height = Math.max(1, Math.round(img.height * scale));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      cb(c.toDataURL('image/png'), c.width / c.height);
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
 function ElementProperties({ el, onPatch, onDelete, onDuplicate, onLayer }) {
-  const TYPE_LABEL = { text: 'Text', barcode: 'Barcode', line: 'Line', box: 'Box' };
+  const TYPE_LABEL = { text: 'Text', barcode: 'Barcode', line: 'Line', box: 'Box', image: 'Image' };
   return (
     <div className="mt-4 border-t border-gray-100 pt-4 animate-fade-up">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
@@ -481,6 +530,22 @@ function ElementProperties({ el, onPatch, onDelete, onDuplicate, onLayer }) {
         </div>
       )}
 
+      {el.type === 'image' && (
+        <div className="mb-3">
+          <label className="label">Artwork {el.src ? '— uploaded' : ''}</label>
+          <input
+            type="file"
+            accept="image/*"
+            className="block text-xs text-gray-500 file:mr-3 file:btn-ghost file:!py-1 file:!px-3 file:text-xs file:border file:border-gray-200 file:rounded-lg file:bg-white file:cursor-pointer"
+            onChange={e => {
+              const f = e.target.files?.[0];
+              if (f) loadImageFile(f, (src, ratio) => onPatch({ src, h: Math.max(12, Math.round(el.w / ratio)) }));
+            }}
+          />
+          <p className="text-[10px] text-gray-400 mt-1">PNG with transparency works best — height follows the artwork's proportions on upload.</p>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5">
         <Num label="X" value={el.x} onChange={x => onPatch({ x })} />
         <Num label="Y" value={el.y} onChange={y => onPatch({ y })} />
@@ -510,6 +575,13 @@ function ElementProperties({ el, onPatch, onDelete, onDuplicate, onLayer }) {
             <Num label="Thick" value={el.h} min={1} max={24} w={56} onChange={h => onPatch({ h })} />
             <Color label="Color" value={el.color} onChange={color => onPatch({ color })} />
             <Check label="Dashed" checked={el.dashed} onChange={dashed => onPatch({ dashed })} />
+          </>
+        )}
+
+        {el.type === 'image' && (
+          <>
+            <Num label="W" value={el.w} min={12} max={1100} onChange={w => onPatch({ w })} />
+            <Num label="H" value={el.h} min={12} max={800} onChange={h => onPatch({ h })} />
           </>
         )}
 

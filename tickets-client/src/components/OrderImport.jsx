@@ -45,6 +45,7 @@ export default function OrderImport({ onImport }) {
           guest: order.guest || '',
           date:  it.eventDate || '',
           price: it.price != null ? `$${it.price.toFixed(2)}` : '',
+          order: String(order.id),
           barcode: serial,
         });
       }
