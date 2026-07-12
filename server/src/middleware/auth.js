@@ -105,6 +105,30 @@ export function requireBot(req, res, next) {
   });
 }
 
+export function requireTickets(req, res, next) {
+  requireAuth(req, res, async () => {
+    if (!req.user.hasTicketsAccess && req.user.role !== 'sysadmin') {
+      return res.status(403).json({ error: 'Ticket Manager access required' });
+    }
+    try {
+      const { rows } = await pool.query(
+        'SELECT is_active, role, COALESCE(has_tickets_access, FALSE) AS has_tickets_access FROM employees WHERE id = $1',
+        [req.user.id]
+      );
+      const emp = rows[0];
+      if (!emp || !emp.is_active) {
+        return res.status(401).json({ error: 'Your account has been deactivated. Please contact your administrator.' });
+      }
+      if (!emp.has_tickets_access && emp.role !== 'sysadmin') {
+        return res.status(403).json({ error: 'Your Ticket Manager access has been revoked. Please contact your administrator.' });
+      }
+      next();
+    } catch {
+      res.status(500).json({ error: 'Failed to verify account status' });
+    }
+  });
+}
+
 export function requireHRManager(req, res, next) {
   requireAuth(req, res, async () => {
     try {

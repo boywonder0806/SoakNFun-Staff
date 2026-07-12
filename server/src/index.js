@@ -17,6 +17,7 @@ import reportsRouter from './routes/reports.js';
 import operationsRouter from './routes/operations.js';
 import hrRouter from './routes/hr.js';
 import bayoubotRouter from './routes/bayoubot.js';
+import ticketsRouter from './routes/tickets.js';
 import { startCallbackDigestCron } from './cron/callbackDigest.js';
 import { startCrewOrderSyncCron } from './cron/crewOrderSync.js';
 
@@ -66,6 +67,7 @@ app.use('/api/reports',     reportsRouter);
 app.use('/api/operations', operationsRouter);
 app.use('/api/hr',         hrRouter);
 app.use('/api/bayoubot',   bayoubotRouter);
+app.use('/api/tickets',    ticketsRouter);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'Blue Bayou Staff API' }));
 
