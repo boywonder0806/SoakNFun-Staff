@@ -8,9 +8,9 @@ import OrderImport from '../components/OrderImport.jsx';
 import { TicketIcon } from './Login.jsx';
 
 const BATCH_KEY    = 'tickets_batch_v1';
-// v2: base ticket became true 5.5in × 2in stock — older saved layouts
-// (640×250) are intentionally left behind on the old key.
-const TEMPLATE_KEY = 'tickets_template_v2';
+// v3: monochrome thermal + square-cut stock defaults — older saved layouts
+// are intentionally left behind on the old keys.
+const TEMPLATE_KEY = 'tickets_template_v3';
 
 const EMPTY_FORM = {
   title:   'General Admission',
@@ -324,11 +324,6 @@ export default function TicketStudio() {
                 <button onClick={() => addElement('box')}     className="btn-ghost !px-3 !py-1.5 text-xs">+ Box</button>
                 <button onClick={() => addElement('image')}   className="btn-ghost !px-3 !py-1.5 text-xs">+ Image</button>
                 <span className="w-px h-5 bg-gray-200 mx-1" />
-                <label className="text-[11px] text-gray-400 flex items-center gap-1" title="Ticket stock color">
-                  Stock <input type="color" className="w-7 h-7 rounded border border-gray-200 cursor-pointer bg-white p-0.5"
-                    value={template.bg || '#ffffff'}
-                    onChange={e => setTemplate(t => ({ ...t, bg: e.target.value }))} />
-                </label>
                 <label className="text-[11px] text-gray-400 flex items-center gap-1">
                   W (in) <input type="number" step="0.05" min="1" max="11" className="field !w-[70px] !px-2 !py-1 !text-xs"
                     value={+(template.width / DPI).toFixed(2)}
@@ -462,16 +457,6 @@ function Check({ label, checked, onChange }) {
   );
 }
 
-function Color({ label, value, onChange }) {
-  return (
-    <label className="text-[11px] text-gray-400 flex items-center gap-1.5">
-      {label}
-      <input type="color" className="w-7 h-7 rounded border border-gray-200 cursor-pointer bg-white p-0.5"
-        value={value || '#111827'} onChange={e => onChange(e.target.value)} />
-    </label>
-  );
-}
-
 // Downscale uploads so a phone photo of the logo doesn't blow the saved template
 function loadImageFile(file, cb) {
   const reader = new FileReader();
@@ -555,7 +540,6 @@ function ElementProperties({ el, onPatch, onDelete, onDuplicate, onLayer }) {
           <>
             <Num label="Size" value={el.fontSize} min={6} max={96} w={60} onChange={fontSize => onPatch({ fontSize })} />
             <Num label="Spacing" value={el.tracking || 0} min={0} max={20} w={56} onChange={tracking => onPatch({ tracking })} />
-            <Color label="Color" value={el.color} onChange={color => onPatch({ color })} />
             <Check label="Bold" checked={el.bold} onChange={bold => onPatch({ bold })} />
             <Check label="Mono" checked={el.mono} onChange={mono => onPatch({ mono })} />
           </>
@@ -573,8 +557,8 @@ function ElementProperties({ el, onPatch, onDelete, onDuplicate, onLayer }) {
           <>
             <Num label="Length" value={el.w} min={8} max={1100} onChange={w => onPatch({ w })} />
             <Num label="Thick" value={el.h} min={1} max={24} w={56} onChange={h => onPatch({ h })} />
-            <Color label="Color" value={el.color} onChange={color => onPatch({ color })} />
             <Check label="Dashed" checked={el.dashed} onChange={dashed => onPatch({ dashed })} />
+            <Check label="Guide (won't print)" checked={el.guide} onChange={guide => onPatch({ guide })} />
           </>
         )}
 
@@ -590,10 +574,9 @@ function ElementProperties({ el, onPatch, onDelete, onDuplicate, onLayer }) {
             <Num label="W" value={el.w} min={8} max={1100} onChange={w => onPatch({ w })} />
             <Num label="H" value={el.h} min={8} max={800} onChange={h => onPatch({ h })} />
             <Num label="Border" value={el.border} min={0} max={12} w={56} onChange={border => onPatch({ border })} />
-            <Num label="Radius" value={el.radius} min={0} max={100} w={56} onChange={radius => onPatch({ radius })} />
-            <Color label="Color" value={el.color} onChange={color => onPatch({ color })} />
             <Check label="Dashed" checked={el.dashed} onChange={dashed => onPatch({ dashed })} />
-            <Check label="Filled" checked={!!el.fill} onChange={f => onPatch({ fill: f ? '#f8fafc' : '' })} />
+            <Check label="Filled" checked={!!el.fill} onChange={f => onPatch({ fill: f ? '#000000' : '' })} />
+            <Check label="Guide (won't print)" checked={el.guide} onChange={guide => onPatch({ guide })} />
           </>
         )}
       </div>

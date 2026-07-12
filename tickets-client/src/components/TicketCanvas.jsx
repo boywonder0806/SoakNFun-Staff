@@ -100,11 +100,11 @@ export default function TicketCanvas({ template, data, editable = false, selecte
 
   return (
     <div
-      className={`relative bg-white border border-gray-300 rounded-xl overflow-hidden ${className}`}
+      // Square-cut like the physical stock; thermal output is monochrome
+      className={`relative bg-white border border-gray-300 overflow-hidden ${className}`}
       style={{
         width: template.width,
         height: template.height,
-        background: template.bg || '#fff',
         // Faint dot grid in the designer only — never printed
         backgroundImage: editable
           ? 'radial-gradient(circle, rgba(148,163,184,0.35) 1px, transparent 1px)'
@@ -165,6 +165,12 @@ export default function TicketCanvas({ template, data, editable = false, selecte
 }
 
 function renderContent(el, data, editable) {
+  // Non-printing guides (e.g. the stock's perforation) exist only in the designer
+  if (el.guide && !editable) return null;
+  // Thermal printers are monochrome — everything renders black. Guides show in
+  // the accent color so it's obvious they won't print.
+  const ink = el.guide ? '#f43f5e' : '#000000';
+
   switch (el.type) {
     case 'text': {
       const filled = fillText(el.text, data);
@@ -175,7 +181,7 @@ function renderContent(el, data, editable) {
             display: 'block',
             fontSize: el.fontSize,
             fontWeight: el.bold ? 700 : 400,
-            color: el.color,
+            color: ink,
             letterSpacing: `${el.tracking || 0}px`,
             fontFamily: el.mono ? 'ui-monospace, monospace' : undefined,
             whiteSpace: 'pre',
@@ -196,9 +202,10 @@ function renderContent(el, data, editable) {
           style={{
             width: el.w,
             height: el.h,
-            background: el.dashed ? undefined : el.color,
+            opacity: el.guide ? 0.6 : 1,
+            background: el.dashed ? undefined : ink,
             backgroundImage: el.dashed
-              ? `repeating-linear-gradient(90deg, ${el.color} 0 6px, transparent 6px 12px)`
+              ? `repeating-linear-gradient(90deg, ${ink} 0 6px, transparent 6px 12px)`
               : undefined,
           }}
         />
@@ -209,9 +216,10 @@ function renderContent(el, data, editable) {
           style={{
             width: el.w,
             height: el.h,
-            border: `${el.border}px ${el.dashed ? 'dashed' : 'solid'} ${el.color}`,
-            borderRadius: el.radius,
-            background: el.fill || 'transparent',
+            opacity: el.guide ? 0.6 : 1,
+            border: `${el.border}px ${el.dashed ? 'dashed' : 'solid'} ${ink}`,
+            borderRadius: el.radius || 0,
+            background: el.fill ? ink : 'transparent',
           }}
         />
       );
@@ -232,7 +240,8 @@ function renderContent(el, data, editable) {
           src={el.src}
           alt=""
           draggable={false}
-          style={{ width: el.w, height: el.h, objectFit: 'contain', pointerEvents: 'none' }}
+          // Grayscale preview — that's what the thermal head will produce
+          style={{ width: el.w, height: el.h, objectFit: 'contain', pointerEvents: 'none', filter: 'grayscale(1)' }}
         />
       );
     default:
@@ -276,7 +285,7 @@ function BarcodeBlock({ el, data, editable }) {
       </svg>
       {el.showText && (
         <p
-          className="font-mono text-center text-gray-800"
+          className="font-mono text-center text-black"
           style={{ fontSize: 10, letterSpacing: 3, lineHeight: `${textH}px`, margin: 0 }}
         >
           {value}
