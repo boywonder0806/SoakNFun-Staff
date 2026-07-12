@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useAuth } from '../context/AuthContext.jsx';
+import api from '../lib/api.js';
 import { hubUrl } from '../lib/hub.js';
 import { sanitizeCode39 } from '../lib/code39.js';
 import { defaultTemplate, newElement, PLACEHOLDERS, DPI } from '../lib/template.js';
@@ -12,6 +13,8 @@ const BATCH_KEY    = 'tickets_batch_v1';
 // v3: monochrome thermal + square-cut stock defaults — older saved layouts
 // are intentionally left behind on the old keys.
 const TEMPLATE_KEY = 'tickets_template_v3';
+// Which saved (server) template the working copy came from
+const TPL_META_KEY = 'tickets_tplmeta_v1';
 
 // What the designer shows when the batch is empty
 const SAMPLE_TICKET = {
@@ -41,6 +44,22 @@ export default function TicketStudio() {
   const [snap, setSnap] = useState(true);
   const [bulkText, setBulkText] = useState('');
   const [toast, setToast]       = useState(null);
+  // Saved-template library (shared, server-side)
+  const [savedTemplates, setSavedTemplates] = useState([]);
+  const [tplMeta, setTplMeta] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(TPL_META_KEY)); }
+    catch { return null; }
+  });
+  const [tplBusy, setTplBusy] = useState(false);
+
+  useEffect(() => {
+    api.get('/tickets/templates')
+      .then(r => setSavedTemplates(r.data.templates))
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    localStorage.setItem(TPL_META_KEY, JSON.stringify(tplMeta));
+  }, [tplMeta]);
 
   useEffect(() => { localStorage.setItem(BATCH_KEY, JSON.stringify(batch)); }, [batch]);
   useEffect(() => {
@@ -124,8 +143,73 @@ export default function TicketStudio() {
 
   function resetTemplate() {
     setTemplate(defaultTemplate());
+    setTplMeta(null);
     setSelectedId(null);
     setToast('Design reset to the default layout');
+  }
+
+  /* ── Saved template library ───────────────────────────────────────────── */
+
+  async function selectTemplate(id) {
+    if (!id) { setTplMeta(null); return; }
+    setTplBusy(true);
+    try {
+      const { data } = await api.get(`/tickets/templates/${id}`);
+      setTemplate(data.template.template);
+      setTplMeta({ id: data.template.id, name: data.template.name });
+      setSelectedId(null);
+      setToast(`Loaded “${data.template.name}”`);
+    } catch (err) {
+      setToast(err.response?.data?.error || 'Failed to load template');
+    } finally {
+      setTplBusy(false);
+    }
+  }
+
+  async function saveTemplate() {
+    if (!tplMeta) return saveTemplateAs();
+    setTplBusy(true);
+    try {
+      await api.put(`/tickets/templates/${tplMeta.id}`, { name: tplMeta.name, template });
+      setSavedTemplates(l => l.map(t => (t.id === tplMeta.id ? { ...t, updatedAt: new Date().toISOString() } : t)));
+      setToast(`Saved “${tplMeta.name}”`);
+    } catch (err) {
+      setToast(err.response?.data?.error || 'Failed to save template');
+    } finally {
+      setTplBusy(false);
+    }
+  }
+
+  async function saveTemplateAs() {
+    const name = (window.prompt('Template name:', tplMeta?.name ? `${tplMeta.name} copy` : 'BB Admission') || '').trim();
+    if (!name) return;
+    setTplBusy(true);
+    try {
+      const { data } = await api.post('/tickets/templates', { name, template });
+      setSavedTemplates(l => [...l, data.template].sort((a, b) => a.name.localeCompare(b.name)));
+      setTplMeta({ id: data.template.id, name: data.template.name });
+      setToast(`Saved “${name}”`);
+    } catch (err) {
+      setToast(err.response?.data?.error || 'Failed to save template');
+    } finally {
+      setTplBusy(false);
+    }
+  }
+
+  async function deleteTemplate() {
+    if (!tplMeta) return;
+    if (!window.confirm(`Delete the template “${tplMeta.name}” for everyone?`)) return;
+    setTplBusy(true);
+    try {
+      await api.delete(`/tickets/templates/${tplMeta.id}`);
+      setSavedTemplates(l => l.filter(t => t.id !== tplMeta.id));
+      setToast(`Deleted “${tplMeta.name}”`);
+      setTplMeta(null);
+    } catch (err) {
+      setToast(err.response?.data?.error || 'Failed to delete template');
+    } finally {
+      setTplBusy(false);
+    }
   }
 
   /* ── Batch ────────────────────────────────────────────────────────────── */
@@ -301,6 +385,34 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-print-color-adjust: 
                 </label>
                 <button onClick={resetTemplate} className="btn-ghost !px-3 !py-1.5 text-xs text-gray-400">Reset</button>
               </div>
+            </div>
+
+            {/* Saved template library */}
+            <div className="flex flex-wrap items-center gap-1.5 mb-4 pb-4 border-b border-gray-100">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mr-1">Template</span>
+              <select
+                className="field !w-auto !py-1.5 !text-xs !pr-8"
+                value={tplMeta?.id ?? ''}
+                disabled={tplBusy}
+                onChange={e => selectTemplate(e.target.value ? parseInt(e.target.value) : null)}
+              >
+                <option value="">Unsaved design</option>
+                {savedTemplates.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+              <button onClick={saveTemplate} disabled={tplBusy} className="btn-primary !px-3 !py-1.5 text-xs">
+                {tplMeta ? 'Save' : 'Save As…'}
+              </button>
+              {tplMeta && (
+                <>
+                  <button onClick={saveTemplateAs} disabled={tplBusy} className="btn-ghost !px-3 !py-1.5 text-xs">Save As…</button>
+                  <button onClick={deleteTemplate} disabled={tplBusy} className="btn-ghost !px-3 !py-1.5 text-xs !text-red-500 hover:!border-red-200">Delete</button>
+                </>
+              )}
+              <span className="text-[11px] text-gray-400 ml-1">
+                {tplMeta ? 'Shared with the whole ticket team' : 'Save to share this design across machines'}
+              </span>
             </div>
 
             <div className="overflow-x-auto pb-2">

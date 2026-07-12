@@ -48,7 +48,8 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json());
+// 5mb: ticket templates carry logo images as data URLs
+app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: false }));
 
 app.use('/api/auth',          authRouter);
