@@ -157,6 +157,32 @@ export default function TicketStudio() {
     });
   }
 
+  // Rotate the whole design 90° clockwise: swap canvas dimensions and remap
+  // every element around its center. Text sizes come from the live DOM since
+  // text elements are auto-width.
+  function rotateDesign() {
+    setSelectedId(null);
+    setTemplate(t => {
+      const elements = t.elements.map(el => {
+        const size = el.w != null
+          ? { w: el.w, h: el.h }
+          : (measureApi.current?.(el.id) || { w: 0, h: 0 });
+        const cx = el.x + size.w / 2;
+        const cy = el.y + size.h / 2;
+        const ncx = t.height - cy;
+        const ncy = cx;
+        return {
+          ...el,
+          x: Math.round(ncx - size.w / 2),
+          y: Math.round(ncy - size.h / 2),
+          rotation: ((el.rotation || 0) + 90) % 360,
+        };
+      });
+      return { ...t, width: t.height, height: t.width, elements };
+    });
+    setToast('Design rotated 90° clockwise');
+  }
+
   function resetTemplate() {
     setTemplate(defaultTemplate());
     setTplMeta(null);
@@ -399,6 +425,7 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-print-color-adjust: 
                   <input type="checkbox" className="accent-tix" checked={snap} onChange={e => setSnap(e.target.checked)} />
                   Snap
                 </label>
+                <button onClick={rotateDesign} className="btn-ghost !px-3 !py-1.5 text-xs" title="Rotate the whole design 90° clockwise (swaps ticket orientation)">⟳ Rotate</button>
                 <button onClick={resetTemplate} className="btn-ghost !px-3 !py-1.5 text-xs text-gray-400">Reset</button>
               </div>
             </div>

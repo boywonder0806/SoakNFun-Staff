@@ -59,35 +59,37 @@ export function newElement(type) {
 // (x = 432), leaving a 1-inch stub.
 export const DPI = 96;
 
-// Modeled on the park's thermal ticket stock: 5.5in × 2in square-cut,
-// monochrome (thermal — everything prints black), logo at one end,
-// order/courtesy/title/fine-print body, and the barcode zone past the
-// perforation — which sits 1in from the barcode end (x = 432). The stock is
-// pre-perforated, so the perf is a non-printing guide. Held portrait
-// (logo up) it reads like the printed GIWP ticket.
+// Modeled on the park's BOCA thermal stock, in the printer's native
+// orientation: PORTRAIT 2in × 5.5in — the head prints across the 2in width
+// and the 5.5in length runs in the feed direction. Logo end at the top
+// (usually pre-printed on the stock), rotated body text, and the barcode
+// zone at the bottom past the perforation, which sits 1in from that end
+// (y = 432). The stock is pre-perforated, so the perf is a non-printing guide.
 export function defaultTemplate() {
   return {
-    width: 5.5 * DPI,   // 528
-    height: 2 * DPI,    // 192
+    width: 2 * DPI,     // 192
+    height: 5.5 * DPI,  // 528
     elements: [
-      // ── Logo end — replace with an Image element of the real logo art ──
-      { id: uid(), type: 'text', x: 12,  y: 12,  rotation: 0, text: 'GULF ISLANDS',  fontSize: 9,  bold: true,  mono: false, tracking: 2 },
-      { id: uid(), type: 'text', x: 12,  y: 24,  rotation: 0, text: 'Waterpark',     fontSize: 16, bold: true,  mono: false, tracking: 0 },
-      // ── Body ──
-      { id: uid(), type: 'text', x: 300, y: 14,  rotation: 0, text: 'Order #: {order}',    fontSize: 8,  bold: false, mono: false, tracking: 0 },
-      { id: uid(), type: 'text', x: 12,  y: 56,  rotation: 0, text: 'Courtesy of {guest}', fontSize: 9,  bold: false, mono: false, tracking: 0 },
-      { id: uid(), type: 'text', x: 12,  y: 72,  rotation: 0, text: '{title}',             fontSize: 15, bold: true,  mono: false, tracking: 0 },
-      { id: uid(), type: 'text', x: 12,  y: 98,  rotation: 0, text: '{note}',              fontSize: 8,  bold: false, mono: false, tracking: 0 },
-      { id: uid(), type: 'text', x: 12,  y: 116, rotation: 0,
+      // ── Logo end — often already pre-printed on the stock; delete these
+      //     or replace with an Image element of the real art ──
+      { id: uid(), type: 'text', x: 12, y: 16, rotation: 0, text: 'GULF ISLANDS', fontSize: 9,  bold: true, mono: false, tracking: 2 },
+      { id: uid(), type: 'text', x: 12, y: 28, rotation: 0, text: 'Waterpark',    fontSize: 16, bold: true, mono: false, tracking: 0 },
+      // ── Body: vertical columns reading bottom-to-top (rotation 270),
+      //     right-to-left like the printed GIWP sample ──
+      { id: uid(), type: 'text', x: 135, y: 255, rotation: 270, text: 'Order #: {order}',    fontSize: 8,  bold: false, mono: false, tracking: 0 },
+      { id: uid(), type: 'text', x: 97,  y: 255, rotation: 270, text: 'Courtesy of {guest}', fontSize: 9,  bold: false, mono: false, tracking: 0 },
+      { id: uid(), type: 'text', x: 43,  y: 251, rotation: 270, text: '{title}',             fontSize: 15, bold: true,  mono: false, tracking: 0 },
+      { id: uid(), type: 'text', x: 59,  y: 256, rotation: 270, text: '{note}',              fontSize: 8,  bold: false, mono: false, tracking: 0 },
+      { id: uid(), type: 'text', x: -29, y: 243, rotation: 270, align: 'center',
         text: 'www.gulfislandswaterpark.com\nPlease complete a waiver before arriving.\nValid for one-time use only.\nNo cash value. Non-refundable. Not valid for resale or upgrades.',
         fontSize: 7, bold: false, mono: false, tracking: 0 },
-      { id: uid(), type: 'text', x: 12,  y: 176, rotation: 0, text: '#{index}', fontSize: 7, bold: false, mono: true, tracking: 0 },
-      // ── Perforation guide at 1in before the end (x = 432) — shown in the
-      //     designer, never printed: the stock is already perforated there ──
-      { id: uid(), type: 'line', x: 336, y: 95, rotation: 90, w: 192, h: 2, dashed: true, guide: true },
-      // ── Barcode zone past the perf — rotated so the bars run across the
-      //     2in width like the sample, serial printed alongside ──
-      { id: uid(), type: 'barcode', x: 394, y: 58, rotation: 90, value: '{barcode}', w: 176, h: 76, showText: true },
+      { id: uid(), type: 'text', x: -1,  y: 256, rotation: 270, text: 'Valid: {date}', fontSize: 9, bold: false, mono: false, tracking: 0 },
+      // ── Perforation guide 1in before the barcode end — designer-only ──
+      { id: uid(), type: 'line', x: 0, y: 431, rotation: 0, w: 192, h: 2, dashed: true, guide: true },
+      // ── Barcode zone past the perf: serial above horizontal bars ──
+      { id: uid(), type: 'text', x: 12, y: 442, rotation: 0, text: '{barcode}', fontSize: 9, bold: false, mono: true, tracking: 2 },
+      { id: uid(), type: 'barcode', x: 12, y: 458, rotation: 0, value: '{barcode}', w: 168, h: 56, showText: false },
+      { id: uid(), type: 'text', x: 150, y: 508, rotation: 0, text: '#{index}', fontSize: 7, bold: false, mono: true, tracking: 0 },
     ],
   };
 }
