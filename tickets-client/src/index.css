@@ -63,6 +63,9 @@
     overflow: visible !important;
   }
   .print-sheet > * { margin: 0 !important; }
+  /* space-y-* on ancestors still applies margins even when siblings are
+     display:none — nothing may offset the ticket from the page origin */
+  main section, main > div { margin: 0 !important; padding: 0 !important; }
   .print-ticket {
     break-inside: avoid;
     page-break-inside: avoid;
