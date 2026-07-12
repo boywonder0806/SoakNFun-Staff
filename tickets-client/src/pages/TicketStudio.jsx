@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { useAuth } from '../context/AuthContext.jsx';
 import { hubUrl } from '../lib/hub.js';
 import { sanitizeCode39 } from '../lib/code39.js';
@@ -160,9 +161,51 @@ export default function TicketStudio() {
     setToast(`Added ${added} ticket${added === 1 ? '' : 's'}${skipped ? ` · ${skipped} line${skipped === 1 ? '' : 's'} skipped` : ''}`);
   }
 
+  // Print through a dedicated document that contains nothing but the tickets:
+  // the page IS the ticket (@page in its own head), no app CSS to fight.
   function printBatch() {
     setSelectedId(null);
-    setTimeout(() => window.print(), 50);
+    const tickets = renderToStaticMarkup(
+      <>
+        {batch.map((t, i) => (
+          <TicketCanvas key={t.id} template={template} data={{ ...t, index: i + 1 }} className="print-ticket" />
+        ))}
+      </>
+    );
+    const win = window.open('', '_blank');
+    if (!win) {
+      setToast('Pop-up blocked — allow pop-ups for this site to print');
+      return;
+    }
+    win.document.write(`<!doctype html>
+<html><head><meta charset="utf-8"><title>Tickets (${batch.length})</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+@page { size: ${(template.width / DPI).toFixed(3)}in ${(template.height / DPI).toFixed(3)}in; margin: 0; }
+html, body { margin: 0; padding: 0; }
+body { font-family: 'Inter', system-ui, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+/* The handful of utility classes TicketCanvas emits, defined by hand —
+   deliberately no border/shadow so only the design reaches the stock */
+.relative { position: relative; }
+.absolute { position: absolute; }
+.overflow-hidden { overflow: hidden; }
+.bg-white { background: #fff; }
+.font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.text-center { text-align: center; }
+.text-black { color: #000; }
+.print-ticket { page-break-after: always; break-inside: avoid; }
+.print-ticket:last-child { page-break-after: auto; }
+</style></head><body>${tickets}</body></html>`);
+    win.document.close();
+    win.onafterprint = () => win.close();
+    // Wait for Inter to load so printed text matches the designer's metrics
+    setTimeout(() => {
+      const go = () => { win.focus(); win.print(); };
+      if (win.document.fonts?.ready) win.document.fonts.ready.then(go);
+      else go();
+    }, 150);
   }
 
   /* ── UI ───────────────────────────────────────────────────────────────── */
