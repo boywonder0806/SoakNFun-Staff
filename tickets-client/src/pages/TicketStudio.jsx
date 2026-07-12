@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useAuth } from '../context/AuthContext.jsx';
 import api from '../lib/api.js';
@@ -51,6 +51,7 @@ export default function TicketStudio() {
     catch { return null; }
   });
   const [tplBusy, setTplBusy] = useState(false);
+  const measureApi = useRef(null);
 
   useEffect(() => {
     api.get('/tickets/templates')
@@ -127,6 +128,21 @@ export default function TicketStudio() {
     const copy = { ...selected, id: crypto.randomUUID(), x: selected.x + 16, y: selected.y + 16 };
     setTemplate(t => ({ ...t, elements: [...t.elements, copy] }));
     setSelectedId(copy.id);
+  }
+
+  // Snap the selected element's rotated bounding box to the ticket's left
+  // edge, horizontal center, or right edge. Rotation happens around the
+  // element's center, so we position by center point.
+  function alignSelected(where) {
+    if (!selected) return;
+    const size = measureApi.current?.(selected.id);
+    if (!size) return;
+    const rad = ((selected.rotation || 0) * Math.PI) / 180;
+    const visualW = Math.abs(size.w * Math.cos(rad)) + Math.abs(size.h * Math.sin(rad));
+    const cx = where === 'left'   ? visualW / 2
+             : where === 'right'  ? template.width - visualW / 2
+             :                      template.width / 2;
+    patchSelected({ x: Math.round(cx - size.w / 2) });
   }
 
   function moveLayer(dir) {
@@ -424,6 +440,7 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-print-color-adjust: 
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 onChange={setTemplate}
+                measureRef={measureApi}
                 className="shadow-sm"
               />
             </div>
@@ -435,6 +452,7 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-print-color-adjust: 
                 onDelete={removeSelected}
                 onDuplicate={duplicateSelected}
                 onLayer={moveLayer}
+                onAlign={alignSelected}
               />
             ) : (
               <p className="text-xs text-gray-400 mt-3">
@@ -548,13 +566,18 @@ function loadImageFile(file, cb) {
   reader.readAsDataURL(file);
 }
 
-function ElementProperties({ el, onPatch, onDelete, onDuplicate, onLayer }) {
+function ElementProperties({ el, onPatch, onDelete, onDuplicate, onLayer, onAlign }) {
   const TYPE_LABEL = { text: 'Text', barcode: 'Barcode', line: 'Line', box: 'Box', image: 'Image' };
   return (
     <div className="mt-4 border-t border-gray-100 pt-4 animate-fade-up">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <p className="text-xs font-bold text-gray-900">{TYPE_LABEL[el.type]} Element</p>
         <div className="flex items-center gap-1.5">
+          <span className="text-[10px] uppercase tracking-wide text-gray-400 mr-0.5">Align</span>
+          <button onClick={() => onAlign('left')}   className="btn-ghost !px-2.5 !py-1 text-[11px]" title="Align to left edge">⇤ Left</button>
+          <button onClick={() => onAlign('center')} className="btn-ghost !px-2.5 !py-1 text-[11px]" title="Center horizontally on the ticket">↔ Center</button>
+          <button onClick={() => onAlign('right')}  className="btn-ghost !px-2.5 !py-1 text-[11px]" title="Align to right edge">⇥ Right</button>
+          <span className="w-px h-4 bg-gray-200 mx-1" />
           <button onClick={() => onLayer(-1)} className="btn-ghost !px-2.5 !py-1 text-[11px]" title="Send backward">▼ Back</button>
           <button onClick={() => onLayer(1)}  className="btn-ghost !px-2.5 !py-1 text-[11px]" title="Bring forward">▲ Front</button>
           <button onClick={onDuplicate} className="btn-ghost !px-2.5 !py-1 text-[11px]">Duplicate</button>
@@ -615,6 +638,19 @@ function ElementProperties({ el, onPatch, onDelete, onDuplicate, onLayer }) {
             <Num label="Spacing" value={el.tracking || 0} min={0} max={20} w={56} onChange={tracking => onPatch({ tracking })} />
             <Check label="Bold" checked={el.bold} onChange={bold => onPatch({ bold })} />
             <Check label="Mono" checked={el.mono} onChange={mono => onPatch({ mono })} />
+            <label className="text-[11px] text-gray-400 flex items-center gap-1.5">
+              Lines
+              <select
+                className="field !w-auto !px-2 !py-1 !text-xs"
+                value={el.align || 'left'}
+                onChange={e => onPatch({ align: e.target.value })}
+                title="How multi-line text lines up within the element"
+              >
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+              </select>
+            </label>
           </>
         )}
 

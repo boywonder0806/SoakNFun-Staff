@@ -7,8 +7,17 @@ import { fillText, allPlaceholdersEmpty } from '../lib/template.js';
  * dragged, rotated (handle above the selection), and resized (handle at the
  * bottom-right corner); changes flow back through onChange(updaterFn).
  */
-export default function TicketCanvas({ template, data, editable = false, selectedId, onSelect, onChange, snap = false, className = '' }) {
+export default function TicketCanvas({ template, data, editable = false, selectedId, onSelect, onChange, snap = false, measureRef, className = '' }) {
   const nodeRefs = useRef({});
+
+  // Expose untransformed layout sizes (offsetWidth ignores rotation) so the
+  // properties panel can align auto-width elements like text.
+  if (measureRef) {
+    measureRef.current = id => {
+      const n = nodeRefs.current[id];
+      return n ? { w: n.offsetWidth, h: n.offsetHeight } : null;
+    };
+  }
 
   function patchElement(id, patch) {
     onChange(t => ({
@@ -185,6 +194,7 @@ function renderContent(el, data, editable) {
             letterSpacing: `${el.tracking || 0}px`,
             fontFamily: el.mono ? 'ui-monospace, monospace' : undefined,
             whiteSpace: 'pre',
+            textAlign: el.align || 'left',
             lineHeight: 1.25,
             // In the designer an empty binding still needs something to grab
             opacity: editable && !filled.trim() ? 0.35 : 1,
