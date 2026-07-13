@@ -1399,7 +1399,12 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
   const txMs   = date ? new Date(date).getTime() : null;
   const hasTime = !!fmtTime(date);
 
+  // TEMPORARY: Gulf Islands cameras aren't on the NVR yet — show a notice
+  // instead of the player until they're connected
+  const isGulfIslands = park === 'GI';
+
   useEffect(() => {
+    if (isGulfIslands) { setLoadingCams(false); return; }
     api.get('/hr/protect/cameras')
       .then(r => {
         const cams = r.data.cameras || [];
@@ -1519,6 +1524,19 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
           </div>
         )}
 
+        {isGulfIslands ? (
+          <div className="p-5">
+            <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <AlertIcon className="text-amber-500 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-amber-800">Not available for Gulf Islands orders</p>
+                <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                  Camera review isn't available for Gulf Islands Waterpark orders yet — it currently only covers the Blue Bayou crew line.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
         <div className="p-5 space-y-4">
           {!hasTime && (
             <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
@@ -1576,6 +1594,7 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
             {loading ? <><Spinner /> Loading footage…</> : videoUrl ? 'Reload Footage' : 'Load Footage'}
           </button>
         </div>
+        )}
       </div>
     </div>
   );
