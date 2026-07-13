@@ -1385,13 +1385,17 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
   const [cameras,       setCameras]       = useState([]);
   const [configuredCams, setConfiguredCams] = useState({});
   const [selectedCam,   setSelectedCam]   = useState('');
+  const [crewCamId,     setCrewCamId]     = useState(null);
   const [loadingCams,   setLoadingCams]   = useState(true);
   const [camError,      setCamError]      = useState(null);
-  const [windowMin,     setWindowMin]     = useState(5);
+  const [windowMin,     setWindowMin]     = useState(1);
   const [loading,       setLoading]       = useState(false);
   const [videoUrl,      setVideoUrl]      = useState(null);
   const [videoReady,    setVideoReady]    = useState(false);
   const [footageError,  setFootageError]  = useState(null);
+  const [clipRange,     setClipRange]     = useState(null); // { startMs, endMs } of the loaded clip
+  const videoRef   = useRef(null);
+  const autoLoaded = useRef(false);
 
   const txMs   = date ? new Date(date).getTime() : null;
   const hasTime = !!fmtTime(date);
@@ -1403,29 +1407,40 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
         const configured = r.data.configuredCameras || {};
         setCameras(cams);
         setConfiguredCams(configured);
-        const parkCams = configured[park] || [];
-        if (parkCams.length === 1) setSelectedCam(parkCams[0]);
-        else if (parkCams.length === 0 && cams.length === 1) setSelectedCam(cams[0].id);
+        const crewId = r.data.crewCameraId;
+        if (crewId && cams.some(c => c.id === crewId)) {
+          setCrewCamId(crewId);
+          setSelectedCam(crewId);
+        } else {
+          // Fallback if the crew line camera isn't found on the NVR
+          const parkCams = configured[park] || [];
+          if (parkCams.length === 1) setSelectedCam(parkCams[0]);
+          else if (parkCams.length === 0 && cams.length === 1) setSelectedCam(cams[0].id);
+        }
       })
       .catch(err => setCamError(err.response?.data?.error || err.message || 'Cannot reach camera system'))
       .finally(() => setLoadingCams(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const parkCamIds     = configuredCams[park] || [];
-  const displayCameras = parkCamIds.length > 0
-    ? cameras.filter(c => parkCamIds.includes(c.id))
-    : cameras;
+  const displayCameras = crewCamId
+    ? cameras
+    : parkCamIds.length > 0
+      ? cameras.filter(c => parkCamIds.includes(c.id))
+      : cameras;
+  const crewCam = cameras.find(c => c.id === crewCamId) || null;
 
-  async function loadFootage() {
+  async function loadFootage(mins = windowMin) {
     if (!selectedCam || !txMs) return;
     setFootageError(null);
     setVideoUrl(null);
     setVideoReady(false);
     setLoading(true);
     try {
-      const startMs = txMs - windowMin * 60 * 1000;
-      const endMs   = txMs + windowMin * 60 * 1000;
+      const startMs = txMs - mins * 60 * 1000;
+      const endMs   = txMs + mins * 60 * 1000;
       const r = await api.post('/hr/protect/footage-token', { cameraId: selectedCam, startMs, endMs });
+      setClipRange({ startMs, endMs });
       setVideoUrl(`/api/hr/protect/footage-stream?token=${r.data.token}`);
     } catch (err) {
       setFootageError(err.response?.data?.error || 'Failed to load footage');
@@ -1434,8 +1449,21 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
     }
   }
 
-  const startTime = txMs ? new Date(txMs - windowMin * 60 * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
-  const endTime   = txMs ? new Date(txMs + windowMin * 60 * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
+  // Footage starts pulling as soon as the crew camera resolves — no manual step
+  useEffect(() => {
+    if (!autoLoaded.current && selectedCam && txMs && hasTime) {
+      autoLoaded.current = true;
+      loadFootage();
+    }
+  }, [selectedCam]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function pickWindow(m) {
+    setWindowMin(m);
+    if (selectedCam && txMs && (videoUrl || loading || autoLoaded.current)) loadFootage(m);
+  }
+
+  const startTime = txMs ? new Date(txMs - windowMin * 60 * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) : null;
+  const endTime   = txMs ? new Date(txMs + windowMin * 60 * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) : null;
 
   return (
     <div ref={backdropRef} onClick={e => e.target === backdropRef.current && onClose()}
@@ -1475,6 +1503,7 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
           <div className={`bg-black ${videoReady ? '' : 'hidden'}`}>
             <video
               key={videoUrl}
+              ref={videoRef}
               controls
               autoPlay
               className="w-full max-h-72"
@@ -1487,6 +1516,9 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
             >
               <source src={videoUrl} type="video/mp4" />
             </video>
+            {clipRange && txMs && (
+              <FootageTimeline videoRef={videoRef} txMs={txMs} clipStart={clipRange.startMs} clipEnd={clipRange.endMs} />
+            )}
           </div>
         )}
 
@@ -1498,7 +1530,7 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
             </div>
           )}
 
-          {/* Camera selector */}
+          {/* Camera — locked to the crew line camera; dropdown only appears if it can't be found */}
           <div>
             <label className="label">Camera</label>
             {loadingCams ? (
@@ -1507,6 +1539,14 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
               </div>
             ) : camError ? (
               <p className="text-xs text-red-500 bg-red-50 rounded-lg p-2">{camError}</p>
+            ) : crewCam ? (
+              <div className="flex items-center gap-2.5 bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${crewCam.state === 'CONNECTED' ? 'bg-emerald-500' : 'bg-red-400'}`} />
+                <span className="text-sm font-medium text-gray-800">{crewCam.name}</span>
+                <span className="text-[11px] text-gray-400 ml-auto">
+                  {crewCam.state === 'CONNECTED' ? 'Crew line camera' : 'Offline'}
+                </span>
+              </div>
             ) : displayCameras.length === 0 ? (
               <p className="text-xs text-gray-500 bg-gray-50 rounded-lg p-2">No cameras found on the NVR.</p>
             ) : (
@@ -1519,17 +1559,14 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
                 ))}
               </select>
             )}
-            {!loadingCams && !camError && parkCamIds.length === 0 && cameras.length > 0 && (
-              <p className="text-xs text-gray-400 mt-1">Tip: set <code>PROTECT_BB_CAMERA_IDS</code> / <code>PROTECT_GI_CAMERA_IDS</code> in .env to pre-filter by park.</p>
-            )}
           </div>
 
           {/* Time window */}
           <div>
             <label className="label">Time Window Around Purchase</label>
-            <div className="grid grid-cols-4 gap-2">
-              {[5, 10, 15, 30].map(m => (
-                <button key={m} onClick={() => setWindowMin(m)}
+            <div className="grid grid-cols-5 gap-2">
+              {[1, 5, 10, 15, 30].map(m => (
+                <button key={m} onClick={() => pickWindow(m)}
                   className={`py-2 rounded-lg text-xs font-semibold border transition-colors
                     ${windowMin === m ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}
                 >
@@ -1554,6 +1591,59 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
             {loading ? <><Spinner /> Loading footage…</> : videoUrl ? 'Reload Footage' : 'Load Footage'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Footage timeline ──────────────────────────────────────────────────────────
+// Custom scrub bar under the player: an amber marker pins the exact moment the
+// transaction was rung up within the exported clip; click anywhere to seek.
+
+function FootageTimeline({ videoRef, txMs, clipStart, clipEnd }) {
+  const trackRef = useRef(null);
+  const [frac, setFrac] = useState(0);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const update = () => { if (v.duration > 0) setFrac(v.currentTime / v.duration); };
+    v.addEventListener('timeupdate', update);
+    v.addEventListener('seeked', update);
+    update();
+    return () => {
+      v.removeEventListener('timeupdate', update);
+      v.removeEventListener('seeked', update);
+    };
+  }, [videoRef]);
+
+  const txFrac = Math.min(Math.max((txMs - clipStart) / (clipEnd - clipStart), 0), 1);
+
+  function seek(e) {
+    const v = videoRef.current;
+    if (!v || !(v.duration > 0)) return;
+    const rect = trackRef.current.getBoundingClientRect();
+    const f = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
+    v.currentTime = f * v.duration;
+  }
+
+  const fmtClock = ms => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+
+  return (
+    <div className="bg-gray-900 px-4 pt-4 pb-2.5 select-none">
+      <div ref={trackRef} onClick={seek} className="relative h-1.5 rounded-full bg-white/15 cursor-pointer">
+        {/* played portion */}
+        <div className="absolute inset-y-0 left-0 rounded-full bg-teal-400/80" style={{ width: `${frac * 100}%` }} />
+        {/* playhead */}
+        <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-white shadow" style={{ left: `${frac * 100}%` }} />
+        {/* transaction marker */}
+        <div className="absolute -top-1.5 -bottom-1.5 w-0.5 -translate-x-1/2 bg-amber-400 rounded-full" style={{ left: `${txFrac * 100}%` }} />
+        <div className="absolute -top-[9px] w-1.5 h-1.5 -translate-x-1/2 rotate-45 bg-amber-400" style={{ left: `${txFrac * 100}%` }} />
+      </div>
+      <div className="flex items-center justify-between mt-2 text-[10px] text-gray-400 tabular-nums">
+        <span>{fmtClock(clipStart)}</span>
+        <span className="text-amber-400 font-semibold">Purchase · {fmtClock(txMs)}</span>
+        <span>{fmtClock(clipEnd)}</span>
       </div>
     </div>
   );

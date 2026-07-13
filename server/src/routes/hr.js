@@ -774,10 +774,17 @@ router.get('/protect/cameras', requireHR, async (req, res) => {
       nvrRes.on('error', reject);
     });
     const all = JSON.parse(raw);
+    const cameras = (Array.isArray(all) ? all : [])
+      .map(c => ({ id: c.id, name: c.name || c.id, state: c.state, type: c.type }));
+    // Meal-deduction review always uses the crew line camera — override with
+    // PROTECT_CREW_CAMERA_ID if the camera is ever renamed on the NVR
+    const crewCameraId = process.env.PROTECT_CREW_CAMERA_ID
+      || cameras.find(c => /crew\s*line/i.test(c.name))?.id
+      || null;
     res.json({
       configured: true,
-      cameras: (Array.isArray(all) ? all : [])
-        .map(c => ({ id: c.id, name: c.name || c.id, state: c.state, type: c.type })),
+      cameras,
+      crewCameraId,
       configuredCameras: {
         BB: (process.env.PROTECT_BB_CAMERA_IDS || '').split(',').filter(Boolean),
         GI: (process.env.PROTECT_GI_CAMERA_IDS || '').split(',').filter(Boolean),
