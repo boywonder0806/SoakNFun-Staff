@@ -1388,7 +1388,6 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
   const [crewCamId,     setCrewCamId]     = useState(null);
   const [loadingCams,   setLoadingCams]   = useState(true);
   const [camError,      setCamError]      = useState(null);
-  const [windowMin,     setWindowMin]     = useState(1);
   const [loading,       setLoading]       = useState(false);
   const [videoUrl,      setVideoUrl]      = useState(null);
   const [videoReady,    setVideoReady]    = useState(false);
@@ -1430,15 +1429,18 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
       : cameras;
   const crewCam = cameras.find(c => c.id === crewCamId) || null;
 
-  async function loadFootage(mins = windowMin) {
+  // Clip is always one minute either side of the transaction
+  const WINDOW_MS = 60 * 1000;
+
+  async function loadFootage() {
     if (!selectedCam || !txMs) return;
     setFootageError(null);
     setVideoUrl(null);
     setVideoReady(false);
     setLoading(true);
     try {
-      const startMs = txMs - mins * 60 * 1000;
-      const endMs   = txMs + mins * 60 * 1000;
+      const startMs = txMs - WINDOW_MS;
+      const endMs   = txMs + WINDOW_MS;
       const r = await api.post('/hr/protect/footage-token', { cameraId: selectedCam, startMs, endMs });
       setClipRange({ startMs, endMs });
       setVideoUrl(`/api/hr/protect/footage-stream?token=${r.data.token}`);
@@ -1457,13 +1459,8 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
     }
   }, [selectedCam]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function pickWindow(m) {
-    setWindowMin(m);
-    if (selectedCam && txMs && (videoUrl || loading || autoLoaded.current)) loadFootage(m);
-  }
-
-  const startTime = txMs ? new Date(txMs - windowMin * 60 * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) : null;
-  const endTime   = txMs ? new Date(txMs + windowMin * 60 * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) : null;
+  const startTime = txMs ? new Date(txMs - WINDOW_MS).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) : null;
+  const endTime   = txMs ? new Date(txMs + WINDOW_MS).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) : null;
 
   return (
     <div ref={backdropRef} onClick={e => e.target === backdropRef.current && onClose()}
@@ -1511,7 +1508,7 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
               onError={() => {
                 setVideoUrl(null);
                 setVideoReady(false);
-                setFootageError('Could not play footage for this time range — try a different window or camera.');
+                setFootageError('Could not play footage for this time range — the camera may not have a recording at that moment.');
               }}
             >
               <source src={videoUrl} type="video/mp4" />
@@ -1561,23 +1558,11 @@ function FootageModal({ transaction, employeeName, park, onClose }) {
             )}
           </div>
 
-          {/* Time window */}
-          <div>
-            <label className="label">Time Window Around Purchase</label>
-            <div className="grid grid-cols-5 gap-2">
-              {[1, 5, 10, 15, 30].map(m => (
-                <button key={m} onClick={() => pickWindow(m)}
-                  className={`py-2 rounded-lg text-xs font-semibold border transition-colors
-                    ${windowMin === m ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}
-                >
-                  ±{m} min
-                </button>
-              ))}
-            </div>
-            {startTime && (
-              <p className="text-xs text-gray-400 mt-1.5">{startTime} – {endTime}</p>
-            )}
-          </div>
+          {startTime && (
+            <p className="text-xs text-gray-400">
+              Showing one minute before and after the purchase · {startTime} – {endTime}
+            </p>
+          )}
 
           {footageError && (
             <p className="text-xs text-red-500 bg-red-50 rounded-lg p-2">{footageError}</p>
