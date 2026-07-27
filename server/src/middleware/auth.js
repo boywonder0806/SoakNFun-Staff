@@ -105,6 +105,30 @@ export function requireBot(req, res, next) {
   });
 }
 
+export function requireAnalytics(req, res, next) {
+  requireAuth(req, res, async () => {
+    if (!req.user.hasAnalyticsAccess) {
+      return res.status(403).json({ error: 'Analytics dashboard access required' });
+    }
+    try {
+      const { rows } = await pool.query(
+        'SELECT is_active, has_analytics_access FROM employees WHERE id = $1',
+        [req.user.id]
+      );
+      const emp = rows[0];
+      if (!emp || !emp.is_active) {
+        return res.status(401).json({ error: 'Your account has been deactivated. Please contact your administrator.' });
+      }
+      if (!emp.has_analytics_access) {
+        return res.status(403).json({ error: 'Your analytics dashboard access has been revoked. Please contact your administrator.' });
+      }
+      next();
+    } catch {
+      res.status(500).json({ error: 'Failed to verify account status' });
+    }
+  });
+}
+
 export function requireTickets(req, res, next) {
   requireAuth(req, res, async () => {
     if (!req.user.hasTicketsAccess && req.user.role !== 'sysadmin') {

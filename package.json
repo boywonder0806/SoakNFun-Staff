@@ -3,16 +3,18 @@
   "version": "1.0.0",
   "description": "Blue Bayou Waterpark Staff Portal",
   "scripts": {
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\" \"npm run dev:reception\" \"npm run dev:hr\"",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\" \"npm run dev:reception\" \"npm run dev:hr\" \"npm run dev:analytics\"",
     "dev:server": "npm --prefix server run dev",
     "dev:client": "npm --prefix client run dev",
     "dev:reception": "npm --prefix reception-client run dev",
     "dev:hr": "npm --prefix hr-client run dev",
-    "install:all": "npm install && npm --prefix server install && npm --prefix client install && npm --prefix reception-client install && npm --prefix hr-client install && npm --prefix tickets-client install",
+    "dev:analytics": "npm --prefix analytics-client run dev",
+    "install:all": "npm install && npm --prefix server install && npm --prefix client install && npm --prefix reception-client install && npm --prefix hr-client install && npm --prefix tickets-client install && npm --prefix analytics-client install",
     "build:all": "npm --prefix client run build && npm --prefix reception-client run build && npm --prefix hr-client run build",
     "build:bot": "npm --prefix bayoubot-client run build",
     "build:admin": "npm --prefix admin-client run build",
     "build:tickets": "npm --prefix tickets-client run build",
+    "build:analytics": "npm --prefix analytics-client run build",
     "dev:tickets": "npm --prefix tickets-client run dev"
   },
   "devDependencies": {

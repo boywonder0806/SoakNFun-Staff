@@ -7,6 +7,7 @@ reception-client/node_modules/
 # Build output
 client/dist/
 reception-client/dist/
+analytics-client/dist/
 
 # Environment variables — never commit these
 .env

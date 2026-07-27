@@ -7,6 +7,9 @@
  * reflected in stored history.
  */
 import pool from '../db/index.js';
+import { getRRToken, fetchOrdersRaw, sleep, centralToday, orderPark, rrLineItemRevenue } from './rocketrez.js';
+
+export { getRRToken, orderPark, rrLineItemRevenue, centralToday };
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -55,30 +58,6 @@ pool.query(`CREATE TABLE IF NOT EXISTS crew_crosspark_reviews (
   UNIQUE (employee_name, home_park)
 )`).catch(e => console.error('crew_crosspark_reviews migration:', e.message));
 
-// ── RocketRez auth ────────────────────────────────────────────────────────────
-
-let rrCachedToken = null;
-let rrTokenExpiry = 0;
-
-export async function getRRToken() {
-  if (rrCachedToken && Date.now() < rrTokenExpiry - 60_000) return rrCachedToken;
-  const res = await fetch(`${process.env.ROCKETREZ_BASE_URL}/v1/oauth2/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      client_id: process.env.ROCKETREZ_CLIENT_ID,
-      client_secret: process.env.ROCKETREZ_CLIENT_SECRET,
-      scope: 'read_orders',
-      grant_type: 'client_credentials',
-    }),
-  });
-  if (!res.ok) throw new Error(`RocketRez auth failed: ${res.status}`);
-  const data = await res.json();
-  rrCachedToken = data.data.access_token;
-  rrTokenExpiry = new Date(data.data.expiry).getTime();
-  return rrCachedToken;
-}
-
 // ── Fetch + classify ──────────────────────────────────────────────────────────
 // Crew orders are kept in ALL statuses here (voids/refunds must overwrite
 // stored rows); the live breakdown filters to Active at build time.
@@ -87,46 +66,14 @@ const crewOrderCache = new Map(); // "start:end" → { orders, fetchedAt }
 const CREW_TTL_TODAY = 5 * 60 * 1000;
 const CREW_TTL_PAST  = 60 * 60 * 1000;
 
-export function centralToday() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
-}
-
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-// RocketRez throttles bursts with 429s — honor Retry-After and back off
-// instead of failing the whole request chain.
-async function rrFetch(url, options, attempts = 4) {
-  for (let attempt = 1; ; attempt++) {
-    const r = await fetch(url, options);
-    if (r.status !== 429 || attempt >= attempts) return r;
-    const retryAfter = parseFloat(r.headers.get('retry-after'));
-    const waitMs = !isNaN(retryAfter) ? retryAfter * 1000 : 1000 * 2 ** (attempt - 1);
-    console.warn(`RocketRez 429 — retrying in ${waitMs}ms (attempt ${attempt}/${attempts})`);
-    await sleep(waitMs);
-  }
-}
-
 export async function fetchCrewOrders(startDate, endDate) {
   const ttl    = endDate >= centralToday() ? CREW_TTL_TODAY : CREW_TTL_PAST;
   const key    = `${startDate}:${endDate}`;
   const cached = crewOrderCache.get(key);
   if (cached && Date.now() - cached.fetchedAt < ttl) return cached;
 
-  const token = await getRRToken();
-  const base  = (process.env.ROCKETREZ_BASE_URL || '').replace(/\/$/, '');
-
-  const orders = [];
-  let pageIndex = 0;
-  while (true) {
-    const url = `${base}/v1/orders?startDate=${startDate}&endDate=${endDate}&pageSize=250&pageIndex=${pageIndex}`;
-    const r = await rrFetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!r.ok) throw new Error(`RocketRez orders API: ${r.status}`);
-    const data  = await r.json();
-    const batch = Array.isArray(data.data) ? data.data : [];
-    orders.push(...batch.filter(o => o.contactGroupName?.trim()));
-    if (batch.length < 250) break;
-    pageIndex++;
-  }
+  const raw    = await fetchOrdersRaw(startDate, endDate);
+  const orders = raw.filter(o => o.contactGroupName?.trim());
 
   const entry = { orders, fetchedAt: Date.now() };
   crewOrderCache.set(key, entry);
@@ -139,12 +86,6 @@ export async function fetchCrewOrders(startDate, endDate) {
   upsertOrders(orders).catch(e => console.error('crew order write-through:', e.message));
 
   return entry;
-}
-
-// A line item's revenue lives in rateTypes[].subTotal — li.subTotal doesn't
-// exist on RocketRez's response shape (can carry multiple rateTypes).
-export function rrLineItemRevenue(li) {
-  return (li.rateTypes || []).reduce((sum, rt) => sum + (rt.subTotal || 0), 0);
 }
 
 export function classifyCrewPayments(paymentMethods, orderTotal) {
@@ -165,13 +106,6 @@ export function classifyCrewPayments(paymentMethods, orderTotal) {
   const LABEL = { payroll: 'payroll_deduction', card: 'stripe', cash: 'cash', token: 'token', comp: 'comp' };
   const dominant = Object.entries(buckets).sort((a, b) => b[1] - a[1])[0];
   return { ...buckets, primary: LABEL[dominant[1] > 0 ? dominant[0] : 'comp'] };
-}
-
-export function orderPark(order) {
-  const office = (order.salesOfficeName || '').trim().toUpperCase();
-  if (office.startsWith('BB')) return 'BB';
-  if (office.startsWith('GI')) return 'GI';
-  return null;
 }
 
 // Normalize one RocketRez order into the stored/served row shape

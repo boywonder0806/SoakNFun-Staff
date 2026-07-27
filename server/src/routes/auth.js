@@ -34,6 +34,9 @@ pool.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_bot_access BOOLEA
 pool.query(
   'ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_tickets_access BOOLEAN NOT NULL DEFAULT FALSE'
 ).catch(e => console.error('auth migration (has_tickets_access):', e.message));
+pool.query(
+  'ALTER TABLE employees ADD COLUMN IF NOT EXISTS has_analytics_access BOOLEAN NOT NULL DEFAULT FALSE'
+).catch(e => console.error('auth migration (has_analytics_access):', e.message));
 
 pool.query(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id          SERIAL PRIMARY KEY,
@@ -63,7 +66,8 @@ router.post('/login', async (req, res) => {
                 COALESCE(is_hr_manager, FALSE) AS "isHrManager",
                 COALESCE(has_bot_access, FALSE) AS "hasBotAccess",
                 COALESCE(has_tickets_access, FALSE) AS "hasTicketsAccess",
-                COALESCE(has_staff_access, FALSE) AS "hasStaffAccess"
+                COALESCE(has_staff_access, FALSE) AS "hasStaffAccess",
+                COALESCE(has_analytics_access, FALSE) AS "hasAnalyticsAccess"
          FROM employees WHERE email = $1`,
         [email.toLowerCase().trim()]
       ));
@@ -84,6 +88,7 @@ router.post('/login', async (req, res) => {
           rows[0].hasBotAccess = false;
           rows[0].hasTicketsAccess = false;
           rows[0].hasStaffAccess = false;
+          rows[0].hasAnalyticsAccess = false;
         }
       } else {
         throw colErr;
@@ -147,7 +152,8 @@ router.post('/change-password', requireAuth, async (req, res) => {
                  COALESCE(is_hr_manager, FALSE) AS "isHrManager",
                  COALESCE(has_bot_access, FALSE) AS "hasBotAccess",
                  COALESCE(has_tickets_access, FALSE) AS "hasTicketsAccess",
-                 COALESCE(has_staff_access, FALSE) AS "hasStaffAccess"`,
+                 COALESCE(has_staff_access, FALSE) AS "hasStaffAccess",
+                 COALESCE(has_analytics_access, FALSE) AS "hasAnalyticsAccess"`,
       [hash, req.user.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'User not found' });

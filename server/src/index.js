@@ -18,8 +18,10 @@ import operationsRouter from './routes/operations.js';
 import hrRouter from './routes/hr.js';
 import bayoubotRouter from './routes/bayoubot.js';
 import ticketsRouter from './routes/tickets.js';
+import analyticsRouter from './routes/analytics.js';
 import { startCallbackDigestCron } from './cron/callbackDigest.js';
 import { startCrewOrderSyncCron } from './cron/crewOrderSync.js';
+import { startAnalyticsOrderSyncCron } from './cron/analyticsOrderSync.js';
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -33,9 +35,11 @@ const allowedOrigins = [
   process.env.BOT_URL         || 'http://localhost:5176',
   process.env.ADMIN_URL       || 'http://localhost:5177',
   process.env.TICKETS_URL     || 'http://localhost:5178',
+  process.env.ANALYTICS_URL   || 'http://localhost:5179',
   'https://admin.bluebayoustaff.com',
   'https://portal.bluebayoustaff.com',
   'https://tickets.bluebayoustaff.com',
+  'https://analytics.bluebayoustaff.com',
 ];
 
 app.use(cors({
@@ -69,6 +73,7 @@ app.use('/api/operations', operationsRouter);
 app.use('/api/hr',         hrRouter);
 app.use('/api/bayoubot',   bayoubotRouter);
 app.use('/api/tickets',    ticketsRouter);
+app.use('/api/analytics',  analyticsRouter);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'Blue Bayou Staff API' }));
 
@@ -80,6 +85,7 @@ if (process.env.NODE_ENV === 'production') {
   const botBuild       = path.join(__dirname, '../../bayoubot-client/dist');
   const adminBuild     = path.join(__dirname, '../../admin-client/dist');
   const ticketsBuild   = path.join(__dirname, '../../tickets-client/dist');
+  const analyticsBuild = path.join(__dirname, '../../analytics-client/dist');
 
   const serveClient    = express.static(clientBuild);
   const serveReception = express.static(receptionBuild);
@@ -87,6 +93,7 @@ if (process.env.NODE_ENV === 'production') {
   const serveBot       = express.static(botBuild);
   const serveAdmin     = express.static(adminBuild);
   const serveTickets   = express.static(ticketsBuild);
+  const serveAnalytics = express.static(analyticsBuild);
 
   app.use((req, res, next) => {
     const host = req.get('host') || '';
@@ -95,6 +102,7 @@ if (process.env.NODE_ENV === 'production') {
     if (host.startsWith('bot.'))       return serveBot(req, res, next);
     if (host.startsWith('admin.'))     return serveAdmin(req, res, next);
     if (host.startsWith('tickets.'))   return serveTickets(req, res, next);
+    if (host.startsWith('analytics.')) return serveAnalytics(req, res, next);
     if (host.startsWith('portal.'))    return serveClient(req, res, next);
     serveClient(req, res, next);
   });
@@ -111,6 +119,8 @@ if (process.env.NODE_ENV === 'production') {
       res.sendFile(path.join(adminBuild, 'index.html'));
     } else if (host.startsWith('tickets.')) {
       res.sendFile(path.join(ticketsBuild, 'index.html'));
+    } else if (host.startsWith('analytics.')) {
+      res.sendFile(path.join(analyticsBuild, 'index.html'));
     } else {
       res.sendFile(path.join(clientBuild, 'index.html'));
     }
@@ -121,4 +131,5 @@ app.listen(PORT, () => {
   console.log(`Blue Bayou Staff API running on http://localhost:${PORT}`);
   startCallbackDigestCron();
   startCrewOrderSyncCron();
+  startAnalyticsOrderSyncCron();
 });

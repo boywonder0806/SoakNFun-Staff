@@ -1155,6 +1155,7 @@ const ACCESS_COLUMNS = {
   reception:         'has_reception_access',
   bot:               'has_bot_access',
   tickets:           'has_tickets_access',
+  analytics:         'has_analytics_access',
   hr_manager:        'is_hr_manager',
   reception_manager: 'is_reception_manager',
 };
@@ -1179,7 +1180,8 @@ router.patch('/sysadmin/users/:id/access', requireSysAdmin, async (req, res) => 
                  COALESCE(is_reception_manager, FALSE) AS "isReceptionManager",
                  COALESCE(has_bot_access, FALSE) AS "hasBotAccess",
                  COALESCE(has_tickets_access, FALSE) AS "hasTicketsAccess",
-                 COALESCE(has_staff_access, FALSE) AS "hasStaffAccess"`,
+                 COALESCE(has_staff_access, FALSE) AS "hasStaffAccess",
+                 COALESCE(has_analytics_access, FALSE) AS "hasAnalyticsAccess"`,
       [access, empId]
     );
     if (!rows[0]) return res.status(404).json({ error: 'User not found' });
@@ -1203,7 +1205,8 @@ router.get('/sysadmin/users', requireSysAdmin, async (_req, res) => {
               COALESCE(is_hr_manager, FALSE) AS "isHrManager",
               COALESCE(has_bot_access, FALSE) AS "hasBotAccess",
               COALESCE(has_tickets_access, FALSE) AS "hasTicketsAccess",
-              COALESCE(has_staff_access, FALSE) AS "hasStaffAccess"
+              COALESCE(has_staff_access, FALSE) AS "hasStaffAccess",
+              COALESCE(has_analytics_access, FALSE) AS "hasAnalyticsAccess"
        FROM employees WHERE role != 'crew_member' ORDER BY name`
     );
     res.json({ users: rows });
@@ -1227,7 +1230,8 @@ router.get('/sysadmin/users/:id(\\d+)', requireSysAdmin, async (req, res) => {
               COALESCE(has_reception_access, FALSE) AS "hasReceptionAccess",
               COALESCE(is_reception_manager, FALSE) AS "isReceptionManager",
               COALESCE(has_bot_access, FALSE) AS "hasBotAccess",
-              COALESCE(has_tickets_access, FALSE) AS "hasTicketsAccess"
+              COALESCE(has_tickets_access, FALSE) AS "hasTicketsAccess",
+              COALESCE(has_analytics_access, FALSE) AS "hasAnalyticsAccess"
        FROM employees WHERE id = $1`,
       [parseInt(req.params.id)]
     );
