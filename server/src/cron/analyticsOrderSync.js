@@ -11,7 +11,7 @@ import { centralToday } from '../services/rocketrez.js';
  * frequency can't be both cheap and instantly correct for edits to old
  * orders, so this runs three tiers of decreasing frequency/window:
  *
- *   1. Every minute   — just today, so new sales show up ~immediately.
+ *   1. Every 5 min     — just today, so new sales show up quickly.
  *   2. Every 15 min    — trailing 7 days, to catch line items appended to
  *                        recent orders within a bounded delay.
  *   3. Nightly (5 AM)  — trailing 30 days, catching stragglers beyond that.
@@ -28,15 +28,15 @@ let todayJobRunning = false;
 let recentJobRunning = false;
 
 export function startAnalyticsOrderSyncCron() {
-  // Every minute: today only
-  cron.schedule('* * * * *', async () => {
+  // Every 5 minutes: today only
+  cron.schedule('*/5 * * * *', async () => {
     if (todayJobRunning) return; // don't stack if a prior run is still going
     todayJobRunning = true;
     try {
       const today = centralToday();
-      await syncRange(today, today, 'minute');
+      await syncRange(today, today, 'today');
     } catch (e) {
-      console.error('Analytics minute sync failed:', e.message);
+      console.error('Analytics today sync failed:', e.message);
     } finally {
       todayJobRunning = false;
     }
@@ -66,5 +66,5 @@ export function startAnalyticsOrderSyncCron() {
     ensureBackfilled().catch(e => console.error('Analytics order backfill failed:', e.message));
   }, 60_000);
 
-  console.log('Analytics order sync cron scheduled (1-min today, 15-min/7-day, nightly/30-day)');
+  console.log('Analytics order sync cron scheduled (5-min today, 15-min/7-day, nightly/30-day)');
 }
