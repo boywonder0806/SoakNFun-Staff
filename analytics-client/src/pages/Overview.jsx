@@ -9,12 +9,14 @@ import WeatherCard from '../components/WeatherCard.jsx';
 import ChartTooltip from '../components/ChartTooltip.jsx';
 
 // Fixed identity colors for attendance buckets — labels carry the identity,
-// color is reinforcement (palette slots 1/3/4/5).
+// color is reinforcement (palette slots, never reassigned by filters).
 const BUCKETS = [
-  { key: 'paid',        label: 'Paid Admission',   color: CATEGORICAL[0] },
+  { key: 'paid',        label: 'Paid Admission',     color: CATEGORICAL[0] },
   { key: 'passholders', label: 'Season Passholders', color: CATEGORICAL[2] },
-  { key: 'employees',   label: 'Employee Passes',  color: CATEGORICAL[3] },
-  { key: 'comps',       label: 'Comps & Promos',   color: CATEGORICAL[4] },
+  { key: 'groups',      label: 'Group Bookings',     color: CATEGORICAL[5] },
+  { key: 'employees',   label: 'Employee Passes',    color: CATEGORICAL[3] },
+  { key: 'comps',       label: 'Comps & Promos',     color: CATEGORICAL[4] },
+  { key: 'other',       label: 'Other',              color: '#9ca3af' },
 ];
 
 // The comparison window: yesterday for a single-day view, the preceding
@@ -121,7 +123,9 @@ export default function Overview() {
           label="Attendance" icon="🎟️" accent
           value={number(att.total)}
           delta={delta(att.total, prevDaily.attendance.total)}
-          sub={compareLabel}
+          sub={att.byPark?.length > 1
+            ? att.byPark.map(p => `${p.park} ${number(p.quantity)}`).join(' · ')
+            : compareLabel}
         />
         <KpiTile
           label="Per Cap (In-Park)" icon="💰" accent
@@ -139,7 +143,7 @@ export default function Overview() {
           label="Admissions Revenue" icon="🏷️"
           value={money(daily.admissions.revenue)}
           delta={delta(daily.admissions.revenue, prevDaily.admissions.revenue)}
-          sub={compareLabel}
+          sub={`GA ticket value · ${compareLabel}`}
         />
       </div>
 
@@ -176,7 +180,7 @@ export default function Overview() {
         >
           <ShareBar segments={BUCKETS.map(b => ({ value: att[b.key], color: b.color }))} />
           <div className="mt-4 space-y-2.5">
-            {BUCKETS.map(b => (
+            {BUCKETS.filter(b => att[b.key] > 0 || b.key === 'paid' || b.key === 'passholders').map(b => (
               <div key={b.key} className="flex items-center gap-2.5 text-sm">
                 <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: b.color }} />
                 <span className="text-gray-600">{b.label}</span>
@@ -187,6 +191,10 @@ export default function Overview() {
               </div>
             ))}
           </div>
+          <p className="mt-3 text-[11px] text-gray-400 leading-relaxed">
+            Counted by visit date from booked tickets, matching the RocketRez attendance report.
+            Guests booked for today who haven't scanned in yet are included.
+          </p>
 
           <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 gap-4">
             <div>

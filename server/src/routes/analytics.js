@@ -94,12 +94,18 @@ router.get('/revenue-trend', async (req, res) => {
 // GET /api/analytics/daily — the waterpark daily report: attendance &
 // ticketing, in-park spend, and per-cap, for the requested range.
 //
-// Attendance is counted from gate-entry line items (type = 'Rate'):
-// paid General Admission, season-pass redemptions, employee passes, and
-// comp/promo redemptions (Sunshine Ticket, Bring A Friend). Pass SALES are
-// type = 'Membership' and are revenue, not attendance. RevPAC and
-// labor-cost KPIs were deliberately left out — no park-capacity or wage
-// data exists in any connected system.
+// Attendance is counted the way RocketRez's own attendance report counts
+// it: gate-entry line items (type = 'Rate' on the park-admission event)
+// matched on the ticket's EVENT (visit) date — not the order's purchase
+// date. Advance web sales are bought days before the visit, so purchase
+// date under-counts today and over-counts future days. Money metrics
+// (in-park spend, pass sales, the revenue KPIs) stay on business_date —
+// they answer "what was collected in this range". Pass SALES are
+// type = 'Membership' and are revenue, not attendance. Remaining gap vs
+// the gate: the Orders API sees bookings, not turnstile scans, so
+// booked-but-not-yet-arrived guests are included. RevPAC and labor-cost
+// KPIs were deliberately left out — no park-capacity or wage data exists
+// in any connected system.
 router.get('/daily', async (req, res) => {
   try {
     const { start, end } = dateRange(req);
@@ -114,26 +120,38 @@ router.get('/daily', async (req, res) => {
       FROM analytics_order_line_items li
       JOIN analytics_orders o ON o.order_id = li.order_id
       WHERE o.status = 'Active' AND o.business_date BETWEEN $1 AND $2${parkSql}`;
+    // Visit-date basis for everything attendance-shaped
+    const gateJoin = `
+      FROM analytics_order_line_items li
+      JOIN analytics_orders o ON o.order_id = li.order_id
+      WHERE o.status = 'Active' AND li.type = 'Rate'
+        AND li.event_name ILIKE '%Admission%'
+        AND li.event_date BETWEEN $1 AND $2${parkSql}`;
 
-    const [attendance, gaByRate, channel, passSales, inPark] = await Promise.all([
+    const [attendance, attByPark, gaByRate, channel, passSales, inPark] = await Promise.all([
       pool.query(
         `SELECT
-           COALESCE(SUM(li.quantity) FILTER (WHERE li.name ILIKE '%General Admission Rate%'), 0)::int          AS "paid",
-           COALESCE(SUM(li.quantity) FILTER (WHERE li.name ILIKE '%Season Pass Redemption%'), 0)::int           AS "passholders",
-           COALESCE(SUM(li.quantity) FILTER (WHERE li.name ILIKE '%Employee Pass Redemption%'), 0)::int          AS "employees",
-           COALESCE(SUM(li.quantity) FILTER (WHERE li.name ILIKE '%Sunshine Ticket%'
-                                          OR li.name ILIKE '%Bring A Friend%'), 0)::int                          AS "comps"
-         ${baseJoin}
-           AND li.type = 'Rate'
-           AND (li.name ILIKE '%General Admission Rate%' OR li.name ILIKE '%Park Admission%'
-                OR li.name ILIKE '%Sunshine Ticket%' OR li.name ILIKE '%Bring A Friend%')`,
+           COALESCE(SUM(li.quantity), 0)::int                                                                   AS "total",
+           COALESCE(SUM(li.quantity) FILTER (WHERE li.name ILIKE '%General Admission Rate%'), 0)::int            AS "paid",
+           COALESCE(SUM(li.quantity) FILTER (WHERE li.name ILIKE '%Season Pass Redemption%'), 0)::int             AS "passholders",
+           COALESCE(SUM(li.quantity) FILTER (WHERE li.name ILIKE '%Employee Pass Redemption%'), 0)::int            AS "employees",
+           COALESCE(SUM(li.quantity) FILTER (WHERE li.name ILIKE '%Group%'), 0)::int                               AS "groups",
+           COALESCE(SUM(li.quantity) FILTER (WHERE li.name ILIKE '%Sunshine Ticket%' OR li.name ILIKE '%Bring A Friend%'
+                                          OR li.name ILIKE '%Comp Ticket%'), 0)::int                               AS "comps"
+         ${gateJoin}`,
+        params
+      ),
+      pool.query(
+        `SELECT o.park AS "park", SUM(li.quantity)::int AS "quantity"
+         ${gateJoin} AND o.park IS NOT NULL
+         GROUP BY o.park ORDER BY o.park`,
         params
       ),
       pool.query(
         `SELECT li.rate_type                        AS "rateType",
                 SUM(li.quantity)::int                AS "quantity",
                 COALESCE(SUM(li.subtotal), 0)::float  AS "revenue"
-         ${baseJoin} AND li.type = 'Rate' AND li.name ILIKE '%General Admission Rate%'
+         ${gateJoin} AND li.name ILIKE '%General Admission Rate%'
          GROUP BY li.rate_type ORDER BY "revenue" DESC`,
         params
       ),
@@ -141,7 +159,7 @@ router.get('/daily', async (req, res) => {
         `SELECT o.is_web_order                       AS "isWebOrder",
                 SUM(li.quantity)::int                 AS "quantity",
                 COALESCE(SUM(li.subtotal), 0)::float   AS "revenue"
-         ${baseJoin} AND li.type = 'Rate' AND li.name ILIKE '%General Admission Rate%'
+         ${gateJoin} AND li.name ILIKE '%General Admission Rate%'
          GROUP BY o.is_web_order`,
         params
       ),
@@ -165,7 +183,10 @@ router.get('/daily', async (req, res) => {
     ]);
 
     const att = attendance.rows[0];
-    const totalAttendance = att.paid + att.passholders + att.employees + att.comps;
+    const totalAttendance = att.total;
+    // Anything on the admission event that didn't match a bucket pattern —
+    // surfaced instead of silently dropped, so new ticket types show up.
+    const other = Math.max(0, totalAttendance - (att.paid + att.passholders + att.employees + att.groups + att.comps));
     const ip = inPark.rows[0];
     const inParkTotal = ip.fnb + ip.rentals + ip.merch;
     const gaRevenue = gaByRate.rows.reduce((s, r) => s + r.revenue, 0);
@@ -174,7 +195,7 @@ router.get('/daily', async (req, res) => {
     const gate = channel.rows.find(r => !r.isWebOrder) || { quantity: 0, revenue: 0 };
 
     res.json({
-      attendance: { total: totalAttendance, ...att,
+      attendance: { ...att, other, byPark: attByPark.rows,
                     passholderShare: totalAttendance ? att.passholders / totalAttendance : 0 },
       admissions: { revenue: gaRevenue, byRateType: gaByRate.rows,
                     channels: { online: { quantity: web.quantity, revenue: web.revenue },
