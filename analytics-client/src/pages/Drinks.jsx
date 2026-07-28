@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../lib/api.js';
 import { useFilters } from '../context/FiltersContext.jsx';
 import { money, moneyPrecise, number, shortDate } from '../lib/format.js';
@@ -15,8 +15,6 @@ const CATEGORIES = [
   { key: 'bottled',   label: 'Bottled & Water',  color: CATEGORICAL[3] },
   { key: 'other',     label: 'Other',            color: '#9ca3af' },
 ];
-const PAID_COLOR = CATEGORICAL[0];
-const FREE_COLOR = CATEGORICAL[1];
 
 function SectionCard({ title, right, children }) {
   return (
@@ -58,39 +56,42 @@ export default function Drinks() {
 
   if (!data) return loading ? <LoadingBlock /> : <div className="text-sm text-gray-400">Failed to load.</div>;
 
-  const { categories, channels, freeSubsidy, byProduct, trend, granularity, freeByCustomer, attendance } = data;
-  const freeQty = channels.crew.quantity + channels.comp.quantity;
-  const per100 = attendance ? (channels.paid.quantity / attendance) * 100 : 0;
+  const { categories, totals, byProduct, trend, granularity, attendance } = data;
+  const per100 = attendance ? (totals.quantity / attendance) * 100 : 0;
+  const avgPrice = totals.quantity ? totals.revenue / totals.quantity : 0;
 
   return (
     <div className="relative space-y-4">
       <LoadingOverlay show={loading} />
 
-      <div className="flex items-center gap-2 text-xs text-gray-500">
+      <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
         <span className="px-2 py-0.5 rounded-full bg-az/10 text-az-dark font-semibold">Blue Bayou only</span>
-        <span>Drink sales across all BB outlets — the park filter doesn't apply here.</span>
+        <span>
+          Purchased guest drinks across all BB outlets — crew drinks and register comps are excluded,
+          and the free soda stations aren't rung up anywhere, so they can't be counted.
+        </span>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiTile
           label="Drink Revenue" icon="🍹" accent
-          value={money(channels.paid.revenue)}
-          sub={`${number(channels.paid.quantity)} drinks sold`}
+          value={money(totals.revenue)}
+          sub="purchased drinks only"
         />
         <KpiTile
-          label="Drinks per 100 Guests" icon="🥤" accent
+          label="Drinks Sold" icon="🥤" accent
+          value={number(totals.quantity)}
+          sub={`avg ${moneyPrecise(avgPrice)} per drink`}
+        />
+        <KpiTile
+          label="Drinks per 100 Guests" icon="🎯"
           value={per100.toFixed(1)}
           sub={`${number(attendance)} guests in range`}
         />
         <KpiTile
-          label="Free & Crew Drinks" icon="🎁"
-          value={number(freeQty)}
-          sub={`${number(channels.crew.quantity)} crew · ${number(channels.comp.quantity)} comped`}
-        />
-        <KpiTile
-          label="Giveaway Value" icon="🏷️"
-          value={money(freeSubsidy)}
-          sub={`retail value given away · crew paid ${money(channels.crew.revenue)}`}
+          label="Alcohol Share" icon="🍺"
+          value={`${totals.revenue ? Math.round(((categories.alcoholic?.revenue || 0) / totals.revenue) * 100) : 0}%`}
+          sub={`${money(categories.alcoholic?.revenue || 0)} of drink revenue`}
         />
       </div>
 
@@ -99,14 +100,11 @@ export default function Drinks() {
           <ShareBar segments={CATEGORIES.map(c => ({ value: categories[c.key]?.revenue || 0, color: c.color }))} />
           <div className="mt-4 space-y-2.5">
             {CATEGORIES.map(c => {
-              const cat = categories[c.key] || { quantity: 0, revenue: 0, freeQty: 0 };
+              const cat = categories[c.key] || { quantity: 0, revenue: 0 };
               return (
                 <div key={c.key} className="flex items-center gap-2.5 text-sm">
                   <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: c.color }} />
                   <span className="text-gray-600">{c.label}</span>
-                  {cat.freeQty > 0 && (
-                    <span className="text-[11px] text-gray-400">+{number(cat.freeQty)} free</span>
-                  )}
                   <span className="ml-auto text-xs text-gray-400 tabular-nums">{number(cat.quantity)} sold</span>
                   <span className="w-20 text-right font-semibold text-gray-900 tabular-nums">{money(cat.revenue)}</span>
                 </div>
@@ -119,90 +117,62 @@ export default function Drinks() {
         </SectionCard>
 
         <SectionCard
-          title={granularity === 'hour' ? 'Paid vs Free by Hour' : 'Paid vs Free by Day'}
+          title={granularity === 'hour' ? 'Drinks Sold by Hour' : 'Drinks Sold by Day'}
           right={<span className="text-xs text-gray-400">drinks</span>}
         >
           {trend.length === 0 ? (
             <p className="text-sm text-gray-400 py-10 text-center">No drink sales in this range.</p>
           ) : (
             <ResponsiveContainer width="100%" height={240}>
-              <ComposedChart data={trend} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <BarChart data={trend} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
                 <XAxis dataKey="bucket" tickFormatter={granularity === 'hour' ? undefined : shortDate}
                        tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={{ stroke: '#e5e7eb' }} tickLine={false} />
                 <YAxis tickFormatter={number} tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} width={48} />
                 <Tooltip content={<ChartTooltip
-                  formatter={(v, name) => name === 'Paid revenue' ? money(v) : number(v)}
+                  formatter={(v, name) => name === 'Revenue' ? money(v) : number(v)}
                   labelFormatter={granularity === 'hour' ? undefined : shortDate} />} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="paidQty" name="Paid drinks" fill={PAID_COLOR} radius={[4, 4, 0, 0]} maxBarSize={28} />
-                <Bar dataKey="freeQty" name="Free & crew" fill={FREE_COLOR} radius={[4, 4, 0, 0]} maxBarSize={28} />
-              </ComposedChart>
+                <Bar dataKey="quantity" name="Drinks sold" fill={CATEGORICAL[0]} radius={[4, 4, 0, 0]} maxBarSize={32} />
+              </BarChart>
             </ResponsiveContainer>
           )}
         </SectionCard>
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-4">
-        <SectionCard title="Products" right={<span className="text-xs text-gray-400">{byProduct.length} drink products</span>}>
-          <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-[11px] text-gray-400 uppercase tracking-wide">
-                  <th className="text-left font-semibold px-1 pb-2">Product</th>
-                  <th className="text-right font-semibold px-1 pb-2">Sold</th>
-                  <th className="text-right font-semibold px-1 pb-2">Revenue</th>
-                  <th className="text-right font-semibold px-1 pb-2">Free/Crew</th>
-                </tr>
-              </thead>
-              <tbody>
-                {byProduct.map(p => {
-                  const cat = CATEGORIES.find(c => c.key === p.category);
-                  return (
-                    <tr key={p.name} className="border-t border-gray-50">
-                      <td className="px-1 py-1.5">
-                        <span className="inline-block w-2 h-2 rounded-full mr-2" style={{ background: cat?.color }} />
-                        <span className="text-gray-700">{p.name}</span>
-                      </td>
-                      <td className="px-1 py-1.5 text-right tabular-nums text-gray-600">{number(p.paidQty)}</td>
-                      <td className="px-1 py-1.5 text-right tabular-nums font-medium text-gray-900">{money(p.paidRevenue)}</td>
-                      <td className="px-1 py-1.5 text-right tabular-nums text-gray-400">
-                        {p.crewQty + p.compQty > 0 ? number(p.crewQty + p.compQty) : '—'}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          title="Free & Crew Drinks by Person"
-          right={<span className="text-xs text-gray-400">{money(freeSubsidy)} given away</span>}
-        >
-          {freeByCustomer.length === 0 ? (
-            <p className="text-sm text-gray-400 py-10 text-center">No free or crew drinks in this range.</p>
-          ) : (
-            <div className="space-y-1.5">
-              {freeByCustomer.map(c => (
-                <div key={c.customer} className="flex items-center gap-2.5 text-sm">
-                  <span className="text-gray-600 truncate">{c.customer}</span>
-                  <span className="text-[11px] text-gray-400 shrink-0">{c.orders} order{c.orders === 1 ? '' : 's'}</span>
-                  <span className="ml-auto font-semibold text-gray-900 tabular-nums shrink-0">{number(c.quantity)}</span>
-                  <span className="w-20 text-right text-xs text-gray-400 tabular-nums shrink-0 whitespace-nowrap">
-                    {c.collected > 0 ? `${moneyPrecise(c.collected)} paid` : 'free'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-          <p className="mt-3 text-[11px] text-gray-400 leading-relaxed">
-            Crew drinks come through BB Crew Kitchen under the crew member's name; "Unattributed"
-            means the register order had no customer attached.
-          </p>
-        </SectionCard>
-      </div>
+      <SectionCard title="Products" right={<span className="text-xs text-gray-400">{byProduct.length} drink products</span>}>
+        <div className="overflow-x-auto -mx-1">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-[11px] text-gray-400 uppercase tracking-wide">
+                <th className="text-left font-semibold px-1 pb-2">Product</th>
+                <th className="text-left font-semibold px-1 pb-2">Category</th>
+                <th className="text-right font-semibold px-1 pb-2">Sold</th>
+                <th className="text-right font-semibold px-1 pb-2">Avg Price</th>
+                <th className="text-right font-semibold px-1 pb-2">Revenue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byProduct.map(p => {
+                const cat = CATEGORIES.find(c => c.key === p.category);
+                return (
+                  <tr key={p.name} className="border-t border-gray-50">
+                    <td className="px-1 py-1.5 text-gray-700">{p.name}</td>
+                    <td className="px-1 py-1.5">
+                      <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: cat?.color }} />
+                      <span className="text-xs text-gray-500">{cat?.label}</span>
+                    </td>
+                    <td className="px-1 py-1.5 text-right tabular-nums text-gray-600">{number(p.quantity)}</td>
+                    <td className="px-1 py-1.5 text-right tabular-nums text-gray-400">
+                      {p.quantity ? moneyPrecise(p.revenue / p.quantity) : '—'}
+                    </td>
+                    <td className="px-1 py-1.5 text-right tabular-nums font-medium text-gray-900">{money(p.revenue)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
     </div>
   );
 }

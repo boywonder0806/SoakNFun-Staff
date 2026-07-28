@@ -233,39 +233,29 @@ router.get('/daily', async (req, res) => {
 // GET /api/analytics/drinks — the Blue Bayou beverage report. BB-only by
 // design (the drink program lives there), so the park filter is ignored.
 //
-// Products are bucketed by name pattern: alcoholic (daiquiris, beer, seltzer,
-// cocktails — '%Cocktail%' safely misses 'Mocktail'), frozen (lemonade /
-// melonade), bottled (drinks, water, Gatorade), other (dirty soda, mocktails,
-// crew cups). Souvenir cups and floats are deliberately excluded (owner's
-// call — the refillable-cup program and ice-cream floats aren't drink
-// factors here).
-//
-// Channel is the paid-vs-free axis: 'crew' for the (BB Employee)-priced
-// variants (contact_group_name carries the crew member), 'comp' for $0
-// giveaways, 'paid' otherwise. Free retail value is estimated client-side
-// from each product's paid unit price.
+// Purchased guest drinks only. Products are bucketed by name pattern:
+// alcoholic (daiquiris, beer, seltzer, cocktails — '%Cocktail%' safely
+// misses 'Mocktail'), frozen (lemonade / melonade), bottled (drinks, water,
+// Gatorade), other (dirty soda, mocktails). Deliberately excluded (owner's
+// call): souvenir cups, floats, all '(BB Employee)' crew-priced items, and
+// $0 register comps. The park's free soda stations aren't rung up in
+// RocketRez at all, so they can't be reported on from any connected system.
 const DRINK_CTE = `
   WITH drink_items AS (
-    SELECT li.name, li.quantity, li.subtotal, li.price,
-           o.order_id, o.business_date, o.created_date,
-           o.contact_group_name, o.primary_contact_name,
+    SELECT li.name, li.quantity, li.subtotal,
+           o.business_date, o.created_date,
       CASE
         WHEN li.name ILIKE 'Daiquiri%' OR li.name ILIKE 'Beer (%'
           OR li.name ILIKE 'Seltzer%' OR li.name ILIKE '%Cocktail%'          THEN 'alcoholic'
         WHEN li.name ILIKE 'Frozen Lemonade%' OR li.name ILIKE 'Frozen Melonade%' THEN 'frozen'
         WHEN li.name ILIKE 'Bottled Drink%' OR li.name ILIKE 'Bottled Water%'
           OR li.name ILIKE 'Bottle Drink%' OR li.name ILIKE '%Gatorade%'      THEN 'bottled'
-        WHEN li.name ILIKE 'Crew Drink Cup%' OR li.name ILIKE 'Dirty Soda%'
-          OR li.name ILIKE 'Mocktail%'                                        THEN 'other'
-      END AS category,
-      CASE
-        WHEN li.name ILIKE '%(BB Employee)%' THEN 'crew'
-        WHEN li.subtotal = 0                 THEN 'comp'
-        ELSE 'paid'
-      END AS channel
+        WHEN li.name ILIKE 'Dirty Soda%' OR li.name ILIKE 'Mocktail%'          THEN 'other'
+      END AS category
     FROM analytics_order_line_items li
     JOIN analytics_orders o ON o.order_id = li.order_id
     WHERE o.status = 'Active' AND o.park = 'BB' AND o.business_date BETWEEN $1 AND $2
+      AND li.name NOT ILIKE '%(BB Employee)%' AND li.subtotal > 0
   )`;
 
 router.get('/drinks', async (req, res) => {
@@ -276,46 +266,28 @@ router.get('/drinks', async (req, res) => {
 
     const trendSql = singleDay
       ? `SELECT to_char(date_trunc('hour', created_date AT TIME ZONE 'America/Chicago'), 'FMHH12AM') AS "bucket",
-                COALESCE(SUM(quantity) FILTER (WHERE channel = 'paid'), 0)::int     AS "paidQty",
-                COALESCE(SUM(subtotal) FILTER (WHERE channel = 'paid'), 0)::float    AS "paidRevenue",
-                COALESCE(SUM(quantity) FILTER (WHERE channel <> 'paid'), 0)::int      AS "freeQty"
+                COALESCE(SUM(quantity), 0)::int   AS "quantity",
+                COALESCE(SUM(subtotal), 0)::float  AS "revenue"
          FROM drink_items WHERE category IS NOT NULL
          GROUP BY date_trunc('hour', created_date AT TIME ZONE 'America/Chicago')
          ORDER BY date_trunc('hour', created_date AT TIME ZONE 'America/Chicago')`
-      : `SELECT business_date::text                                                  AS "bucket",
-                COALESCE(SUM(quantity) FILTER (WHERE channel = 'paid'), 0)::int     AS "paidQty",
-                COALESCE(SUM(subtotal) FILTER (WHERE channel = 'paid'), 0)::float    AS "paidRevenue",
-                COALESCE(SUM(quantity) FILTER (WHERE channel <> 'paid'), 0)::int      AS "freeQty"
+      : `SELECT business_date::text                AS "bucket",
+                COALESCE(SUM(quantity), 0)::int   AS "quantity",
+                COALESCE(SUM(subtotal), 0)::float  AS "revenue"
          FROM drink_items WHERE category IS NOT NULL
          GROUP BY 1 ORDER BY 1`;
 
-    const [byProduct, trend, freeByCustomer, attendance] = await Promise.all([
+    const [byProduct, trend, attendance] = await Promise.all([
       pool.query(
         `${DRINK_CTE}
          SELECT name, category,
-                COALESCE(SUM(quantity) FILTER (WHERE channel = 'paid'), 0)::int    AS "paidQty",
-                COALESCE(SUM(subtotal) FILTER (WHERE channel = 'paid'), 0)::float   AS "paidRevenue",
-                COALESCE(SUM(quantity) FILTER (WHERE channel = 'crew'), 0)::int      AS "crewQty",
-                COALESCE(SUM(subtotal) FILTER (WHERE channel = 'crew'), 0)::float     AS "crewRevenue",
-                COALESCE(SUM(quantity) FILTER (WHERE channel = 'comp'), 0)::int        AS "compQty",
-                COALESCE(MAX(price) FILTER (WHERE channel = 'paid' AND price > 0),
-                         MAX(price), 0)::float                                          AS "unitPrice"
+                SUM(quantity)::int                 AS "quantity",
+                COALESCE(SUM(subtotal), 0)::float   AS "revenue"
          FROM drink_items WHERE category IS NOT NULL
-         GROUP BY name, category ORDER BY "paidRevenue" DESC`,
+         GROUP BY name, category ORDER BY "revenue" DESC`,
         params
       ),
       pool.query(`${DRINK_CTE} ${trendSql}`, params),
-      pool.query(
-        `${DRINK_CTE}
-         SELECT COALESCE(NULLIF(TRIM(contact_group_name), ''),
-                         NULLIF(TRIM(primary_contact_name), ''), 'Unattributed') AS "customer",
-                SUM(quantity)::int                                                 AS "quantity",
-                COALESCE(SUM(subtotal), 0)::float                                   AS "collected",
-                COUNT(DISTINCT order_id)::int                                        AS "orders"
-         FROM drink_items WHERE category IS NOT NULL AND channel <> 'paid'
-         GROUP BY 1 ORDER BY "quantity" DESC LIMIT 20`,
-        params
-      ),
       pool.query(
         `SELECT COALESCE(SUM(li.quantity), 0)::int AS "total"
          FROM analytics_order_line_items li
@@ -327,27 +299,20 @@ router.get('/drinks', async (req, res) => {
     ]);
 
     const categories = {};
-    const channels = { paid: { quantity: 0, revenue: 0 }, crew: { quantity: 0, revenue: 0 }, comp: { quantity: 0, revenue: 0 } };
-    let freeRetailValue = 0;
+    const totals = { quantity: 0, revenue: 0 };
     for (const p of byProduct.rows) {
-      const c = categories[p.category] ||= { quantity: 0, revenue: 0, freeQty: 0 };
-      c.quantity += p.paidQty;
-      c.revenue  += p.paidRevenue;
-      c.freeQty  += p.crewQty + p.compQty;
-      channels.paid.quantity += p.paidQty;  channels.paid.revenue += p.paidRevenue;
-      channels.crew.quantity += p.crewQty;  channels.crew.revenue += p.crewRevenue;
-      channels.comp.quantity += p.compQty;
-      freeRetailValue += p.unitPrice * (p.crewQty + p.compQty);
+      const c = categories[p.category] ||= { quantity: 0, revenue: 0 };
+      c.quantity += p.quantity;
+      c.revenue  += p.revenue;
+      totals.quantity += p.quantity;
+      totals.revenue  += p.revenue;
     }
 
     res.json({
-      categories, channels,
-      // What the giveaway would have sold for, minus what crew actually paid
-      freeSubsidy: Math.max(0, freeRetailValue - channels.crew.revenue),
+      categories, totals,
       byProduct: byProduct.rows,
       trend: trend.rows,
       granularity: singleDay ? 'hour' : 'day',
-      freeByCustomer: freeByCustomer.rows,
       attendance: attendance.rows[0].total,
     });
   } catch (err) {
