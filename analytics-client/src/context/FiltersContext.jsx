@@ -15,7 +15,7 @@ function daysAgo(n) {
 export function FiltersProvider({ children }) {
   const [startDate, setStartDate] = useState(centralToday());
   const [endDate, setEndDate]     = useState(centralToday());
-  const [park, setPark]           = useState('ALL'); // ALL | BB | GI
+  const [park, setPark]           = useState('BB'); // ALL | BB | GI — defaults to Blue Bayou
 
   const params = useMemo(() => {
     const p = { startDate, endDate };
