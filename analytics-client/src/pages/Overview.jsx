@@ -7,6 +7,7 @@ import { CATEGORICAL } from '../lib/palette.js';
 import KpiTile, { DeltaChip } from '../components/KpiTile.jsx';
 import WeatherCard from '../components/WeatherCard.jsx';
 import ChartTooltip from '../components/ChartTooltip.jsx';
+import LoadingOverlay from '../components/LoadingOverlay.jsx';
 
 // Fixed identity colors for attendance buckets — labels carry the identity,
 // color is reinforcement (palette slots, never reassigned by filters).
@@ -115,7 +116,8 @@ export default function Overview() {
   const chTotal = ch.online.quantity + ch.gate.quantity || 1;
 
   return (
-    <div className="space-y-4">
+    <div className="relative space-y-4">
+      <LoadingOverlay show={loading} />
       <WeatherCard />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

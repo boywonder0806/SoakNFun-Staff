@@ -5,6 +5,7 @@ import { useFilters } from '../context/FiltersContext.jsx';
 import { money, number } from '../lib/format.js';
 import { CATEGORICAL } from '../lib/palette.js';
 import ChartTooltip from '../components/ChartTooltip.jsx';
+import LoadingOverlay, { LoadingBlock } from '../components/LoadingOverlay.jsx';
 
 const METRICS = [
   { value: 'revenue', label: 'Revenue', formatter: money },
@@ -28,7 +29,8 @@ export default function ProductMix() {
   const top15 = [...rows].sort((a, b) => b[metric] - a[metric]).slice(0, 15).reverse();
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6">
+      <LoadingOverlay show={loading && rows.length > 0} />
       <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-lg p-1 w-fit">
         {METRICS.map(m => (
           <button
@@ -45,8 +47,8 @@ export default function ProductMix() {
 
       <div className="card p-5">
         <p className="text-sm font-semibold text-gray-700 mb-4">Top Products — Top 15 by {active.label}</p>
-        {loading ? (
-          <div className="h-96 flex items-center justify-center text-sm text-gray-400">Loading…</div>
+        {rows.length === 0 && loading ? (
+          <LoadingBlock h="h-96" />
         ) : top15.length === 0 ? (
           <p className="text-sm text-gray-400 py-12 text-center">No line items in this range.</p>
         ) : (
