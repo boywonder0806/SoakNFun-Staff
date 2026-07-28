@@ -143,10 +143,23 @@ export default function Overview() {
   const compareLabel = singleDay ? 'vs yesterday' : `vs previous ${data.prevDays} days`;
   const ch = daily.admissions.channels;
   const chTotal = ch.online.quantity + ch.gate.quantity || 1;
-  const lockersMissing = daily.inPark.lockersMissing || [];
-  const lockersWarning = lockersMissing.length
-    ? `${lockersMissing.join(' & ')} Nayax lockers not entered yet — understated`
-    : null;
+  // Nayax locker totals are entered manually — warn when the range has
+  // days without an entry. Single day reads as "not finalized"; a range
+  // with some days entered reads as partial.
+  const lockersIncomplete = (daily.inPark.lockerStatus || []).filter(s => s.missingDays > 0);
+  let lockersWarning = null;
+  let lockersChip = null;
+  if (lockersIncomplete.length) {
+    const parks = lockersIncomplete.map(s => s.park).join(' & ');
+    if (singleDay) {
+      lockersWarning = `Locker sales not finalized${lockersIncomplete.length > 1 ? ` (${parks})` : ''}`;
+      lockersChip = 'Lockers not finalized';
+    } else {
+      const parts = lockersIncomplete.map(s => `${s.park} ${s.missingDays} of ${s.operatingDays} days`);
+      lockersWarning = `Partial locker sales — missing ${parts.join(', ')}`;
+      lockersChip = 'Partial locker sales';
+    }
+  }
 
   return (
     <div className="relative space-y-4">
@@ -283,7 +296,7 @@ export default function Overview() {
               {[
                 { label: 'Food & Beverage', value: daily.inPark.fnb,     prev: prevDaily.inPark.fnb,     color: CATEGORICAL[0] },
                 { label: 'Rentals (lockers & cabanas)', value: daily.inPark.rentals, prev: prevDaily.inPark.rentals, color: CATEGORICAL[2],
-                  chip: lockersMissing.length ? `${lockersMissing.join(' & ')} Nayax pending` : null },
+                  chip: lockersChip },
                 { label: 'Merchandise', value: daily.inPark.merch,        prev: prevDaily.inPark.merch,   color: CATEGORICAL[4] },
               ].map(r => (
                 <div key={r.label} className="flex items-center gap-2.5">
