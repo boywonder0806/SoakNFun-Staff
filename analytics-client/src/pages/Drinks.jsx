@@ -13,7 +13,6 @@ const CATEGORIES = [
   { key: 'alcoholic', label: 'Alcoholic',        color: CATEGORICAL[0] },
   { key: 'frozen',    label: 'Frozen',           color: CATEGORICAL[2] },
   { key: 'bottled',   label: 'Bottled & Water',  color: CATEGORICAL[3] },
-  { key: 'fountain',  label: 'Souvenir Cups',    color: CATEGORICAL[4] },
   { key: 'other',     label: 'Other',            color: '#9ca3af' },
 ];
 const PAID_COLOR = CATEGORICAL[0];
@@ -115,8 +114,7 @@ export default function Drinks() {
             })}
           </div>
           <p className="mt-3 text-[11px] text-gray-400 leading-relaxed">
-            Souvenir cups are the refillable-cup program (cup sales — refills aren't rung up).
-            Daiquiris count as alcoholic, not frozen.
+            Daiquiris count as alcoholic, not frozen. Souvenir cups and floats are excluded.
           </p>
         </SectionCard>
 

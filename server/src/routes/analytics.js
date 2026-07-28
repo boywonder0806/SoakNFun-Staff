@@ -235,9 +235,10 @@ router.get('/daily', async (req, res) => {
 //
 // Products are bucketed by name pattern: alcoholic (daiquiris, beer, seltzer,
 // cocktails — '%Cocktail%' safely misses 'Mocktail'), frozen (lemonade /
-// melonade), bottled (drinks, water, Gatorade), fountain (souvenir-cup
-// program + crew cups), other (floats, dirty soda, mocktails). GA-with-cup
-// bundles are type 'Rate' and stay out — they're admissions revenue.
+// melonade), bottled (drinks, water, Gatorade), other (dirty soda, mocktails,
+// crew cups). Souvenir cups and floats are deliberately excluded (owner's
+// call — the refillable-cup program and ice-cream floats aren't drink
+// factors here).
 //
 // Channel is the paid-vs-free axis: 'crew' for the (BB Employee)-priced
 // variants (contact_group_name carries the crew member), 'comp' for $0
@@ -254,9 +255,7 @@ const DRINK_CTE = `
         WHEN li.name ILIKE 'Frozen Lemonade%' OR li.name ILIKE 'Frozen Melonade%' THEN 'frozen'
         WHEN li.name ILIKE 'Bottled Drink%' OR li.name ILIKE 'Bottled Water%'
           OR li.name ILIKE 'Bottle Drink%' OR li.name ILIKE '%Gatorade%'      THEN 'bottled'
-        WHEN (li.name ILIKE '%Souvenir Cup%' AND li.type = 'Product')
-          OR li.name ILIKE 'Crew Drink Cup%'                                  THEN 'fountain'
-        WHEN li.name ILIKE 'Float%' OR li.name ILIKE 'Dirty Soda%'
+        WHEN li.name ILIKE 'Crew Drink Cup%' OR li.name ILIKE 'Dirty Soda%'
           OR li.name ILIKE 'Mocktail%'                                        THEN 'other'
       END AS category,
       CASE
