@@ -4,48 +4,153 @@ import api from '../lib/api.js';
 import { useFilters } from '../context/FiltersContext.jsx';
 import { money, moneyPrecise, number, shortDate } from '../lib/format.js';
 import { CATEGORICAL } from '../lib/palette.js';
-import KpiTile from '../components/KpiTile.jsx';
+import KpiTile, { DeltaChip } from '../components/KpiTile.jsx';
+import WeatherCard from '../components/WeatherCard.jsx';
 import ChartTooltip from '../components/ChartTooltip.jsx';
+
+// Fixed identity colors for attendance buckets — labels carry the identity,
+// color is reinforcement (palette slots 1/3/4/5).
+const BUCKETS = [
+  { key: 'paid',        label: 'Paid Admission',   color: CATEGORICAL[0] },
+  { key: 'passholders', label: 'Season Passholders', color: CATEGORICAL[2] },
+  { key: 'employees',   label: 'Employee Passes',  color: CATEGORICAL[3] },
+  { key: 'comps',       label: 'Comps & Promos',   color: CATEGORICAL[4] },
+];
+
+// The comparison window: yesterday for a single-day view, the preceding
+// same-length window for a range.
+function previousRange(startDate, endDate) {
+  const s = new Date(`${startDate}T12:00:00Z`);
+  const e = new Date(`${endDate}T12:00:00Z`);
+  const days = Math.round((e - s) / 86_400_000) + 1;
+  const fmt = d => d.toISOString().slice(0, 10);
+  return {
+    startDate: fmt(new Date(s.getTime() - days * 86_400_000)),
+    endDate:   fmt(new Date(e.getTime() - days * 86_400_000)),
+    days,
+  };
+}
+
+function delta(cur, prev) {
+  if (!prev) return null;
+  return (cur - prev) / prev;
+}
+
+function Skeleton({ h = 'h-24' }) {
+  return <div className={`card ${h} animate-pulse bg-gray-100/70`} />;
+}
+
+function SectionCard({ title, right, children }) {
+  return (
+    <div className="card p-5">
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-sm font-semibold text-gray-700">{title}</p>
+        {right}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function ShareBar({ segments }) {
+  const total = segments.reduce((s, x) => s + x.value, 0) || 1;
+  return (
+    <div className="flex h-2.5 rounded-full overflow-hidden bg-gray-100 gap-px">
+      {segments.filter(s => s.value > 0).map((s, i) => (
+        <div key={i} style={{ width: `${(s.value / total) * 100}%`, background: s.color }} />
+      ))}
+    </div>
+  );
+}
 
 export default function Overview() {
   const { params } = useFilters();
-  const [overview, setOverview] = useState(null);
-  const [trend, setTrend]       = useState([]);
-  const [loading, setLoading]   = useState(true);
+  const [data, setData]       = useState(null); // { daily, overview, prevDaily, prevOverview, trend, granularity }
+  const [loading, setLoading] = useState(true);
+
+  const singleDay = params.startDate === params.endDate;
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
+    const prev = previousRange(params.startDate, params.endDate);
+    const prevParams = { ...params, startDate: prev.startDate, endDate: prev.endDate };
+    const granularity = singleDay ? 'hour' : 'day';
+
     Promise.all([
+      api.get('/analytics/daily',    { params }),
       api.get('/analytics/overview', { params }),
-      api.get('/analytics/revenue-trend', { params: { ...params, granularity: 'day' } }),
+      api.get('/analytics/daily',    { params: prevParams }),
+      api.get('/analytics/overview', { params: prevParams }),
+      api.get('/analytics/revenue-trend', { params: { ...params, granularity } }),
     ])
-      .then(([o, t]) => { setOverview(o.data); setTrend(t.data.rows); })
-      .finally(() => setLoading(false));
+      .then(([d, o, pd, po, t]) => {
+        if (cancelled) return;
+        setData({ daily: d.data, overview: o.data, prevDaily: pd.data, prevOverview: po.data,
+                  trend: t.data.rows, granularity, prevDays: prev.days });
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [params.startDate, params.endDate, params.park]);
 
-  if (loading && !overview) {
-    return <div className="text-sm text-gray-400">Loading…</div>;
+  if (loading && !data) {
+    return (
+      <div className="space-y-4">
+        <Skeleton h="h-20" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <Skeleton /><Skeleton /><Skeleton /><Skeleton />
+        </div>
+        <Skeleton h="h-72" />
+      </div>
+    );
   }
+  if (!data) return <div className="text-sm text-gray-400">Failed to load.</div>;
+
+  const { daily, overview, prevDaily, prevOverview, trend, granularity } = data;
+  const att = daily.attendance;
+  const compareLabel = singleDay ? 'vs yesterday' : `vs previous ${data.prevDays} days`;
+  const ch = daily.admissions.channels;
+  const chTotal = ch.online.quantity + ch.gate.quantity || 1;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      <WeatherCard />
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiTile label="Revenue" value={money(overview?.revenue)} />
-        <KpiTile label="Orders" value={number(overview?.orderCount)} />
-        <KpiTile label="Avg Order Value" value={moneyPrecise(overview?.avgOrderValue)} />
         <KpiTile
-          label="Web vs In-Person"
-          value={`${number(overview?.webOrderCount)} / ${number(overview?.inPersonOrderCount)}`}
-          sub="web / in-person orders"
+          label="Attendance" icon="🎟️" accent
+          value={number(att.total)}
+          delta={delta(att.total, prevDaily.attendance.total)}
+          sub={compareLabel}
+        />
+        <KpiTile
+          label="Per Cap (In-Park)" icon="💰" accent
+          value={moneyPrecise(daily.inPark.perCap)}
+          delta={delta(daily.inPark.perCap, prevDaily.inPark.perCap)}
+          sub="in-park spend per guest"
+        />
+        <KpiTile
+          label="Total Revenue" icon="📈"
+          value={money(overview.revenue)}
+          delta={delta(overview.revenue, prevOverview.revenue)}
+          sub={compareLabel}
+        />
+        <KpiTile
+          label="Admissions Revenue" icon="🏷️"
+          value={money(daily.admissions.revenue)}
+          delta={delta(daily.admissions.revenue, prevDaily.admissions.revenue)}
+          sub={compareLabel}
         />
       </div>
 
-      <div className="card p-5">
-        <p className="text-sm font-semibold text-gray-700 mb-4">Revenue Trend</p>
+      <SectionCard
+        title={granularity === 'hour' ? 'Revenue by Hour' : 'Revenue Trend'}
+        right={<span className="text-xs text-gray-400">{number(overview.orderCount)} orders</span>}
+      >
         {trend.length === 0 ? (
-          <p className="text-sm text-gray-400 py-12 text-center">No orders in this range.</p>
+          <p className="text-sm text-gray-400 py-10 text-center">No orders yet in this range.</p>
         ) : (
-          <ResponsiveContainer width="100%" height={280}>
+          <ResponsiveContainer width="100%" height={260}>
             <AreaChart data={trend} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="revFill" x1="0" y1="0" x2="0" y2="1">
@@ -54,13 +159,124 @@ export default function Overview() {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
-              <XAxis dataKey="bucket" tickFormatter={shortDate} tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={{ stroke: '#e5e7eb' }} tickLine={false} />
+              <XAxis dataKey="bucket" tickFormatter={granularity === 'hour' ? undefined : shortDate}
+                     tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={{ stroke: '#e5e7eb' }} tickLine={false} />
               <YAxis tickFormatter={money} tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} width={64} />
-              <Tooltip content={<ChartTooltip formatter={money} labelFormatter={shortDate} />} />
+              <Tooltip content={<ChartTooltip formatter={money} labelFormatter={granularity === 'hour' ? undefined : shortDate} />} />
               <Area type="monotone" dataKey="revenue" name="Revenue" stroke={CATEGORICAL[0]} strokeWidth={2} fill="url(#revFill)" />
             </AreaChart>
           </ResponsiveContainer>
         )}
+      </SectionCard>
+
+      <div className="grid lg:grid-cols-2 gap-4">
+        <SectionCard
+          title="Attendance & Ticketing"
+          right={<DeltaChip delta={delta(att.total, prevDaily.attendance.total)} />}
+        >
+          <ShareBar segments={BUCKETS.map(b => ({ value: att[b.key], color: b.color }))} />
+          <div className="mt-4 space-y-2.5">
+            {BUCKETS.map(b => (
+              <div key={b.key} className="flex items-center gap-2.5 text-sm">
+                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: b.color }} />
+                <span className="text-gray-600">{b.label}</span>
+                <span className="ml-auto font-semibold text-gray-900 tabular-nums">{number(att[b.key])}</span>
+                <span className="w-12 text-right text-xs text-gray-400 tabular-nums">
+                  {att.total ? Math.round((att[b.key] / att.total) * 100) : 0}%
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Sales Channel (GA)</p>
+              <ShareBar segments={[
+                { value: ch.online.quantity, color: CATEGORICAL[0] },
+                { value: ch.gate.quantity,   color: CATEGORICAL[1] },
+              ]} />
+              <div className="mt-2 space-y-1 text-xs text-gray-600">
+                <div className="flex justify-between">
+                  <span><span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: CATEGORICAL[0] }} />Online</span>
+                  <span className="tabular-nums font-medium">{number(ch.online.quantity)} · {money(ch.online.revenue)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span><span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: CATEGORICAL[1] }} />Walk-up</span>
+                  <span className="tabular-nums font-medium">{number(ch.gate.quantity)} · {money(ch.gate.revenue)}</span>
+                </div>
+                <p className="text-gray-400 pt-0.5">{Math.round((ch.online.quantity / chTotal) * 100)}% bought in advance</p>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">GA by Rate Type</p>
+              <div className="space-y-1 text-xs text-gray-600">
+                {daily.admissions.byRateType.map(r => (
+                  <div key={r.rateType} className="flex justify-between">
+                    <span>{r.rateType}</span>
+                    <span className="tabular-nums font-medium">{number(r.quantity)} · {money(r.revenue)}</span>
+                  </div>
+                ))}
+                {daily.admissions.byRateType.length === 0 && <p className="text-gray-400">No GA sales yet.</p>}
+              </div>
+              <p className="mt-2 text-xs text-gray-400">
+                {Math.round(att.passholderShare * 100)}% of attendance are passholders
+              </p>
+            </div>
+          </div>
+        </SectionCard>
+
+        <div className="space-y-4">
+          <SectionCard
+            title="In-Park Revenue"
+            right={<span className="text-xs text-gray-400">per cap {moneyPrecise(daily.inPark.perCap)}</span>}
+          >
+            <ShareBar segments={[
+              { value: daily.inPark.fnb,     color: CATEGORICAL[0] },
+              { value: daily.inPark.rentals, color: CATEGORICAL[2] },
+              { value: daily.inPark.merch,   color: CATEGORICAL[4] },
+            ]} />
+            <div className="mt-4 space-y-2.5 text-sm">
+              {[
+                { label: 'Food & Beverage', value: daily.inPark.fnb,     prev: prevDaily.inPark.fnb,     color: CATEGORICAL[0] },
+                { label: 'Rentals (lockers & cabanas)', value: daily.inPark.rentals, prev: prevDaily.inPark.rentals, color: CATEGORICAL[2] },
+                { label: 'Merchandise', value: daily.inPark.merch,        prev: prevDaily.inPark.merch,   color: CATEGORICAL[4] },
+              ].map(r => (
+                <div key={r.label} className="flex items-center gap-2.5">
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: r.color }} />
+                  <span className="text-gray-600">{r.label}</span>
+                  <span className="ml-auto font-semibold text-gray-900 tabular-nums">{money(r.value)}</span>
+                  <span className="w-14 text-right text-xs text-gray-400 tabular-nums">
+                    {att.total ? moneyPrecise(r.value / att.total) : '—'}/guest
+                  </span>
+                  <DeltaChip delta={delta(r.value, r.prev)} />
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-sm">
+              <span className="text-gray-500">Total in-park</span>
+              <span className="font-bold text-gray-900 tabular-nums">{money(daily.inPark.total)}</span>
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            title="Season Pass Sales"
+            right={<DeltaChip delta={delta(daily.passSales.revenue, prevDaily.passSales.revenue)} />}
+          >
+            <div className="flex items-baseline gap-3">
+              <p className="text-2xl font-bold text-gray-900 tabular-nums">{number(daily.passSales.quantity)}</p>
+              <p className="text-sm text-gray-500">passes sold · {money(daily.passSales.revenue)}</p>
+            </div>
+            <div className="mt-3 space-y-1 text-xs text-gray-600">
+              {daily.passSales.byProduct.slice(0, 5).map(p => (
+                <div key={p.name} className="flex justify-between">
+                  <span className="truncate pr-3">{p.name}</span>
+                  <span className="tabular-nums font-medium shrink-0">{number(p.quantity)} · {money(p.revenue)}</span>
+                </div>
+              ))}
+              {daily.passSales.byProduct.length === 0 && <p className="text-gray-400">No pass sales in this range.</p>}
+            </div>
+          </SectionCard>
+        </div>
       </div>
     </div>
   );

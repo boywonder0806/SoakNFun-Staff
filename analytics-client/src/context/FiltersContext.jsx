@@ -11,8 +11,9 @@ function daysAgo(n) {
 }
 
 // Shared date-range + park filter, so switching pages doesn't lose context.
+// Defaults to today — the dashboard opens as a live daily report.
 export function FiltersProvider({ children }) {
-  const [startDate, setStartDate] = useState(daysAgo(29));
+  const [startDate, setStartDate] = useState(centralToday());
   const [endDate, setEndDate]     = useState(centralToday());
   const [park, setPark]           = useState('ALL'); // ALL | BB | GI
 
