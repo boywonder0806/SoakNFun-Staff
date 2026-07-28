@@ -8,6 +8,7 @@ const NAV = [
   { to: '/',                label: 'Overview' },
   { to: '/revenue',         label: 'Revenue Trends' },
   { to: '/products',        label: 'Product Mix' },
+  { to: '/drinks',          label: 'Drinks' },
   { to: '/offices',         label: 'Sales Offices' },
   { to: '/payment-methods', label: 'Payment Methods' },
 ];
