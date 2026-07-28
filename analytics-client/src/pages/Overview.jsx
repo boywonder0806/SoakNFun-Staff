@@ -7,7 +7,12 @@ import { CATEGORICAL } from '../lib/palette.js';
 import KpiTile, { DeltaChip } from '../components/KpiTile.jsx';
 import WeatherCard from '../components/WeatherCard.jsx';
 import ChartTooltip from '../components/ChartTooltip.jsx';
-import LoadingOverlay from '../components/LoadingOverlay.jsx';
+import LoadingOverlay, { Spinner } from '../components/LoadingOverlay.jsx';
+
+// Survives route changes so returning to Overview paints the last report
+// instantly (with the overlay on top while it refreshes) instead of a
+// blank first-load screen every visit.
+let lastReport = null; // { key, payload }
 
 // Fixed identity colors for attendance buckets — labels carry the identity,
 // color is reinforcement (palette slots, never reassigned by filters).
@@ -39,8 +44,16 @@ function delta(cur, prev) {
   return (cur - prev) / prev;
 }
 
-function Skeleton({ h = 'h-24' }) {
-  return <div className={`card ${h} animate-pulse bg-gray-100/70`} />;
+// White cards with visibly pulsing bars — the old flat gray blocks
+// disappeared into the gray page background and read as a blank screen.
+function Skeleton({ h = 'h-24', bars = 2 }) {
+  return (
+    <div className={`card ${h} p-5 space-y-3 overflow-hidden`}>
+      <div className="h-3 w-24 bg-gray-200 rounded animate-pulse" />
+      {bars > 1 && <div className="h-7 w-36 bg-gray-200 rounded animate-pulse" />}
+      {bars > 2 && <div className="h-3 w-full max-w-md bg-gray-100 rounded animate-pulse" />}
+    </div>
+  );
 }
 
 function SectionCard({ title, right, children }) {
@@ -68,7 +81,12 @@ function ShareBar({ segments }) {
 
 export default function Overview() {
   const { params } = useFilters();
-  const [data, setData]       = useState(null); // { daily, overview, prevDaily, prevOverview, trend, granularity }
+  const filterKey = `${params.startDate}:${params.endDate}:${params.park || 'ALL'}`;
+  // Seed from the cached report even if filters changed — dimmed stale
+  // numbers under the overlay beat a blank screen, and it's the same
+  // behavior as switching filters while on the page.
+  // { daily, overview, prevDaily, prevOverview, trend, granularity }
+  const [data, setData]       = useState(() => lastReport?.payload || null);
   const [loading, setLoading] = useState(true);
 
   const singleDay = params.startDate === params.endDate;
@@ -89,8 +107,10 @@ export default function Overview() {
     ])
       .then(([d, o, pd, po, t]) => {
         if (cancelled) return;
-        setData({ daily: d.data, overview: o.data, prevDaily: pd.data, prevOverview: po.data,
-                  trend: t.data.rows, granularity, prevDays: prev.days });
+        const payload = { daily: d.data, overview: o.data, prevDaily: pd.data, prevOverview: po.data,
+                          trend: t.data.rows, granularity, prevDays: prev.days };
+        lastReport = { key: filterKey, payload };
+        setData(payload);
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -99,11 +119,20 @@ export default function Overview() {
   if (loading && !data) {
     return (
       <div className="space-y-4">
-        <Skeleton h="h-20" />
+        <div className="flex justify-center py-3">
+          <div className="flex items-center gap-2.5 bg-white border border-gray-200 rounded-full px-4 py-2 shadow-sm text-sm text-gray-600">
+            <Spinner />
+            Reviewing the data…
+          </div>
+        </div>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <Skeleton /><Skeleton /><Skeleton /><Skeleton />
         </div>
-        <Skeleton h="h-72" />
+        <Skeleton h="h-72" bars={3} />
+        <div className="grid lg:grid-cols-2 gap-4">
+          <Skeleton h="h-48" bars={3} />
+          <Skeleton h="h-48" bars={3} />
+        </div>
       </div>
     );
   }
