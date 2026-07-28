@@ -155,18 +155,18 @@ export default function Overview() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiTile
-          label="Attendance" icon="🎟️" accent
+          label="Booked Attendance" icon="🎟️" accent
           value={number(att.total)}
           delta={delta(att.total, prevDaily.attendance.total)}
           sub={att.byPark?.length > 1
-            ? att.byPark.map(p => `${p.park} ${number(p.quantity)}`).join(' · ')
-            : compareLabel}
+            ? `${att.byPark.map(p => `${p.park} ${number(p.quantity)}`).join(' · ')} · not gate scans`
+            : `reserved, not gate scans · ${compareLabel}`}
         />
         <KpiTile
           label="Per Cap (In-Park)" icon="💰" accent
           value={moneyPrecise(daily.inPark.perCap)}
           delta={delta(daily.inPark.perCap, prevDaily.inPark.perCap)}
-          sub="in-park spend per guest"
+          sub="in-park spend per booked guest"
           warning={lockersWarning}
         />
         <KpiTile
@@ -228,8 +228,8 @@ export default function Overview() {
             ))}
           </div>
           <p className="mt-3 text-[11px] text-gray-400 leading-relaxed">
-            Counted by visit date from booked tickets, matching the RocketRez attendance report.
-            Guests booked for today who haven't scanned in yet are included.
+            Booked attendance — matches RocketRez's "Reserved" column, not "Checked In".
+            Gate-scan data isn't exposed by the API, so no-shows and not-yet-arrived guests are included.
           </p>
 
           <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 gap-4">
