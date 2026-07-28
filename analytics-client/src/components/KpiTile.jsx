@@ -19,9 +19,9 @@ export function DeltaChip({ delta, invert = false }) {
   );
 }
 
-export default function KpiTile({ label, value, sub, delta, deltaLabel, icon, accent = false }) {
+export default function KpiTile({ label, value, sub, delta, deltaLabel, icon, accent = false, warning }) {
   return (
-    <div className={`card px-5 py-4 ${accent ? 'ring-1 ring-az/30 bg-gradient-to-br from-white to-emerald-50/60' : ''}`}>
+    <div className={`card px-5 py-4 ${warning ? 'ring-1 ring-amber-300' : accent ? 'ring-1 ring-az/30 bg-gradient-to-br from-white to-emerald-50/60' : ''}`}>
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</p>
         {icon && <span className="text-base leading-none opacity-70">{icon}</span>}
@@ -30,7 +30,9 @@ export default function KpiTile({ label, value, sub, delta, deltaLabel, icon, ac
         <p className="text-3xl font-bold text-gray-900 tabular-nums leading-none">{value}</p>
         <DeltaChip delta={delta} />
       </div>
-      {(sub || deltaLabel) && (
+      {warning ? (
+        <p className="mt-1.5 text-xs text-amber-600 font-medium">⚠️ {warning}</p>
+      ) : (sub || deltaLabel) && (
         <p className="mt-1.5 text-xs text-gray-400">{sub || deltaLabel}</p>
       )}
     </div>

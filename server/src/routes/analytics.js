@@ -128,7 +128,7 @@ router.get('/daily', async (req, res) => {
         AND li.event_name ILIKE '%Admission%'
         AND li.event_date BETWEEN $1 AND $2${parkSql}`;
 
-    const [attendance, attByPark, gaByRate, channel, passSales, inPark] = await Promise.all([
+    const [attendance, attByPark, gaByRate, channel, passSales, inPark, nayax] = await Promise.all([
       pool.query(
         `SELECT
            COALESCE(SUM(li.quantity), 0)::int                                                                   AS "total",
@@ -180,6 +180,17 @@ router.get('/daily', async (req, res) => {
          ${baseJoin}`,
         params
       ),
+      // Nayax locker totals are keyed into RocketRez manually as a bulk
+      // order — until that's done, rentals (and per cap) run low. Detect
+      // which in-scope parks have an entry so the UI can warn.
+      pool.query(
+        `SELECT o.park AS "park", COUNT(*)::int AS "n"
+         FROM analytics_orders o
+         WHERE o.status = 'Active' AND o.business_date BETWEEN $1 AND $2${parkSql}
+           AND o.sales_office_name ILIKE '%Nayax%' AND o.park IS NOT NULL
+         GROUP BY o.park`,
+        params
+      ),
     ]);
 
     const att = attendance.rows[0];
@@ -193,6 +204,8 @@ router.get('/daily', async (req, res) => {
     const passSalesTotal = passSales.rows.reduce((s, r) => ({ quantity: s.quantity + r.quantity, revenue: s.revenue + r.revenue }), { quantity: 0, revenue: 0 });
     const web  = channel.rows.find(r => r.isWebOrder)  || { quantity: 0, revenue: 0 };
     const gate = channel.rows.find(r => !r.isWebOrder) || { quantity: 0, revenue: 0 };
+    const scopeParks = park === 'BB' || park === 'GI' ? [park] : ['BB', 'GI'];
+    const lockersMissing = scopeParks.filter(p => !nayax.rows.some(r => r.park === p && r.n > 0));
 
     res.json({
       attendance: { ...att, other, byPark: attByPark.rows,
@@ -201,7 +214,7 @@ router.get('/daily', async (req, res) => {
                     channels: { online: { quantity: web.quantity, revenue: web.revenue },
                                 gate:   { quantity: gate.quantity, revenue: gate.revenue } } },
       passSales:  { ...passSalesTotal, byProduct: passSales.rows },
-      inPark:     { total: inParkTotal, ...ip,
+      inPark:     { total: inParkTotal, ...ip, lockersMissing,
                     perCap: totalAttendance ? inParkTotal / totalAttendance : 0 },
     });
   } catch (err) {

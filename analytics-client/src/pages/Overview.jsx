@@ -143,6 +143,10 @@ export default function Overview() {
   const compareLabel = singleDay ? 'vs yesterday' : `vs previous ${data.prevDays} days`;
   const ch = daily.admissions.channels;
   const chTotal = ch.online.quantity + ch.gate.quantity || 1;
+  const lockersMissing = daily.inPark.lockersMissing || [];
+  const lockersWarning = lockersMissing.length
+    ? `${lockersMissing.join(' & ')} Nayax lockers not entered yet — understated`
+    : null;
 
   return (
     <div className="relative space-y-4">
@@ -163,6 +167,7 @@ export default function Overview() {
           value={moneyPrecise(daily.inPark.perCap)}
           delta={delta(daily.inPark.perCap, prevDaily.inPark.perCap)}
           sub="in-park spend per guest"
+          warning={lockersWarning}
         />
         <KpiTile
           label="Total Revenue" icon="📈"
@@ -277,12 +282,18 @@ export default function Overview() {
             <div className="mt-4 space-y-2.5 text-sm">
               {[
                 { label: 'Food & Beverage', value: daily.inPark.fnb,     prev: prevDaily.inPark.fnb,     color: CATEGORICAL[0] },
-                { label: 'Rentals (lockers & cabanas)', value: daily.inPark.rentals, prev: prevDaily.inPark.rentals, color: CATEGORICAL[2] },
+                { label: 'Rentals (lockers & cabanas)', value: daily.inPark.rentals, prev: prevDaily.inPark.rentals, color: CATEGORICAL[2],
+                  chip: lockersMissing.length ? `${lockersMissing.join(' & ')} Nayax pending` : null },
                 { label: 'Merchandise', value: daily.inPark.merch,        prev: prevDaily.inPark.merch,   color: CATEGORICAL[4] },
               ].map(r => (
                 <div key={r.label} className="flex items-center gap-2.5">
                   <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: r.color }} />
                   <span className="text-gray-600">{r.label}</span>
+                  {r.chip && (
+                    <span className="px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[10px] font-semibold whitespace-nowrap">
+                      ⚠️ {r.chip}
+                    </span>
+                  )}
                   <span className="ml-auto font-semibold text-gray-900 tabular-nums">{money(r.value)}</span>
                   <span className="w-14 text-right text-xs text-gray-400 tabular-nums">
                     {att.total ? moneyPrecise(r.value / att.total) : '—'}/guest
