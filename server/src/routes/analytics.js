@@ -171,12 +171,25 @@ router.get('/daily', async (req, res) => {
          GROUP BY li.name ORDER BY "revenue" DESC`,
         params
       ),
+      // Rentals vs F&B is classified per ITEM, not per office: the Cabana
+      // Services office mostly sells food delivered to cabanas (burgers,
+      // daiquiris — that's F&B), while actual cabana/sundeck reservations
+      // are Rate-type bookings sold mainly through Web Sales. Office-based
+      // bucketing counted cabana food as rentals and missed ~$90K/mo of
+      // real cabana rental revenue entirely.
       pool.query(
         `SELECT
-           COALESCE(SUM(li.subtotal) FILTER (WHERE li.sales_office_name ILIKE '%Food & Beverage%'), 0)::float AS "fnb",
-           COALESCE(SUM(li.subtotal) FILTER (WHERE li.sales_office_name ILIKE '%Locker%'
-                                          OR li.sales_office_name ILIKE '%Cabana%'), 0)::float                AS "rentals",
-           COALESCE(SUM(li.subtotal) FILTER (WHERE li.sales_office_name ILIKE '%Gift Shop%'), 0)::float        AS "merch"
+           COALESCE(SUM(li.subtotal) FILTER (WHERE
+             li.sales_office_name ILIKE '%Food & Beverage%'
+             OR (li.sales_office_name ILIKE '%Cabana%' AND li.type <> 'Rate')
+             OR (li.type = 'Product' AND li.name ILIKE '%Cabana%')
+           ), 0)::float AS "fnb",
+           COALESCE(SUM(li.subtotal) FILTER (WHERE
+             li.sales_office_name ILIKE '%Locker%'
+             OR (li.type = 'Rate' AND (li.name ILIKE '%Cabana%' OR li.name ILIKE 'Sundeck%'
+                                       OR li.sales_office_name ILIKE '%Cabana%'))
+           ), 0)::float AS "rentals",
+           COALESCE(SUM(li.subtotal) FILTER (WHERE li.sales_office_name ILIKE '%Gift Shop%'), 0)::float AS "merch"
          ${baseJoin}`,
         params
       ),
