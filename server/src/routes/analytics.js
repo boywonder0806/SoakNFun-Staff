@@ -91,6 +91,81 @@ router.get('/revenue-trend', async (req, res) => {
   }
 });
 
+// GET /api/analytics/revenue-breakdown?granularity=hour|day|week|month
+// Companion to /revenue-trend for the Revenue Trends page: revenue split by
+// business category and by sales channel per bucket, plus day-of-week
+// averages. Category revenue comes from line-item subtotals (pre-tax), so
+// the stack won't exactly equal the order-total headline — that's expected
+// and labeled in the UI. Channel and DOW figures use order totals.
+router.get('/revenue-breakdown', async (req, res) => {
+  try {
+    const { start, end } = dateRange(req);
+    const granularity = ['hour', 'day', 'week', 'month'].includes(req.query.granularity) ? req.query.granularity : 'day';
+    const params = [start, end];
+    const parkSql = parkFilter(req, params).replace(' AND park', ' AND o.park');
+
+    const liBucket = granularity === 'hour'
+      ? `to_char(date_trunc('hour', o.created_date AT TIME ZONE 'America/Chicago'), 'FMHH12AM')`
+      : granularity === 'day' ? `o.business_date::text`
+      : `date_trunc('${granularity}', o.business_date)::date::text`;
+    const liOrder = granularity === 'hour'
+      ? `date_trunc('hour', o.created_date AT TIME ZONE 'America/Chicago')` : '1';
+
+    const [categories, channels, dow] = await Promise.all([
+      pool.query(
+        `SELECT ${liBucket} AS "bucket",
+           COALESCE(SUM(li.subtotal) FILTER (WHERE li.type = 'Rate' AND li.event_name ILIKE '%Admission%'), 0)::float AS "admissions",
+           COALESCE(SUM(li.subtotal) FILTER (WHERE TRIM(li.sales_office_name) ILIKE '%Food & Beverage%'
+             OR TRIM(li.sales_office_name) ILIKE '%Crew Kitchen%'
+             OR TRIM(li.sales_office_name) ILIKE '%Cabana Services%'), 0)::float                                       AS "fnb",
+           COALESCE(SUM(li.subtotal) FILTER (WHERE li.type = 'Membership'), 0)::float                                   AS "passes",
+           COALESCE(SUM(li.subtotal) FILTER (WHERE TRIM(li.sales_office_name) ILIKE '%Gift Shop%'), 0)::float            AS "retail",
+           COALESCE(SUM(li.subtotal) FILTER (WHERE li.type = 'Rate' AND (li.name ILIKE '%Cabana%'
+             OR li.name ILIKE '%Covered Area%')), 0)::float                                                               AS "cabanas",
+           COALESCE(SUM(li.subtotal) FILTER (WHERE TRIM(li.sales_office_name) ILIKE '%Parking%'
+             OR li.name ILIKE '%Parking%'), 0)::float                                                                      AS "parking",
+           COALESCE(SUM(li.subtotal), 0)::float                                                                             AS "total"
+         FROM analytics_order_line_items li
+         JOIN analytics_orders o ON o.order_id = li.order_id
+         WHERE o.status = 'Active' AND o.business_date BETWEEN $1 AND $2${parkSql}
+         GROUP BY ${liBucket}${liOrder === '1' ? '' : `, ${liOrder}`}
+         ORDER BY ${liOrder === '1' ? '1' : liOrder}`,
+        params
+      ),
+      pool.query(
+        `SELECT ${liBucket.replaceAll('o.created_date', 'created_date').replaceAll('o.business_date', 'business_date')} AS "bucket",
+                COALESCE(SUM(total) FILTER (WHERE is_web_order), 0)::float      AS "online",
+                COALESCE(SUM(total) FILTER (WHERE NOT is_web_order), 0)::float   AS "inPerson"
+         FROM analytics_orders o
+         WHERE status = 'Active' AND business_date BETWEEN $1 AND $2${parkSql}
+         GROUP BY 1${liOrder === '1' ? '' : `, ${liOrder.replaceAll('o.created_date', 'created_date')}`}
+         ORDER BY ${liOrder === '1' ? '1' : liOrder.replaceAll('o.created_date', 'created_date')}`,
+        params
+      ),
+      pool.query(
+        `SELECT to_char(business_date, 'Dy') AS "dow",
+                COUNT(DISTINCT business_date)::int AS "days",
+                COALESCE(SUM(total), 0)::float AS "revenue"
+         FROM analytics_orders o
+         WHERE status = 'Active' AND business_date BETWEEN $1 AND $2${parkSql}
+         GROUP BY to_char(business_date, 'Dy'), to_char(business_date, 'ID')
+         ORDER BY to_char(business_date, 'ID')`,
+        params
+      ),
+    ]);
+
+    res.json({
+      granularity,
+      categories: categories.rows.map(r => ({ ...r, other: Math.max(0, r.total - (r.admissions + r.fnb + r.passes + r.retail + r.cabanas + r.parking)) })),
+      channels: channels.rows,
+      dow: dow.rows.map(r => ({ dow: r.dow, days: r.days, avgRevenue: r.days ? r.revenue / r.days : 0 })),
+    });
+  } catch (err) {
+    console.error('analytics revenue-breakdown error:', err.message);
+    res.status(500).json({ error: 'Failed to load revenue breakdown' });
+  }
+});
+
 // GET /api/analytics/daily — the waterpark daily report: attendance &
 // ticketing, in-park spend, and per-cap, for the requested range.
 //
