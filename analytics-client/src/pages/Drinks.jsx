@@ -40,7 +40,7 @@ function ShareBar({ segments }) {
 }
 
 export default function Drinks() {
-  const { params } = useFilters();
+  const { params, park } = useFilters();
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -54,6 +54,16 @@ export default function Drinks() {
     return () => { cancelled = true; };
   }, [params.startDate, params.endDate]);
 
+  if (park === 'GI') {
+    return (
+      <div className="card p-10 text-center">
+        <p className="text-3xl mb-2">🥤</p>
+        <p className="text-sm font-semibold text-gray-700">Drink analytics is temporarily only available for Blue Bayou.</p>
+        <p className="mt-1 text-xs text-gray-400">Switch the park filter to Blue Bayou to see the drink report.</p>
+      </div>
+    );
+  }
+
   if (!data) return loading ? <LoadingBlock /> : <div className="text-sm text-gray-400">Failed to load.</div>;
 
   const { categories, totals, byProduct, trend, granularity, attendance } = data;
@@ -63,14 +73,6 @@ export default function Drinks() {
   return (
     <div className="relative space-y-4">
       <LoadingOverlay show={loading} />
-
-      <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
-        <span className="px-2 py-0.5 rounded-full bg-az/10 text-az-dark font-semibold">Blue Bayou only</span>
-        <span>
-          Purchased guest drinks across all BB outlets — crew drinks and register comps are excluded,
-          and the free soda stations aren't rung up anywhere, so they can't be counted.
-        </span>
-      </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiTile
@@ -112,7 +114,9 @@ export default function Drinks() {
             })}
           </div>
           <p className="mt-3 text-[11px] text-gray-400 leading-relaxed">
-            Daiquiris count as alcoholic, not frozen. Souvenir cups and floats are excluded.
+            Purchased guest drinks only — crew drinks, register comps, souvenir cups, and floats
+            are excluded, and free soda stations aren't rung up anywhere so they can't be counted.
+            Daiquiris count as alcoholic, not frozen.
           </p>
         </SectionCard>
 

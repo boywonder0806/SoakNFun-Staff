@@ -54,7 +54,7 @@ function BarRow({ label, value, max, right }) {
 }
 
 export default function Cabanas() {
-  const { params } = useFilters();
+  const { params, park } = useFilters();
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -70,6 +70,16 @@ export default function Cabanas() {
     return () => { cancelled = true; };
   }, [params.startDate, params.endDate]);
 
+  if (park === 'GI') {
+    return (
+      <div className="card p-10 text-center">
+        <p className="text-3xl mb-2">⛱️</p>
+        <p className="text-sm font-semibold text-gray-700">Cabana analytics is temporarily only available for Blue Bayou.</p>
+        <p className="mt-1 text-xs text-gray-400">Switch the park filter to Blue Bayou to see the cabana report.</p>
+      </div>
+    );
+  }
+
   if (!data) return loading ? <LoadingBlock /> : <div className="text-sm text-gray-400">Failed to load.</div>;
 
   const { bookings: b, food: f } = data;
@@ -80,14 +90,6 @@ export default function Cabanas() {
   return (
     <div className="relative space-y-4">
       <LoadingOverlay show={loading} />
-
-      <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
-        <span className="px-2 py-0.5 rounded-full bg-az/10 text-az-dark font-semibold">Blue Bayou only</span>
-        <span>
-          Bookings are counted by visit date; food covers every (CS-BB)-tagged item
-          no matter where it was rung, counted when the money moved.
-        </span>
-      </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiTile
