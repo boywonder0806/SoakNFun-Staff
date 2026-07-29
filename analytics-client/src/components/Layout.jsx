@@ -4,15 +4,26 @@ import { hubUrl } from '../lib/hub.js';
 import FilterBar from './FilterBar.jsx';
 import SyncStatus from './SyncStatus.jsx';
 
-const NAV = [
-  { to: '/',                label: 'Overview' },
-  { to: '/revenue',         label: 'Revenue Trends' },
-  { to: '/products',        label: 'Product Mix' },
-  { to: '/drinks',          label: 'Drinks' },
-  { to: '/cabanas',         label: 'Cabanas' },
-  { to: '/offices',         label: 'Sales Offices' },
-  { to: '/payment-methods', label: 'Payment Methods' },
-  { to: '/refunds',         label: 'Refunds' },
+const NAV_SECTIONS = [
+  {
+    heading: 'Analytics',
+    items: [
+      { to: '/',                label: 'Overview' },
+      { to: '/revenue',         label: 'Revenue Trends' },
+      { to: '/products',        label: 'Product Mix' },
+      { to: '/drinks',          label: 'Drinks' },
+      { to: '/cabanas',         label: 'Cabanas' },
+      { to: '/offices',         label: 'Sales Offices' },
+      { to: '/payment-methods', label: 'Payment Methods' },
+      { to: '/refunds',         label: 'Refunds' },
+    ],
+  },
+  {
+    heading: 'Reporting',
+    items: [
+      { to: '/reports/cash-out', label: 'Cash Out Report' },
+    ],
+  },
 ];
 
 export default function Layout({ children }) {
@@ -25,7 +36,7 @@ export default function Layout({ children }) {
 
   return (
     <div className="min-h-screen flex bg-slate-100">
-      <aside className="w-60 shrink-0 bg-white border-r border-gray-200 flex flex-col">
+      <aside className="w-60 shrink-0 bg-white border-r border-gray-200 flex flex-col print:hidden">
         <div className="px-5 py-5 border-b border-gray-100">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center"
@@ -39,20 +50,27 @@ export default function Layout({ children }) {
           </div>
         </div>
 
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {NAV.map(item => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === '/'}
-              className={({ isActive }) =>
-                `block px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                  isActive ? 'bg-az/10 text-az-dark' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                }`
-              }
-            >
-              {item.label}
-            </NavLink>
+        <nav className="flex-1 px-3 py-4 space-y-4">
+          {NAV_SECTIONS.map(section => (
+            <div key={section.heading}>
+              <p className="px-3 pb-1 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">{section.heading}</p>
+              <div className="space-y-1">
+                {section.items.map(item => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.to === '/'}
+                    className={({ isActive }) =>
+                      `block px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                        isActive ? 'bg-az/10 text-az-dark' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                      }`
+                    }
+                  >
+                    {item.label}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
 
@@ -64,12 +82,12 @@ export default function Layout({ children }) {
         </div>
       </aside>
 
-      <main className="flex-1 min-w-0">
-        <div className="sticky top-0 z-10 bg-slate-100/90 backdrop-blur border-b border-gray-200 px-6 py-3 flex items-center justify-between gap-4 flex-wrap">
+      <main className="flex-1 min-w-0 print:w-full">
+        <div className="sticky top-0 z-10 bg-slate-100/90 backdrop-blur border-b border-gray-200 px-6 py-3 flex items-center justify-between gap-4 flex-wrap print:hidden">
           <FilterBar />
           <SyncStatus />
         </div>
-        <div className="px-6 py-6">{children}</div>
+        <div className="px-6 py-6 print:p-0">{children}</div>
       </main>
     </div>
   );

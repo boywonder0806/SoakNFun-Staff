@@ -11,6 +11,7 @@ import Cabanas from './pages/Cabanas.jsx';
 import Refunds from './pages/Refunds.jsx';
 import SalesOffices from './pages/SalesOffices.jsx';
 import PaymentMethods from './pages/PaymentMethods.jsx';
+import CashOutReport from './pages/CashOutReport.jsx';
 
 function Gate() {
   const { user, loading } = useAuth();
@@ -35,6 +36,7 @@ function Gate() {
             <Route path="/offices" element={<SalesOffices />} />
             <Route path="/payment-methods" element={<PaymentMethods />} />
             <Route path="/refunds" element={<Refunds />} />
+            <Route path="/reports/cash-out" element={<CashOutReport />} />
           </Routes>
         </Layout>
       </BrowserRouter>

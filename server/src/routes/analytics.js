@@ -993,6 +993,86 @@ router.delete('/refunds/:orderId/flag', async (req, res) => {
   }
 });
 
+// GET /api/analytics/reports/cash-out — cashier cash-drawer reconciliation
+// report. Grouped by salesperson, matching RocketRez's own "Employee/Web
+// Engine" grouping on the printed Cash Out Report, then by tender. The cash
+// total per cashier is the number that matters for drawer reconciliation —
+// it nets out any cash refunds, since those physically leave the drawer too.
+// Terminal and GL Code from the native report aren't exposed by the Orders
+// API this app syncs from, so they're intentionally left off here.
+router.get('/reports/cash-out', async (req, res) => {
+  try {
+    const { start, end } = dateRange(req);
+    const params = [start, end];
+    const parkSql = parkFilter(req, params).replace(' AND park', ' AND o.park');
+
+    const { rows } = await pool.query(
+      `SELECT o.order_id::text AS "orderId", o.business_date::text AS "date",
+              to_char(o.created_date AT TIME ZONE 'America/Chicago', 'FMHH12:MI AM') AS "time",
+              o.park, o.sales_office_name AS "office",
+              COALESCE(NULLIF(TRIM(o.sales_person_name), ''), 'Unattributed') AS "cashier",
+              pm->>'paymentMethod' AS "method",
+              (pm->>'paymentAmount')::numeric::float AS "amount"
+       FROM analytics_orders o, jsonb_array_elements(o.payment_methods) pm
+       WHERE o.status = 'Active' AND o.business_date BETWEEN $1 AND $2${parkSql}
+       ORDER BY o.business_date, o.sales_person_name, o.created_date`,
+      params
+    );
+
+    const round2 = n => Math.round(n * 100) / 100;
+    const dateMap = new Map();
+    let totalCash = 0, totalAll = 0;
+    const allOrderIds = new Set();
+
+    for (const r of rows) {
+      totalAll += r.amount;
+      allOrderIds.add(r.orderId);
+      const isCash = /cash/i.test(r.method);
+      if (isCash) totalCash += r.amount;
+
+      let d = dateMap.get(r.date);
+      if (!d) dateMap.set(r.date, d = { date: r.date, cashiers: new Map() });
+      let c = d.cashiers.get(r.cashier);
+      if (!c) d.cashiers.set(r.cashier, c = { cashier: r.cashier, total: 0, cashTotal: 0, orderIds: new Set(), methods: new Map() });
+      c.total += r.amount;
+      if (isCash) c.cashTotal += r.amount;
+      c.orderIds.add(r.orderId);
+      let m = c.methods.get(r.method);
+      if (!m) c.methods.set(r.method, m = { method: r.method, total: 0, payments: [] });
+      m.total += r.amount;
+      m.payments.push({ orderId: r.orderId, time: r.time, office: r.office, park: r.park, amount: round2(r.amount) });
+    }
+
+    const dateGroups = [...dateMap.values()].map(d => ({
+      date: d.date,
+      cashiers: [...d.cashiers.values()]
+        .map(c => ({
+          cashier: c.cashier,
+          total: round2(c.total),
+          cashTotal: round2(c.cashTotal),
+          orderCount: c.orderIds.size,
+          methods: [...c.methods.values()]
+            .map(m => ({ ...m, total: round2(m.total) }))
+            .sort((a, b) => b.total - a.total),
+        }))
+        .sort((a, b) => b.cashTotal - a.cashTotal || b.total - a.total),
+    })).sort((a, b) => a.date.localeCompare(b.date));
+
+    res.json({
+      kpis: {
+        totalCash: round2(totalCash),
+        totalAll: round2(totalAll),
+        cashierCount: new Set(rows.map(r => r.cashier)).size,
+        orderCount: allOrderIds.size,
+      },
+      dateGroups,
+    });
+  } catch (err) {
+    console.error('analytics cash-out report error:', err.message);
+    res.status(500).json({ error: 'Failed to load cash out report' });
+  }
+});
+
 // GET /api/analytics/sync-status
 router.get('/sync-status', async (_req, res) => {
   try {
