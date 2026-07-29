@@ -831,6 +831,122 @@ router.get('/payment-methods', async (req, res) => {
   }
 });
 
+// GET /api/analytics/refunds — refund analytics. A "refund" is any negative
+// payment on an order (RocketRez records refunds as negative paymentAmount
+// entries), regardless of order status: Active orders carry partial/full
+// refunds (a fully-refunded Active order nets to total = 0), and Void /
+// Cancelled orders keep their reversal payments too. "Who" is the
+// salesperson on the order — for gate sales that's the crew member at the
+// register; web-engine refunds show the engine name (e.g. 'GI - Public
+// Sales'), since RocketRez doesn't expose the refunding user separately.
+router.get('/refunds', async (req, res) => {
+  try {
+    const { start, end } = dateRange(req);
+    const params = [start, end];
+    const parkSql = parkFilter(req, params).replace(' AND park', ' AND o.park');
+    const singleDay = start === end;
+
+    const refundsCte = `
+      WITH pays AS (
+        SELECT o.order_id, o.business_date, o.created_date, o.park, o.status,
+               o.sales_person_name, o.sales_office_name, o.primary_contact_name, o.contact_group_name,
+               (pm->>'paymentAmount')::numeric AS amt,
+               pm->>'paymentMethod'            AS method,
+          CASE
+            WHEN pm->>'paymentMethod' ILIKE '%Apple Pay%'
+              OR pm->>'paymentMethod' ILIKE '%Google Pay%' THEN 'Digital Wallet'
+            WHEN pm->>'paymentMethod' ILIKE '%PayPal%'      THEN 'PayPal'
+            WHEN pm->>'paymentMethod' ILIKE '%Cash%'         THEN 'Cash'
+            WHEN pm->>'paymentMethod' ILIKE '%Stripe%'        THEN 'Card'
+            ELSE 'Other'
+          END AS grp
+        FROM analytics_orders o, jsonb_array_elements(o.payment_methods) pm
+        WHERE o.business_date BETWEEN $1 AND $2${parkSql}
+      ),
+      refund_orders AS (
+        SELECT order_id, business_date, created_date, park, status,
+               sales_person_name, sales_office_name, primary_contact_name, contact_group_name,
+               -SUM(amt) FILTER (WHERE amt < 0)      AS refunded,
+               COALESCE(SUM(amt) FILTER (WHERE amt > 0), 0) AS charged,
+               string_agg(DISTINCT grp, ', ') FILTER (WHERE amt < 0) AS methods
+        FROM pays
+        GROUP BY 1,2,3,4,5,6,7,8,9
+        HAVING SUM(amt) FILTER (WHERE amt < 0) IS NOT NULL
+      )`;
+
+    const trendSql = singleDay
+      ? `SELECT to_char(date_trunc('hour', created_date AT TIME ZONE 'America/Chicago'), 'FMHH12AM') AS "bucket",
+                COALESCE(SUM(refunded), 0)::float AS "refunded", COUNT(*)::int AS "orders"
+         FROM refund_orders
+         GROUP BY date_trunc('hour', created_date AT TIME ZONE 'America/Chicago')
+         ORDER BY date_trunc('hour', created_date AT TIME ZONE 'America/Chicago')`
+      : `SELECT business_date::text AS "bucket",
+                COALESCE(SUM(refunded), 0)::float AS "refunded", COUNT(*)::int AS "orders"
+         FROM refund_orders GROUP BY 1 ORDER BY 1`;
+
+    const [kpis, trend, byPerson, byOffice, byMethod, detail] = await Promise.all([
+      pool.query(
+        `${refundsCte}
+         SELECT COALESCE(SUM(refunded), 0)::float                                       AS "refunded",
+                COUNT(*)::int                                                            AS "refundOrders",
+                COALESCE(AVG(refunded), 0)::float                                         AS "avgRefund",
+                COUNT(*) FILTER (WHERE refunded >= charged - 0.01)::int                    AS "fullRefunds",
+                COUNT(*) FILTER (WHERE status = 'Void')::int                                AS "voids",
+                COUNT(*) FILTER (WHERE status = 'Cancelled')::int                            AS "cancellations",
+                (SELECT COALESCE(SUM(amt), 0) FROM pays WHERE amt > 0)::float                 AS "grossCollected",
+                (SELECT COUNT(DISTINCT order_id) FROM pays)::int                               AS "totalOrders"
+         FROM refund_orders`,
+        params
+      ),
+      pool.query(`${refundsCte} ${trendSql}`, params),
+      pool.query(
+        `${refundsCte}
+         SELECT COALESCE(NULLIF(TRIM(sales_person_name), ''), 'Unattributed') AS "person",
+                COUNT(*)::int AS "orders", COALESCE(SUM(refunded), 0)::float AS "refunded"
+         FROM refund_orders GROUP BY 1 ORDER BY "refunded" DESC LIMIT 12`,
+        params
+      ),
+      pool.query(
+        `${refundsCte}
+         SELECT COALESCE(NULLIF(TRIM(sales_office_name), ''), 'Unattributed') AS "office",
+                COUNT(*)::int AS "orders", COALESCE(SUM(refunded), 0)::float AS "refunded"
+         FROM refund_orders GROUP BY 1 ORDER BY "refunded" DESC`,
+        params
+      ),
+      pool.query(
+        `${refundsCte}
+         SELECT grp AS "method", COUNT(*)::int AS "payments",
+                COALESCE(-SUM(amt), 0)::float AS "refunded"
+         FROM pays WHERE amt < 0 GROUP BY grp ORDER BY "refunded" DESC`,
+        params
+      ),
+      pool.query(
+        `${refundsCte}
+         SELECT order_id::text AS "orderId", business_date::text AS "date", park, status,
+                sales_person_name AS "salesperson", sales_office_name AS "office",
+                COALESCE(NULLIF(TRIM(primary_contact_name), ''), NULLIF(TRIM(contact_group_name), '')) AS "customer",
+                charged::float AS "charged", refunded::float AS "refunded", methods,
+                (refunded >= charged - 0.01) AS "isFull"
+         FROM refund_orders ORDER BY business_date DESC, refunded DESC LIMIT 200`,
+        params
+      ),
+    ]);
+
+    res.json({
+      kpis: kpis.rows[0] || { refunded: 0, refundOrders: 0, avgRefund: 0, fullRefunds: 0, voids: 0, cancellations: 0, grossCollected: 0, totalOrders: 0 },
+      trend: trend.rows,
+      granularity: singleDay ? 'hour' : 'day',
+      byPerson: byPerson.rows,
+      byOffice: byOffice.rows,
+      byMethod: byMethod.rows,
+      detail: detail.rows,
+    });
+  } catch (err) {
+    console.error('analytics refunds error:', err.message);
+    res.status(500).json({ error: 'Failed to load refund report' });
+  }
+});
+
 // GET /api/analytics/sync-status
 router.get('/sync-status', async (_req, res) => {
   try {

@@ -8,6 +8,7 @@ import RevenueTrends from './pages/RevenueTrends.jsx';
 import ProductMix from './pages/ProductMix.jsx';
 import Drinks from './pages/Drinks.jsx';
 import Cabanas from './pages/Cabanas.jsx';
+import Refunds from './pages/Refunds.jsx';
 import SalesOffices from './pages/SalesOffices.jsx';
 import PaymentMethods from './pages/PaymentMethods.jsx';
 
@@ -33,6 +34,7 @@ function Gate() {
             <Route path="/cabanas" element={<Cabanas />} />
             <Route path="/offices" element={<SalesOffices />} />
             <Route path="/payment-methods" element={<PaymentMethods />} />
+            <Route path="/refunds" element={<Refunds />} />
           </Routes>
         </Layout>
       </BrowserRouter>

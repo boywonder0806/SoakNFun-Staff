@@ -12,6 +12,7 @@ const NAV = [
   { to: '/cabanas',         label: 'Cabanas' },
   { to: '/offices',         label: 'Sales Offices' },
   { to: '/payment-methods', label: 'Payment Methods' },
+  { to: '/refunds',         label: 'Refunds' },
 ];
 
 export default function Layout({ children }) {
