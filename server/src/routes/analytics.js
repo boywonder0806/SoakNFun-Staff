@@ -334,6 +334,203 @@ router.get('/drinks', async (req, res) => {
   }
 });
 
+// GET /api/analytics/cabanas — the Blue Bayou cabana report. BB-only, park
+// filter ignored (GI's cabana program is too small to matter yet).
+//
+// Two halves with different date bases, same split as /daily:
+// - BOOKINGS are 'Blue Bayou Cabana N' rate items counted on their EVENT
+//   (visit) date — cabanas are booked days ahead, so purchase date would
+//   put the booking on the wrong day. Occupancy = booked ÷ (8 cabanas ×
+//   operating days), where operating days are days with gate activity,
+//   capped at today so future days don't dilute the denominator.
+//   'Blue Bayou Covered Area N' (the groups pavilion) is reported
+//   separately, not in occupancy.
+// - FOOD is every Product line item rung through the 'BB Cabana Services'
+//   office (the covered-area service engine), on business_date — that's
+//   when the money moved. The office name has a trailing space in
+//   RocketRez, hence TRIM(). $0 'CABANA N' tab markers are excluded —
+//   they tag which cabana an order belongs to, but only ~25% of orders
+//   carry one, so per-cabana food attribution would mislead.
+const CABANA_RATE = `li.type = 'Rate' AND li.name ILIKE 'Blue Bayou Cabana%'`;
+const CABANA_FOOD_CTE = `
+  WITH food_items AS (
+    SELECT li.name, li.quantity, li.subtotal,
+           o.order_id, o.business_date, o.created_date, o.is_web_order,
+      CASE
+        WHEN li.name ILIKE '%Daiquiri%' OR li.name ILIKE '%Cocktail%' OR li.name ILIKE '%Michelob%'
+          OR li.name ILIKE '%Corona%' OR li.name ILIKE '%Miller%' OR li.name ILIKE '%Bud Light%'
+          OR li.name ILIKE '%Abita%' OR li.name ILIKE '%Coors%' OR li.name ILIKE '%Modelo%'
+          OR li.name ILIKE '%Twisted Tea%' OR li.name ILIKE '%Truly%' OR li.name ILIKE '%Absolut%' THEN 'alcohol'
+        WHEN li.name ILIKE '%Bottled%' OR li.name ILIKE '%Frozen Lemonade%'
+          OR li.name ILIKE '%Frozen Melonade%' OR li.name ILIKE '%Gatorde%'                         THEN 'drinks'
+        ELSE 'food'
+      END AS category
+    FROM analytics_order_line_items li
+    JOIN analytics_orders o ON o.order_id = li.order_id
+    WHERE o.status = 'Active' AND o.park = 'BB' AND o.business_date BETWEEN $1 AND $2
+      AND TRIM(li.sales_office_name) = 'BB Cabana Services' AND li.type = 'Product'
+      AND li.name NOT ILIKE 'CABANA %' AND li.name <> 'Test Product' AND li.subtotal > 0
+  )`;
+
+router.get('/cabanas', async (req, res) => {
+  try {
+    const { start, end } = dateRange(req);
+    const params = [start, end];
+    const singleDay = start === end;
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+
+    const bookedJoin = `
+      FROM analytics_order_line_items li
+      JOIN analytics_orders o ON o.order_id = li.order_id
+      WHERE o.status = 'Active' AND ${CABANA_RATE} AND li.event_date BETWEEN $1 AND $2`;
+
+    const foodTrendSql = singleDay
+      ? `SELECT to_char(date_trunc('hour', created_date AT TIME ZONE 'America/Chicago'), 'FMHH12AM') AS "bucket",
+                COUNT(DISTINCT order_id)::int      AS "orders",
+                COALESCE(SUM(subtotal), 0)::float   AS "revenue"
+         FROM food_items
+         GROUP BY date_trunc('hour', created_date AT TIME ZONE 'America/Chicago')
+         ORDER BY date_trunc('hour', created_date AT TIME ZONE 'America/Chicago')`
+      : `SELECT business_date::text AS "bucket",
+                COUNT(DISTINCT order_id)::int      AS "orders",
+                COALESCE(SUM(subtotal), 0)::float   AS "revenue"
+         FROM food_items GROUP BY 1 ORDER BY 1`;
+
+    const [byCabana, coveredArea, channels, leadTime, byDow, bookTrend, operatingDays, foodItems, foodTotals, foodTrend] = await Promise.all([
+      pool.query(
+        `SELECT li.name AS "name", SUM(li.quantity)::int AS "quantity",
+                COALESCE(SUM(li.subtotal), 0)::float AS "revenue"
+         ${bookedJoin} GROUP BY li.name ORDER BY li.name`,
+        params
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(li.quantity), 0)::int AS "quantity",
+                COALESCE(SUM(li.subtotal), 0)::float AS "revenue"
+         FROM analytics_order_line_items li
+         JOIN analytics_orders o ON o.order_id = li.order_id
+         WHERE o.status = 'Active' AND li.type = 'Rate'
+           AND li.name ILIKE 'Blue Bayou Covered Area%' AND li.event_date BETWEEN $1 AND $2`,
+        params
+      ),
+      pool.query(
+        `SELECT o.is_web_order AS "isWebOrder", SUM(li.quantity)::int AS "quantity",
+                COALESCE(SUM(li.subtotal), 0)::float AS "revenue"
+         ${bookedJoin} GROUP BY o.is_web_order`,
+        params
+      ),
+      pool.query(
+        `SELECT COALESCE(AVG(li.event_date - o.business_date), 0)::float AS "avgDays",
+                COUNT(*) FILTER (WHERE li.event_date - o.business_date <= 0)::int                                        AS "sameDay",
+                COUNT(*) FILTER (WHERE li.event_date - o.business_date BETWEEN 1 AND 3)::int                              AS "d1to3",
+                COUNT(*) FILTER (WHERE li.event_date - o.business_date BETWEEN 4 AND 7)::int                               AS "d4to7",
+                COUNT(*) FILTER (WHERE li.event_date - o.business_date BETWEEN 8 AND 14)::int                               AS "d8to14",
+                COUNT(*) FILTER (WHERE li.event_date - o.business_date > 14)::int                                            AS "d15plus"
+         ${bookedJoin}`,
+        params
+      ),
+      pool.query(
+        `SELECT to_char(li.event_date, 'Dy') AS "dow",
+                SUM(li.quantity)::int AS "booked",
+                COUNT(DISTINCT li.event_date)::int AS "days"
+         ${bookedJoin} GROUP BY to_char(li.event_date, 'Dy'), to_char(li.event_date, 'ID')
+         ORDER BY to_char(li.event_date, 'ID')`,
+        params
+      ),
+      pool.query(
+        `SELECT li.event_date::text AS "bucket", SUM(li.quantity)::int AS "booked",
+                COALESCE(SUM(li.subtotal), 0)::float AS "revenue"
+         ${bookedJoin} GROUP BY li.event_date ORDER BY li.event_date`,
+        params
+      ),
+      pool.query(
+        `SELECT COUNT(DISTINCT li.event_date)::int AS "days"
+         FROM analytics_order_line_items li
+         JOIN analytics_orders o ON o.order_id = li.order_id
+         WHERE o.status = 'Active' AND o.park = 'BB' AND li.type = 'Rate'
+           AND li.event_name ILIKE '%Admission%'
+           AND li.event_date BETWEEN $1 AND LEAST($2::date, $3::date)`,
+        [start, end, today]
+      ),
+      pool.query(
+        `${CABANA_FOOD_CTE}
+         SELECT name, category, SUM(quantity)::int AS "quantity",
+                COALESCE(SUM(subtotal), 0)::float AS "revenue"
+         FROM food_items GROUP BY name, category ORDER BY "revenue" DESC`,
+        params
+      ),
+      pool.query(
+        `${CABANA_FOOD_CTE}
+         SELECT COUNT(DISTINCT order_id)::int AS "orders",
+                COUNT(DISTINCT order_id) FILTER (WHERE is_web_order)::int AS "webOrders",
+                COALESCE(SUM(subtotal), 0)::float AS "revenue"
+         FROM food_items`,
+        params
+      ),
+      pool.query(`${CABANA_FOOD_CTE} ${foodTrendSql}`, params),
+    ]);
+
+    // All 8 cabanas, zero-filled, so empty ones are visible on the page
+    const cabanas = Array.from({ length: 8 }, (_, i) => {
+      const name = `Blue Bayou Cabana ${i + 1}`;
+      const row = byCabana.rows.find(r => r.name === name);
+      return { cabana: i + 1, quantity: row?.quantity || 0, revenue: row?.revenue || 0 };
+    });
+    const booked = cabanas.reduce((s, c) => s + c.quantity, 0);
+    const bookingRevenue = cabanas.reduce((s, c) => s + c.revenue, 0);
+    const days = operatingDays.rows[0].days;
+    const web = channels.rows.find(r => r.isWebOrder) || { quantity: 0, revenue: 0 };
+    const gate = channels.rows.find(r => !r.isWebOrder) || { quantity: 0, revenue: 0 };
+    const lt = leadTime.rows[0];
+    const food = foodTotals.rows[0];
+
+    const foodCategories = { food: { quantity: 0, revenue: 0 }, alcohol: { quantity: 0, revenue: 0 }, drinks: { quantity: 0, revenue: 0 } };
+    for (const p of foodItems.rows) {
+      foodCategories[p.category].quantity += p.quantity;
+      foodCategories[p.category].revenue += p.revenue;
+    }
+
+    res.json({
+      bookings: {
+        booked,
+        revenue: bookingRevenue,
+        avgRate: booked ? bookingRevenue / booked : 0,
+        occupancy: days ? booked / (8 * days) : null,
+        operatingDays: days,
+        byCabana: cabanas,
+        byDow: byDow.rows.map(r => ({ ...r, occupancy: r.days ? r.booked / (8 * r.days) : 0 })),
+        leadTime: {
+          avgDays: lt.avgDays,
+          buckets: [
+            { label: 'Same day', count: lt.sameDay },
+            { label: '1–3 days', count: lt.d1to3 },
+            { label: '4–7 days', count: lt.d4to7 },
+            { label: '8–14 days', count: lt.d8to14 },
+            { label: '15+ days', count: lt.d15plus },
+          ],
+        },
+        channels: { online: { quantity: web.quantity, revenue: web.revenue },
+                    inPerson: { quantity: gate.quantity, revenue: gate.revenue } },
+        coveredArea: coveredArea.rows[0],
+        trend: bookTrend.rows,
+      },
+      food: {
+        revenue: food.revenue,
+        orders: food.orders,
+        webOrders: food.webOrders,
+        avgOrder: food.orders ? food.revenue / food.orders : 0,
+        perCabana: booked ? food.revenue / booked : 0,
+        categories: foodCategories,
+        topItems: foodItems.rows.slice(0, 12),
+        trend: foodTrend.rows,
+        granularity: singleDay ? 'hour' : 'day',
+      },
+    });
+  } catch (err) {
+    console.error('analytics cabanas error:', err.message);
+    res.status(500).json({ error: 'Failed to load cabana report' });
+  }
+});
+
 // GET /api/analytics/weather — current conditions + today's high/precip at
 // the park (Tomorrow.io), cached 10 minutes so dashboard refreshes don't
 // burn the API quota.

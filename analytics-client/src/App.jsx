@@ -7,6 +7,7 @@ import Overview from './pages/Overview.jsx';
 import RevenueTrends from './pages/RevenueTrends.jsx';
 import ProductMix from './pages/ProductMix.jsx';
 import Drinks from './pages/Drinks.jsx';
+import Cabanas from './pages/Cabanas.jsx';
 import SalesOffices from './pages/SalesOffices.jsx';
 import PaymentMethods from './pages/PaymentMethods.jsx';
 
@@ -29,6 +30,7 @@ function Gate() {
             <Route path="/revenue" element={<RevenueTrends />} />
             <Route path="/products" element={<ProductMix />} />
             <Route path="/drinks" element={<Drinks />} />
+            <Route path="/cabanas" element={<Cabanas />} />
             <Route path="/offices" element={<SalesOffices />} />
             <Route path="/payment-methods" element={<PaymentMethods />} />
           </Routes>
