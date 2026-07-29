@@ -641,22 +641,115 @@ router.get('/offices', async (req, res) => {
   }
 });
 
-// GET /api/analytics/payment-methods
+// GET /api/analytics/payment-methods — advanced tender report.
+//
+// RocketRez method names encode "{park} - {processor} - [wallet -] {brand}"
+// (e.g. 'GI - Stripe 2.0 - Apple Pay - Visa'), so groups and card brands are
+// parsed straight out of the name. Groups: card (Stripe, no wallet), wallet
+// (Apple/Google Pay), paypal, cash, other (payroll deduction, Nayax, prepaid
+// pass, checks, tokens — individually visible in the methods table).
+// Negative payment amounts are refunds; transaction counts and averages use
+// positive payments only so refunds don't drag the averages.
 router.get('/payment-methods', async (req, res) => {
   try {
     const { start, end } = dateRange(req);
     const params = [start, end];
-    const parkSql = parkFilter(req, params);
-    const { rows } = await pool.query(
-      `SELECT pm->>'paymentMethod'                        AS "method",
-              COALESCE(SUM((pm->>'paymentAmount')::numeric), 0)::float AS "amount"
-       FROM analytics_orders o, jsonb_array_elements(o.payment_methods) pm
-       WHERE o.status = 'Active' AND o.business_date BETWEEN $1 AND $2${parkSql}
-       GROUP BY 1
-       ORDER BY "amount" DESC`,
-      params
-    );
-    res.json({ rows });
+    const parkSql = parkFilter(req, params).replace(' AND park', ' AND o.park');
+    const singleDay = start === end;
+
+    const paysCte = `
+      WITH pays AS (
+        SELECT o.business_date, o.created_date,
+               (pm->>'paymentAmount')::numeric AS amount,
+               pm->>'paymentMethod'            AS method,
+          CASE
+            WHEN pm->>'paymentMethod' ILIKE '%Apple Pay%'
+              OR pm->>'paymentMethod' ILIKE '%Google Pay%' THEN 'wallet'
+            WHEN pm->>'paymentMethod' ILIKE '%PayPal%'      THEN 'paypal'
+            WHEN pm->>'paymentMethod' ILIKE '%Cash%'         THEN 'cash'
+            WHEN pm->>'paymentMethod' ILIKE '%Stripe%'        THEN 'card'
+            ELSE 'other'
+          END AS grp,
+          CASE
+            WHEN pm->>'paymentMethod' ILIKE '%Visa%'             THEN 'Visa'
+            WHEN pm->>'paymentMethod' ILIKE '%Mastercard%'        THEN 'Mastercard'
+            WHEN pm->>'paymentMethod' ILIKE '%Discover%'           THEN 'Discover'
+            WHEN pm->>'paymentMethod' ILIKE '%American Express%'    THEN 'American Express'
+          END AS brand
+        FROM analytics_orders o, jsonb_array_elements(o.payment_methods) pm
+        WHERE o.status = 'Active' AND o.business_date BETWEEN $1 AND $2${parkSql}
+      )`;
+
+    const trendSql = singleDay
+      ? `SELECT to_char(date_trunc('hour', created_date AT TIME ZONE 'America/Chicago'), 'FMHH12AM') AS "bucket",
+                COALESCE(SUM(amount) FILTER (WHERE grp = 'card'), 0)::float   AS "card",
+                COALESCE(SUM(amount) FILTER (WHERE grp = 'cash'), 0)::float    AS "cash",
+                COALESCE(SUM(amount) FILTER (WHERE grp = 'wallet'), 0)::float   AS "wallet",
+                COALESCE(SUM(amount) FILTER (WHERE grp = 'paypal'), 0)::float    AS "paypal",
+                COALESCE(SUM(amount) FILTER (WHERE grp = 'other'), 0)::float      AS "other"
+         FROM pays
+         GROUP BY date_trunc('hour', created_date AT TIME ZONE 'America/Chicago')
+         ORDER BY date_trunc('hour', created_date AT TIME ZONE 'America/Chicago')`
+      : `SELECT business_date::text AS "bucket",
+                COALESCE(SUM(amount) FILTER (WHERE grp = 'card'), 0)::float   AS "card",
+                COALESCE(SUM(amount) FILTER (WHERE grp = 'cash'), 0)::float    AS "cash",
+                COALESCE(SUM(amount) FILTER (WHERE grp = 'wallet'), 0)::float   AS "wallet",
+                COALESCE(SUM(amount) FILTER (WHERE grp = 'paypal'), 0)::float    AS "paypal",
+                COALESCE(SUM(amount) FILTER (WHERE grp = 'other'), 0)::float      AS "other"
+         FROM pays GROUP BY 1 ORDER BY 1`;
+
+    const [groups, brands, methods, trend, kpis] = await Promise.all([
+      pool.query(
+        `${paysCte}
+         SELECT grp AS "group",
+                COALESCE(SUM(amount), 0)::float                                  AS "amount",
+                COUNT(*) FILTER (WHERE amount > 0)::int                           AS "transactions",
+                COALESCE(AVG(amount) FILTER (WHERE amount > 0), 0)::float          AS "avgTransaction",
+                COALESCE(-SUM(amount) FILTER (WHERE amount < 0), 0)::float          AS "refunded",
+                COUNT(*) FILTER (WHERE amount < 0)::int                              AS "refundCount"
+         FROM pays GROUP BY grp ORDER BY "amount" DESC`,
+        params
+      ),
+      pool.query(
+        `${paysCte}
+         SELECT brand AS "brand",
+                COALESCE(SUM(amount), 0)::float          AS "amount",
+                COUNT(*) FILTER (WHERE amount > 0)::int   AS "transactions"
+         FROM pays WHERE brand IS NOT NULL
+         GROUP BY brand ORDER BY "amount" DESC`,
+        params
+      ),
+      pool.query(
+        `${paysCte}
+         SELECT method AS "method",
+                COALESCE(SUM(amount), 0)::float                                  AS "amount",
+                COUNT(*) FILTER (WHERE amount > 0)::int                           AS "transactions",
+                COALESCE(AVG(amount) FILTER (WHERE amount > 0), 0)::float          AS "avgTransaction",
+                COALESCE(-SUM(amount) FILTER (WHERE amount < 0), 0)::float          AS "refunded"
+         FROM pays GROUP BY method ORDER BY "amount" DESC`,
+        params
+      ),
+      pool.query(`${paysCte} ${trendSql}`, params),
+      pool.query(
+        `${paysCte}
+         SELECT COALESCE(SUM(amount), 0)::float                                  AS "total",
+                COUNT(*) FILTER (WHERE amount > 0)::int                           AS "transactions",
+                COALESCE(AVG(amount) FILTER (WHERE amount > 0), 0)::float          AS "avgTransaction",
+                COALESCE(-SUM(amount) FILTER (WHERE amount < 0), 0)::float          AS "refunded",
+                COUNT(*) FILTER (WHERE amount < 0)::int                              AS "refundCount"
+         FROM pays`,
+        params
+      ),
+    ]);
+
+    res.json({
+      kpis: kpis.rows[0],
+      groups: groups.rows,
+      brands: brands.rows,
+      methods: methods.rows,
+      trend: trend.rows,
+      granularity: singleDay ? 'hour' : 'day',
+    });
   } catch (err) {
     console.error('analytics payment-methods error:', err.message);
     res.status(500).json({ error: 'Failed to load payment method breakdown' });
