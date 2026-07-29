@@ -84,8 +84,8 @@ export default function Cabanas() {
       <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
         <span className="px-2 py-0.5 rounded-full bg-az/10 text-az-dark font-semibold">Blue Bayou only</span>
         <span>
-          Bookings are counted by visit date; food covers everything rung through the
-          Cabana Services engine, counted when the money moved.
+          Bookings are counted by visit date; food covers every (CS-BB)-tagged item
+          no matter where it was rung, counted when the money moved.
         </span>
       </div>
 
@@ -199,7 +199,7 @@ export default function Cabanas() {
           )}
         </SectionCard>
 
-        <SectionCard title="Cabana Food & Beverage" right={<span className="text-xs text-gray-400">{number(f.webOrders)} of {number(f.orders)} orders via QR</span>}>
+        <SectionCard title="Cabana Food & Beverage" right={<span className="text-xs text-gray-400">{number(f.orders)} orders</span>}>
           <ShareBar segments={FOOD_CATEGORIES.map(c => ({ value: f.categories[c.key]?.revenue || 0, color: c.color }))} />
           <div className="mt-3 space-y-1.5">
             {FOOD_CATEGORIES.map(c => (
@@ -210,6 +210,19 @@ export default function Cabanas() {
                 <span className="w-20 text-right font-semibold text-gray-900 tabular-nums">{money(f.categories[c.key]?.revenue || 0)}</span>
               </div>
             ))}
+          </div>
+          <div className="mt-4 pt-3 border-t border-gray-100">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Ordering channel</p>
+            <div className="space-y-1 text-xs text-gray-600">
+              <div className="flex justify-between">
+                <span>Covered Area engine (guest self-service)</span>
+                <span className="tabular-nums font-medium">{number(f.channels.engine.orders)} orders · {money(f.channels.engine.revenue)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Manual (rung by crew)</span>
+                <span className="tabular-nums font-medium">{number(f.channels.manual.orders)} orders · {money(f.channels.manual.revenue)}</span>
+              </div>
+            </div>
           </div>
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4 mb-1.5">Top items</p>
           <div className="space-y-1 text-xs text-gray-600">

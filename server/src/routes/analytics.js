@@ -345,17 +345,20 @@ router.get('/drinks', async (req, res) => {
 //   capped at today so future days don't dilute the denominator.
 //   'Blue Bayou Covered Area N' (the groups pavilion) is reported
 //   separately, not in occupancy.
-// - FOOD is every Product line item rung through the 'BB Cabana Services'
-//   office (the covered-area service engine), on business_date — that's
-//   when the money moved. The office name has a trailing space in
-//   RocketRez, hence TRIM(). $0 'CABANA N' tab markers are excluded —
-//   they tag which cabana an order belongs to, but only ~25% of orders
-//   carry one, so per-cabana food attribution would mislead.
+// - FOOD is every Product line item whose name carries the '(CS-BB)' tag —
+//   per the owner, that suffix is the authoritative marker for cabana
+//   items. Counted on business_date, when the money moved. $0 'CABANA N'
+//   items are excluded: they're print markers manual orders attach so the
+//   slip shows the cabana, not sales. Ordering channel: orders created by
+//   the 'BB - Covered Area Services' web engine (salesperson name, which
+//   coincides with is_web_order) are guest self-service; orders rung by a
+//   named user in the Cabana Services office are manual/staff orders.
 const CABANA_RATE = `li.type = 'Rate' AND li.name ILIKE 'Blue Bayou Cabana%'`;
 const CABANA_FOOD_CTE = `
   WITH food_items AS (
     SELECT li.name, li.quantity, li.subtotal,
-           o.order_id, o.business_date, o.created_date, o.is_web_order,
+           o.order_id, o.business_date, o.created_date,
+           (o.is_web_order OR o.sales_person_name ILIKE '%Covered Area Service%') AS is_engine,
       CASE
         WHEN li.name ILIKE '%Daiquiri%' OR li.name ILIKE '%Cocktail%' OR li.name ILIKE '%Michelob%'
           OR li.name ILIKE '%Corona%' OR li.name ILIKE '%Miller%' OR li.name ILIKE '%Bud Light%'
@@ -368,8 +371,8 @@ const CABANA_FOOD_CTE = `
     FROM analytics_order_line_items li
     JOIN analytics_orders o ON o.order_id = li.order_id
     WHERE o.status = 'Active' AND o.park = 'BB' AND o.business_date BETWEEN $1 AND $2
-      AND TRIM(li.sales_office_name) = 'BB Cabana Services' AND li.type = 'Product'
-      AND li.name NOT ILIKE 'CABANA %' AND li.name <> 'Test Product' AND li.subtotal > 0
+      AND li.type = 'Product' AND li.name LIKE '%(CS-BB)%'
+      AND li.name NOT ILIKE 'CABANA %' AND li.subtotal > 0
   )`;
 
 router.get('/cabanas', async (req, res) => {
@@ -461,8 +464,9 @@ router.get('/cabanas', async (req, res) => {
       pool.query(
         `${CABANA_FOOD_CTE}
          SELECT COUNT(DISTINCT order_id)::int AS "orders",
-                COUNT(DISTINCT order_id) FILTER (WHERE is_web_order)::int AS "webOrders",
-                COALESCE(SUM(subtotal), 0)::float AS "revenue"
+                COUNT(DISTINCT order_id) FILTER (WHERE is_engine)::int AS "engineOrders",
+                COALESCE(SUM(subtotal), 0)::float AS "revenue",
+                COALESCE(SUM(subtotal) FILTER (WHERE is_engine), 0)::float AS "engineRevenue"
          FROM food_items`,
         params
       ),
@@ -516,7 +520,10 @@ router.get('/cabanas', async (req, res) => {
       food: {
         revenue: food.revenue,
         orders: food.orders,
-        webOrders: food.webOrders,
+        channels: {
+          engine: { orders: food.engineOrders, revenue: food.engineRevenue },
+          manual: { orders: food.orders - food.engineOrders, revenue: food.revenue - food.engineRevenue },
+        },
         avgOrder: food.orders ? food.revenue / food.orders : 0,
         perCabana: booked ? food.revenue / booked : 0,
         categories: foodCategories,
