@@ -872,30 +872,37 @@ router.get('/refunds', async (req, res) => {
         FROM pays
         GROUP BY 1,2,3,4,5,6,7,8,9
         HAVING SUM(amt) FILTER (WHERE amt < 0) IS NOT NULL
+      ),
+      marked AS (
+        SELECT r.*, (f.order_id IS NOT NULL) AS flagged, f.note AS flag_note, f.flagged_by
+        FROM refund_orders r
+        LEFT JOIN analytics_refund_flags f ON f.order_id = r.order_id
       )`;
 
     const trendSql = singleDay
       ? `SELECT to_char(date_trunc('hour', created_date AT TIME ZONE 'America/Chicago'), 'FMHH12AM') AS "bucket",
                 COALESCE(SUM(refunded), 0)::float AS "refunded", COUNT(*)::int AS "orders"
-         FROM refund_orders
+         FROM marked WHERE NOT flagged
          GROUP BY date_trunc('hour', created_date AT TIME ZONE 'America/Chicago')
          ORDER BY date_trunc('hour', created_date AT TIME ZONE 'America/Chicago')`
       : `SELECT business_date::text AS "bucket",
                 COALESCE(SUM(refunded), 0)::float AS "refunded", COUNT(*)::int AS "orders"
-         FROM refund_orders GROUP BY 1 ORDER BY 1`;
+         FROM marked WHERE NOT flagged GROUP BY 1 ORDER BY 1`;
 
     const [kpis, trend, byPerson, byOffice, byMethod, detail] = await Promise.all([
       pool.query(
         `${refundsCte}
-         SELECT COALESCE(SUM(refunded), 0)::float                                       AS "refunded",
-                COUNT(*)::int                                                            AS "refundOrders",
-                COALESCE(AVG(refunded), 0)::float                                         AS "avgRefund",
-                COUNT(*) FILTER (WHERE refunded >= charged - 0.01)::int                    AS "fullRefunds",
-                COUNT(*) FILTER (WHERE status = 'Void')::int                                AS "voids",
-                COUNT(*) FILTER (WHERE status = 'Cancelled')::int                            AS "cancellations",
-                (SELECT COALESCE(SUM(amt), 0) FROM pays WHERE amt > 0)::float                 AS "grossCollected",
-                (SELECT COUNT(DISTINCT order_id) FROM pays)::int                               AS "totalOrders"
-         FROM refund_orders`,
+         SELECT COALESCE(SUM(refunded) FILTER (WHERE NOT flagged), 0)::float             AS "refunded",
+                COUNT(*) FILTER (WHERE NOT flagged)::int                                  AS "refundOrders",
+                COALESCE(AVG(refunded) FILTER (WHERE NOT flagged), 0)::float               AS "avgRefund",
+                COUNT(*) FILTER (WHERE NOT flagged AND refunded >= charged - 0.01)::int     AS "fullRefunds",
+                COUNT(*) FILTER (WHERE NOT flagged AND status = 'Void')::int                 AS "voids",
+                COUNT(*) FILTER (WHERE NOT flagged AND status = 'Cancelled')::int             AS "cancellations",
+                COUNT(*) FILTER (WHERE flagged)::int                                           AS "flaggedCount",
+                COALESCE(SUM(refunded) FILTER (WHERE flagged), 0)::float                        AS "flaggedAmount",
+                (SELECT COALESCE(SUM(amt), 0) FROM pays WHERE amt > 0)::float                    AS "grossCollected",
+                (SELECT COUNT(DISTINCT order_id) FROM pays)::int                                  AS "totalOrders"
+         FROM marked`,
         params
       ),
       pool.query(`${refundsCte} ${trendSql}`, params),
@@ -903,21 +910,23 @@ router.get('/refunds', async (req, res) => {
         `${refundsCte}
          SELECT COALESCE(NULLIF(TRIM(sales_person_name), ''), 'Unattributed') AS "person",
                 COUNT(*)::int AS "orders", COALESCE(SUM(refunded), 0)::float AS "refunded"
-         FROM refund_orders GROUP BY 1 ORDER BY "refunded" DESC LIMIT 12`,
+         FROM marked WHERE NOT flagged GROUP BY 1 ORDER BY "refunded" DESC LIMIT 12`,
         params
       ),
       pool.query(
         `${refundsCte}
          SELECT COALESCE(NULLIF(TRIM(sales_office_name), ''), 'Unattributed') AS "office",
                 COUNT(*)::int AS "orders", COALESCE(SUM(refunded), 0)::float AS "refunded"
-         FROM refund_orders GROUP BY 1 ORDER BY "refunded" DESC`,
+         FROM marked WHERE NOT flagged GROUP BY 1 ORDER BY "refunded" DESC`,
         params
       ),
       pool.query(
         `${refundsCte}
          SELECT grp AS "method", COUNT(*)::int AS "payments",
                 COALESCE(-SUM(amt), 0)::float AS "refunded"
-         FROM pays WHERE amt < 0 GROUP BY grp ORDER BY "refunded" DESC`,
+         FROM pays WHERE amt < 0
+           AND order_id NOT IN (SELECT order_id FROM analytics_refund_flags)
+         GROUP BY grp ORDER BY "refunded" DESC`,
         params
       ),
       pool.query(
@@ -926,14 +935,15 @@ router.get('/refunds', async (req, res) => {
                 sales_person_name AS "salesperson", sales_office_name AS "office",
                 COALESCE(NULLIF(TRIM(primary_contact_name), ''), NULLIF(TRIM(contact_group_name), '')) AS "customer",
                 charged::float AS "charged", refunded::float AS "refunded", methods,
-                (refunded >= charged - 0.01) AS "isFull"
-         FROM refund_orders ORDER BY business_date DESC, refunded DESC LIMIT 200`,
+                (refunded >= charged - 0.01) AS "isFull",
+                flagged, flag_note AS "flagNote", flagged_by AS "flaggedBy"
+         FROM marked ORDER BY business_date DESC, refunded DESC LIMIT 200`,
         params
       ),
     ]);
 
     res.json({
-      kpis: kpis.rows[0] || { refunded: 0, refundOrders: 0, avgRefund: 0, fullRefunds: 0, voids: 0, cancellations: 0, grossCollected: 0, totalOrders: 0 },
+      kpis: kpis.rows[0] || { refunded: 0, refundOrders: 0, avgRefund: 0, fullRefunds: 0, voids: 0, cancellations: 0, flaggedCount: 0, flaggedAmount: 0, grossCollected: 0, totalOrders: 0 },
       trend: trend.rows,
       granularity: singleDay ? 'hour' : 'day',
       byPerson: byPerson.rows,
@@ -944,6 +954,42 @@ router.get('/refunds', async (req, res) => {
   } catch (err) {
     console.error('analytics refunds error:', err.message);
     res.status(500).json({ error: 'Failed to load refund report' });
+  }
+});
+
+// POST /api/analytics/refunds/:orderId/flag — mark an order's refund as "not
+// a true refund" (register mistake etc.) with a note; the refunds dashboard
+// excludes it from every aggregate. Upserts so the note can be edited.
+router.post('/refunds/:orderId/flag', async (req, res) => {
+  try {
+    const orderId = Number(req.params.orderId);
+    if (!Number.isInteger(orderId)) return res.status(400).json({ error: 'Invalid order id' });
+    const note = (req.body?.note || '').trim().slice(0, 500) || null;
+    const by = req.user?.name || req.user?.email || `user ${req.user?.id}`;
+    await pool.query(
+      `INSERT INTO analytics_refund_flags (order_id, note, flagged_by)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (order_id) DO UPDATE SET note = EXCLUDED.note, flagged_by = EXCLUDED.flagged_by, flagged_at = NOW()`,
+      [orderId, note, by]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('analytics refund flag error:', err.message);
+    res.status(500).json({ error: 'Failed to flag order' });
+  }
+});
+
+// DELETE /api/analytics/refunds/:orderId/flag — restore the order to the
+// refund calculations.
+router.delete('/refunds/:orderId/flag', async (req, res) => {
+  try {
+    const orderId = Number(req.params.orderId);
+    if (!Number.isInteger(orderId)) return res.status(400).json({ error: 'Invalid order id' });
+    await pool.query('DELETE FROM analytics_refund_flags WHERE order_id = $1', [orderId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('analytics refund unflag error:', err.message);
+    res.status(500).json({ error: 'Failed to unflag order' });
   }
 });
 

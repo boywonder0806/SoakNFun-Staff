@@ -76,6 +76,17 @@ pool.query(`CREATE TABLE IF NOT EXISTS analytics_order_sync_log (
   ran_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`).catch(e => console.error('analytics_order_sync_log migration:', e.message));
 
+// Orders manually flagged as "not a true refund" (register mistakes etc.) —
+// the refunds dashboard excludes these from every aggregate but still shows
+// them, dimmed, in the detail table. No FK on purpose: order rows are
+// delete/reinserted by sync and the flag must survive that.
+pool.query(`CREATE TABLE IF NOT EXISTS analytics_refund_flags (
+  order_id   BIGINT PRIMARY KEY,
+  note       TEXT,
+  flagged_by TEXT,
+  flagged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`).catch(e => console.error('analytics_refund_flags migration:', e.message));
+
 // ── Mapping ───────────────────────────────────────────────────────────────────
 
 function mapOrderRow(order) {

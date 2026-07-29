@@ -56,6 +56,10 @@ export default function Refunds() {
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy]   = useState('date'); // date | amount
   const [search, setSearch]   = useState('');
+  const [flagTarget, setFlagTarget] = useState(null); // row being flagged
+  const [flagNote, setFlagNote]     = useState('');
+  const [savingFlag, setSavingFlag] = useState(false);
+  const [reloadKey, setReloadKey]   = useState(0);
 
   const singleDay = params.startDate === params.endDate;
 
@@ -74,7 +78,25 @@ export default function Refunds() {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [params.startDate, params.endDate, params.park]);
+  }, [params.startDate, params.endDate, params.park, reloadKey]);
+
+  async function submitFlag() {
+    if (!flagTarget) return;
+    setSavingFlag(true);
+    try {
+      await api.post(`/analytics/refunds/${flagTarget.orderId}/flag`, { note: flagNote });
+      setFlagTarget(null);
+      setFlagNote('');
+      setReloadKey(k => k + 1);
+    } finally {
+      setSavingFlag(false);
+    }
+  }
+
+  async function unflag(orderId) {
+    await api.delete(`/analytics/refunds/${orderId}/flag`);
+    setReloadKey(k => k + 1);
+  }
 
   const detail = useMemo(() => {
     if (!data) return [];
@@ -126,6 +148,13 @@ export default function Refunds() {
           sub={`of ${money(kpis.grossCollected)} collected · ${number(kpis.voids)} voids, ${number(kpis.cancellations)} cancelled`}
         />
       </div>
+
+      {kpis.flaggedCount > 0 && (
+        <p className="text-xs text-gray-500">
+          🚩 {number(kpis.flaggedCount)} order{kpis.flaggedCount === 1 ? '' : 's'} ({money(kpis.flaggedAmount)}) flagged
+          as mistakes and excluded from every number on this page.
+        </p>
+      )}
 
       <div className="grid lg:grid-cols-2 gap-4">
         <SectionCard
@@ -234,19 +263,43 @@ export default function Refunds() {
                 <th className="text-left font-semibold px-1 pb-2">Tender</th>
                 <th className="text-right font-semibold px-1 pb-2">Charged</th>
                 <th className="text-right font-semibold px-1 pb-2">Refunded</th>
+                <th className="px-1 pb-2" />
               </tr>
             </thead>
             <tbody>
               {detail.map(r => (
-                <tr key={r.orderId} className="border-t border-gray-50">
+                <tr key={r.orderId} className={`border-t border-gray-50 ${r.flagged ? 'opacity-50' : ''}`}>
                   <td className="px-1 py-1.5 tabular-nums font-medium text-gray-900">#{r.orderId}</td>
                   <td className="px-1 py-1.5 text-gray-500 whitespace-nowrap">{shortDate(r.date)}</td>
                   <td className="px-1 py-1.5"><StatusChip status={r.status} isFull={r.isFull} /></td>
-                  <td className="px-1 py-1.5 text-gray-600 truncate max-w-40">{r.customer || '—'}</td>
+                  <td className="px-1 py-1.5 text-gray-600 max-w-40">
+                    <p className="truncate">{r.customer || '—'}</p>
+                    {r.flagged && (
+                      <p className="text-[11px] text-amber-600 truncate" title={`${r.flagNote || 'No note'} — ${r.flaggedBy}`}>
+                        🚩 {r.flagNote || 'Flagged'} · {r.flaggedBy}
+                      </p>
+                    )}
+                  </td>
                   <td className="px-1 py-1.5 text-gray-600 truncate max-w-44">{r.salesperson || '—'}</td>
                   <td className="px-1 py-1.5 text-gray-400 text-xs whitespace-nowrap">{r.methods}</td>
                   <td className="px-1 py-1.5 text-right tabular-nums text-gray-400">{moneyPrecise(r.charged)}</td>
-                  <td className="px-1 py-1.5 text-right tabular-nums font-semibold text-red-600">−{moneyPrecise(r.refunded)}</td>
+                  <td className={`px-1 py-1.5 text-right tabular-nums font-semibold ${r.flagged ? 'text-gray-400 line-through' : 'text-red-600'}`}>
+                    −{moneyPrecise(r.refunded)}
+                  </td>
+                  <td className="px-1 py-1.5 text-right whitespace-nowrap">
+                    {r.flagged ? (
+                      <button onClick={() => unflag(r.orderId)}
+                        className="text-xs text-gray-500 hover:text-gray-800 font-medium">
+                        Unflag
+                      </button>
+                    ) : (
+                      <button onClick={() => { setFlagTarget(r); setFlagNote(''); }}
+                        title="Flag as not a true refund — excludes it from the numbers"
+                        className="text-xs text-gray-400 hover:text-amber-600 font-medium">
+                        🚩 Flag
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -261,6 +314,38 @@ export default function Refunds() {
           <p className="mt-2 text-[11px] text-gray-400">Showing the most recent 200 refunded orders — narrow the date range to see everything.</p>
         )}
       </SectionCard>
+
+      {flagTarget && (
+        <div className="fixed inset-0 z-50 bg-gray-900/40 flex items-center justify-center p-4"
+             onClick={() => !savingFlag && setFlagTarget(null)}>
+          <div className="bg-white rounded-2xl shadow-xl p-5 w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <p className="text-sm font-semibold text-gray-800">
+              Flag order #{flagTarget.orderId} as not a true refund
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              −{moneyPrecise(flagTarget.refunded)} · {flagTarget.salesperson || 'no salesperson'} ·
+              {' '}{shortDate(flagTarget.date)}. The order stays visible below but is removed from
+              every refund number on this page.
+            </p>
+            <textarea
+              autoFocus value={flagNote} onChange={e => setFlagNote(e.target.value)}
+              placeholder="Why is this not a true refund? (e.g. rung twice by mistake, test order…)"
+              rows={3} maxLength={500}
+              className="mt-3 w-full px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg text-gray-700 resize-none focus:outline-none focus:ring-1 focus:ring-az"
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button onClick={() => setFlagTarget(null)} disabled={savingFlag}
+                className="px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded-lg">
+                Cancel
+              </button>
+              <button onClick={submitFlag} disabled={savingFlag}
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-az hover:bg-az-dark rounded-lg disabled:opacity-50">
+                {savingFlag ? 'Flagging…' : '🚩 Flag order'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
