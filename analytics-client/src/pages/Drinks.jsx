@@ -54,7 +54,7 @@ export default function Drinks() {
     return () => { cancelled = true; };
   }, [params.startDate, params.endDate]);
 
-  if (park === 'GI') {
+  if (park !== 'BB') {
     return (
       <div className="card p-10 text-center">
         <p className="text-3xl mb-2">🥤</p>

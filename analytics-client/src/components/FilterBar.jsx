@@ -8,9 +8,9 @@ const PRESETS = [
 ];
 
 const PARKS = [
-  { value: 'ALL', label: 'Both Parks' },
   { value: 'BB', label: 'Blue Bayou' },
   { value: 'GI', label: 'Gulf Islands' },
+  { value: 'ALL', label: 'Both Parks' },
 ];
 
 export default function FilterBar() {
