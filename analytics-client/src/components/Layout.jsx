@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { hubUrl } from '../lib/hub.js';
 import FilterBar from './FilterBar.jsx';
@@ -28,6 +28,10 @@ const NAV_SECTIONS = [
 
 export default function Layout({ children }) {
   const { user, logout } = useAuth();
+  // Reporting pages generate a report on demand with their own date/park
+  // controls, rather than reading the shared live-dashboard date filter —
+  // so the global filter bar (and its sync-status readout) is irrelevant there.
+  const isReportPage = useLocation().pathname.startsWith('/reports');
 
   function handleLogout() {
     logout();
@@ -83,10 +87,12 @@ export default function Layout({ children }) {
       </aside>
 
       <main className="flex-1 min-w-0 print:w-full">
-        <div className="sticky top-0 z-10 bg-slate-100/90 backdrop-blur border-b border-gray-200 px-6 py-3 flex items-center justify-between gap-4 flex-wrap print:hidden">
-          <FilterBar />
-          <SyncStatus />
-        </div>
+        {!isReportPage && (
+          <div className="sticky top-0 z-10 bg-slate-100/90 backdrop-blur border-b border-gray-200 px-6 py-3 flex items-center justify-between gap-4 flex-wrap print:hidden">
+            <FilterBar />
+            <SyncStatus />
+          </div>
+        )}
         <div className="px-6 py-6 print:p-0">{children}</div>
       </main>
     </div>
