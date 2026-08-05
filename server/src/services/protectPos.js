@@ -63,10 +63,9 @@ function buildPayload(order, lineItems) {
     amount: Math.abs(total),
     currency: 'USD',
     lineItems: lineItems.slice(0, 200).map(li => ({
-      name: li.name,
+      title: li.name,
       quantity: li.quantity,
-      unitPrice: Number(li.price),
-      total: Number(li.subtotal),
+      price: Number(li.price),
     })),
     location: {
       id: order.sales_office_id != null ? String(order.sales_office_id) : '',
