@@ -18,6 +18,12 @@
  * repost.
  */
 import pool from '../db/index.js';
+import { Agent } from 'undici';
+
+// The NVR presents a self-signed cert (same reason the DB pool and the
+// Protect camera-auth curl checks use rejectUnauthorized: false) — scoped to
+// just this Agent so it never weakens TLS for RocketRez/Stripe/anything else.
+const insecureAgent = new Agent({ connect: { rejectUnauthorized: false } });
 
 pool.query(`CREATE TABLE IF NOT EXISTS analytics_pos_events (
   order_id   BIGINT PRIMARY KEY,
@@ -41,6 +47,7 @@ async function postTransaction(camId, payload) {
     method: 'POST',
     headers: { 'X-API-KEY': process.env.PROTECT_API_KEY, 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    dispatcher: insecureAgent,
   });
   const body = await res.json().catch(() => null);
   return { ok: res.ok, status: res.status, body };
