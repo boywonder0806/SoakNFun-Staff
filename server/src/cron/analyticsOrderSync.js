@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { syncRange, syncTrailingDays, ensureBackfilled } from '../services/analyticsOrders.js';
 import { centralToday } from '../services/rocketrez.js';
+import { syncCrewLineToProtect } from '../services/protectPos.js';
 
 /**
  * Tiered sync for the analytics dashboard's order history.
@@ -35,6 +36,9 @@ export function startAnalyticsOrderSyncCron() {
     try {
       const today = centralToday();
       await syncRange(today, today, 'today');
+      // Piggybacks on this tier: Crew Line POS-camera overlay needs orders
+      // as fresh as they land, and this is the tightest cycle we already run.
+      await syncCrewLineToProtect().catch(e => console.error('Protect POS sync failed:', e.message));
     } catch (e) {
       console.error('Analytics today sync failed:', e.message);
     } finally {
@@ -66,5 +70,5 @@ export function startAnalyticsOrderSyncCron() {
     ensureBackfilled().catch(e => console.error('Analytics order backfill failed:', e.message));
   }, 60_000);
 
-  console.log('Analytics order sync cron scheduled (5-min today, 15-min/7-day, nightly/30-day)');
+  console.log('Analytics order sync cron scheduled (5-min today, 15-min/7-day, nightly/30-day, Crew Line POS overlay on the 5-min tier)');
 }
