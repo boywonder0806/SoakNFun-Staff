@@ -62,10 +62,11 @@ function buildPayload(order, lineItems) {
     externalId: `bayoustaff-order-${order.order_id}`,
     amount: Math.abs(total),
     currency: 'USD',
+    // The API's own AJV validator rejected every other shape tried (name/
+    // unitPrice/total, then +price) — title + quantity is what it actually accepts.
     lineItems: lineItems.slice(0, 200).map(li => ({
       title: li.name,
       quantity: li.quantity,
-      price: Number(li.price),
     })),
     location: {
       id: order.sales_office_id != null ? String(order.sales_office_id) : '',
@@ -131,6 +132,12 @@ export async function syncCrewLineToProtect() {
     liByOrder.get(li.order_id).push(li);
   }
 
+  // Protect rate-limits at 10 req/sec — steady-state real-time posting is
+  // nowhere near that (a handful of Crew Kitchen orders per 5-min tick), but
+  // a backlog catch-up after downtime can post dozens at once. ~6/sec stays
+  // safely under the limit.
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
   let posted = 0, failed = 0;
   for (const order of orders) {
     const payload = buildPayload(order, liByOrder.get(order.order_id) || []);
@@ -139,10 +146,12 @@ export async function syncCrewLineToProtect() {
       if (ok) {
         await recordSuccess(order.order_id, camId, body?.eventId);
         posted++;
-      } else if (status === 409) {
-        // Protect is mid-processing a duplicate of this externalId — leave
-        // unrecorded so the next tick retries once it clears.
-        console.warn(`Protect POS 409 for order ${order.order_id}, will retry next tick`);
+      } else if (status === 409 || status === 429) {
+        // 409: Protect is mid-processing a duplicate of this externalId.
+        // 429: rate-limited. Both transient — leave unrecorded so the next
+        // tick retries without burning one of the capped attempts.
+        console.warn(`Protect POS ${status} for order ${order.order_id}, will retry next tick`);
+        if (status === 429) await sleep(1000);
       } else {
         await recordFailure(order.order_id, camId, `HTTP ${status}: ${JSON.stringify(body)}`);
         failed++;
@@ -151,6 +160,7 @@ export async function syncCrewLineToProtect() {
       await recordFailure(order.order_id, camId, e.message);
       failed++;
     }
+    await sleep(150);
   }
   if (posted || failed) console.log(`Protect POS sync (Crew Line): ${posted} posted, ${failed} failed`);
 }
