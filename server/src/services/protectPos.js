@@ -53,13 +53,23 @@ async function postTransaction(camId, payload) {
   return { ok: res.ok, status: res.status, body };
 }
 
+// RocketRez method names are "{park} - {processor} - [wallet -] {brand}"
+// (plus a stray trailing space on some, e.g. "BB - Payroll Deduction ") —
+// the park prefix is redundant on a single-park camera overlay, so strip it
+// for a clean "Payroll Deduction" / "Cash" / "Stripe 2.0 - Visa" display.
+function cleanPaymentType(method) {
+  return (method || '').trim().replace(/^(BB|GI)\s*-\s*/i, '').trim();
+}
+
 // order.total < 0 covers the rare fully-refunded Crew Kitchen order; Protect
 // wants a non-negative amount plus a direction, not a signed amount.
 function buildPayload(order, lineItems) {
   const total = Number(order.total);
   return {
     type: total < 0 ? 'refund' : 'sale',
-    externalId: `bayoustaff-order-${order.order_id}`,
+    // Protect displays this directly next to "Sale"/"Refund" on the overlay —
+    // the bare order number reads far cleaner than a namespaced string.
+    externalId: String(order.order_id),
     amount: Math.abs(total),
     currency: 'USD',
     // The API's own AJV validator rejected every other shape tried (name/
@@ -73,7 +83,7 @@ function buildPayload(order, lineItems) {
       name: (order.sales_office_name || '').trim(),
     },
     paymentTypes: (order.payment_methods || [])
-      .map(pm => pm.paymentMethod).filter(Boolean).slice(0, 20),
+      .map(pm => cleanPaymentType(pm.paymentMethod)).filter(Boolean).slice(0, 20),
     timestamp: new Date(order.created_date).getTime(),
   };
 }
