@@ -55,10 +55,22 @@ async function postTransaction(camId, payload) {
 
 // RocketRez method names are "{park} - {processor} - [wallet -] {brand}"
 // (plus a stray trailing space on some, e.g. "BB - Payroll Deduction ") —
-// the park prefix is redundant on a single-park camera overlay, so strip it
-// for a clean "Payroll Deduction" / "Cash" / "Stripe 2.0 - Visa" display.
+// collapse them to what a crew member actually wants to see on the overlay:
+//   "BB - Stripe 2.0 - Visa"               -> "Card (Visa)"
+//   "BB - Stripe 2.0 - Apple Pay - Visa"   -> "Card (Visa)"   (wallet folded into the card brand)
+//   "BB - Token Redemption"                -> "Token"
+//   "BB - Cash" / "BB - Payroll Deduction" -> "Cash" / "Payroll Deduction" (prefix stripped, otherwise as-is)
+const CARD_BRANDS = ['American Express', 'Mastercard', 'Discover', 'Visa'];
+const CARD_BRAND_LABEL = { 'American Express': 'Amex' };
+
 function cleanPaymentType(method) {
-  return (method || '').trim().replace(/^(BB|GI)\s*-\s*/i, '').trim();
+  const cleaned = (method || '').trim().replace(/^(BB|GI)\s*-\s*/i, '').trim();
+  if (/^Stripe/i.test(cleaned)) {
+    const brand = CARD_BRANDS.find(b => cleaned.toLowerCase().endsWith(b.toLowerCase()));
+    if (brand) return `Card (${CARD_BRAND_LABEL[brand] || brand})`;
+  }
+  if (/^Token Redemption$/i.test(cleaned)) return 'Token';
+  return cleaned;
 }
 
 // order.total < 0 covers the rare fully-refunded Crew Kitchen order; Protect
