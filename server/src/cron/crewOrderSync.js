@@ -8,7 +8,11 @@ import { syncTrailingDays, ensureBackfilled } from '../services/crewOrders.js';
 const NIGHTLY_LOOKBACK_DAYS = 30;
 
 export function startCrewOrderSyncCron() {
-  // 5:00 AM Central — parks are closed, RocketRez is quiet
+  // 5:00 AM Central — parks are closed, RocketRez is quiet. Analytics' own
+  // nightly sync (analyticsOrderSync.js) runs at 5:20 to avoid starting a
+  // second 30-day pull at the same instant; both also share a request gate
+  // (rocketrez.js withRRGate) so they queue instead of racing if they ever
+  // do overlap.
   cron.schedule('0 5 * * *', () => {
     syncTrailingDays(NIGHTLY_LOOKBACK_DAYS, 'nightly')
       .catch(e => console.error('Nightly crew order sync failed:', e.message));

@@ -59,8 +59,11 @@ export function startAnalyticsOrderSyncCron() {
     }
   }, { timezone: 'America/Chicago' });
 
-  // Nightly at 5:00 AM Central — parks are closed, RocketRez is quiet
-  cron.schedule('0 5 * * *', () => {
+  // Nightly at 5:20 AM Central — offset from crew order sync's 5:00 AM run
+  // (crewOrderSync.js) so the two heaviest jobs don't both start a 30-day
+  // paginated pull in the same instant. They also share a request gate
+  // (rocketrez.js withRRGate) that queues either job if they do overlap.
+  cron.schedule('20 5 * * *', () => {
     syncTrailingDays(NIGHTLY_LOOKBACK_DAYS, 'nightly')
       .catch(e => console.error('Analytics nightly sync failed:', e.message));
   }, { timezone: 'America/Chicago' });

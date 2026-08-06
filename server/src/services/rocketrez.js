@@ -27,6 +27,21 @@ export async function getRRToken() {
 
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// ── Bulk-pull gate ────────────────────────────────────────────────────────
+// Crew order sync, and analytics sync's today/recent/nightly tiers, each run
+// on their own independent cron schedule — several land on the same minute
+// (all fire at :00/:05/:15, and both nightly jobs at 5 AM Central). Left
+// uncoordinated, two paginated pulls firing at once blow through RocketRez's
+// burst limit and produce sustained 429s that exhaust rrFetch's own retry
+// budget, aborting the whole sync. Funnel every bulk pull through one queue
+// so only one is ever in flight, regardless of how many jobs start together.
+let rrGateTail = Promise.resolve();
+function withRRGate(fn) {
+  const run = rrGateTail.then(fn, fn);
+  rrGateTail = run.then(() => {}, () => {}); // next caller waits regardless of outcome
+  return run;
+}
+
 // RocketRez throttles bursts with 429s — honor Retry-After and back off
 // instead of failing the whole request chain.
 export async function rrFetch(url, options, attempts = 4) {
@@ -50,7 +65,12 @@ export function centralDate(iso) {
 
 // Pages through GET /v1/orders for a date range, unfiltered — returns every
 // order RocketRez has for the window, regardless of type or sales office.
-export async function fetchOrdersRaw(startDate, endDate) {
+// Gated (see withRRGate above) so concurrent callers queue instead of racing.
+export function fetchOrdersRaw(startDate, endDate) {
+  return withRRGate(() => fetchOrdersRawInner(startDate, endDate));
+}
+
+async function fetchOrdersRawInner(startDate, endDate) {
   const token = await getRRToken();
   const base  = (process.env.ROCKETREZ_BASE_URL || '').replace(/\/$/, '');
 
