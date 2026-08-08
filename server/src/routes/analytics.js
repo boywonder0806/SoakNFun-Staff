@@ -1155,17 +1155,24 @@ router.get('/season-passes', async (req, res) => {
            WHEN li.name ILIKE '%Gulf Islands%' OR li.name ILIKE 'GI %'     THEN 'Gulf Islands'
            ELSE 'Other' END`;
 
-    // Hour buckets use the order's created hour — right for gate sales
-    // (order created when the guest walks up); for an advance-web order
-    // upgraded on the visit day the append time isn't recorded anywhere, so
-    // its hour is the original purchase hour. The DAY is still correct.
+    // Upgrades only ever happen in person at the park (per the owner — you
+    // can't buy one in advance), so an upgrade's order.created_date is never
+    // the upgrade moment itself when it's appended to an existing GA order:
+    // it's whenever that order was ORIGINALLY created, which for an
+    // advance-purchased GA ticket can be weeks before the actual upgrade,
+    // and even for a same-day walk-up ticket may just be when the GA ticket
+    // (not the upgrade) was rung up. RocketRez records no per-line-item
+    // timestamp for the append (documented in analyticsOrders.js — the same
+    // reason line items are replaced rather than diffed on sync), so there
+    // is no hour we can trust for an upgrade at all. Hourly view therefore
+    // tracks 'new' pass purchases only, where created_date reliably IS the
+    // purchase moment; the day's upgrade total is surfaced as a plain
+    // non-hourly figure instead of a fabricated hour.
     const salesTrendSql = singleDay
       ? `SELECT to_char(date_trunc('hour', o.created_date AT TIME ZONE 'America/Chicago'), 'FMHH12AM') AS "bucket",
-                COALESCE(SUM(li.quantity) FILTER (WHERE ${kindCase} = 'new'), 0)::int      AS "newQty",
-                COALESCE(SUM(li.subtotal) FILTER (WHERE ${kindCase} = 'new'), 0)::float     AS "newRevenue",
-                COALESCE(SUM(li.quantity) FILTER (WHERE ${kindCase} = 'upgrade'), 0)::int    AS "upgradeQty",
-                COALESCE(SUM(li.subtotal) FILTER (WHERE ${kindCase} = 'upgrade'), 0)::float   AS "upgradeRevenue"
-         ${salesJoin}
+                COALESCE(SUM(li.quantity), 0)::int    AS "newQty",
+                COALESCE(SUM(li.subtotal), 0)::float   AS "newRevenue"
+         ${salesJoin} AND ${kindCase} = 'new'
          GROUP BY date_trunc('hour', o.created_date AT TIME ZONE 'America/Chicago')
          ORDER BY date_trunc('hour', o.created_date AT TIME ZONE 'America/Chicago')`
       : `SELECT (${effDate})::text AS "bucket",

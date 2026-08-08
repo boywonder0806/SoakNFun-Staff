@@ -134,7 +134,7 @@ export default function SeasonPasses() {
 
       <div className="grid lg:grid-cols-2 gap-4">
         <SectionCard
-          title={granularity === 'hour' ? 'Pass Sales by Hour' : 'Pass Sales by Day'}
+          title={granularity === 'hour' ? 'New Pass Sales by Hour' : 'Pass Sales by Day'}
           right={<span className="text-xs text-gray-400">passes</span>}
         >
           {salesTrend.length === 0 ? (
@@ -146,16 +146,32 @@ export default function SeasonPasses() {
                 <XAxis dataKey="bucket" tickFormatter={xTickFmt} {...axisProps.x} />
                 <YAxis tickFormatter={number} {...axisProps.y} />
                 <Tooltip content={<ChartTooltip formatter={number} labelFormatter={xTickFmt} />} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
+                {granularity !== 'hour' && <Legend wrapperStyle={{ fontSize: 12 }} />}
                 <Bar dataKey="newQty" name="New passes" stackId="p" fill={KIND_COLORS.new} maxBarSize={32} />
-                <Bar dataKey="upgradeQty" name="Upgrades" stackId="p" fill={KIND_COLORS.upgrade} maxBarSize={32} />
+                {granularity !== 'hour' && (
+                  <Bar dataKey="upgradeQty" name="Upgrades" stackId="p" fill={KIND_COLORS.upgrade} maxBarSize={32} />
+                )}
               </BarChart>
             </ResponsiveContainer>
           )}
-          <p className="mt-2 text-[11px] text-gray-400 leading-relaxed">
-            Upgrades count on the guest's visit day — the (UP) membership is added to their original
-            GA ticket order, so the order date can be weeks earlier for advance web purchases.
-          </p>
+          {granularity === 'hour' ? (
+            <p className="mt-2 text-[11px] text-gray-400 leading-relaxed">
+              Upgrades only happen in person at the park — there's no advance purchase — but RocketRez
+              never records the moment one was rung in, only the order it was appended to (which may
+              have been created earlier that same visit, or weeks earlier for an advance GA ticket).
+              With no hour to trust, upgrades are left off this chart entirely.
+              {kinds.upgrade.quantity > 0 && (
+                <> {' '}Today's upgrade total: <span className="font-semibold text-gray-600">
+                {number(kinds.upgrade.quantity)} ({money(kinds.upgrade.revenue)})</span> — included in
+                the KPIs above.</>
+              )}
+            </p>
+          ) : (
+            <p className="mt-2 text-[11px] text-gray-400 leading-relaxed">
+              Upgrades count on the guest's visit day — the (UP) membership is added to their original
+              GA ticket order, so the order date can be weeks earlier for advance web purchases.
+            </p>
+          )}
         </SectionCard>
 
         <SectionCard title="Revenue by Pass Family">
