@@ -9,6 +9,7 @@ import ProductMix from './pages/ProductMix.jsx';
 import Drinks from './pages/Drinks.jsx';
 import Cabanas from './pages/Cabanas.jsx';
 import Refunds from './pages/Refunds.jsx';
+import SeasonPasses from './pages/SeasonPasses.jsx';
 import SalesOffices from './pages/SalesOffices.jsx';
 import PaymentMethods from './pages/PaymentMethods.jsx';
 import CashOutReport from './pages/CashOutReport.jsx';
@@ -33,6 +34,7 @@ function Gate() {
             <Route path="/products" element={<ProductMix />} />
             <Route path="/drinks" element={<Drinks />} />
             <Route path="/cabanas" element={<Cabanas />} />
+            <Route path="/season-passes" element={<SeasonPasses />} />
             <Route path="/offices" element={<SalesOffices />} />
             <Route path="/payment-methods" element={<PaymentMethods />} />
             <Route path="/refunds" element={<Refunds />} />

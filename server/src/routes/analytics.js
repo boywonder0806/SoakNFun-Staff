@@ -1073,6 +1073,149 @@ router.get('/reports/cash-out', async (req, res) => {
   }
 });
 
+// GET /api/analytics/season-passes — season pass program report.
+//
+// Three distinct signals, two date bases (same split as /daily):
+// - SALES are type='Membership' line items on business_date. Products whose
+//   name carries the '(UP)' suffix are day-ticket-to-season-pass UPGRADES
+//   (sold at a $10–35 upgrade price at the gate); $0 memberships (investor /
+//   comped passes) are counted separately so giveaways don't dilute average
+//   prices. Replacement fees ($10 Product items) are tracked as their own
+//   small bucket.
+// - REDEMPTIONS ('% Season Pass Redemption' rate items, always $0) are
+//   passholder gate visits, counted on EVENT (visit) date like attendance.
+// - Upgrade capture = upgrades sold per 100 GA tickets sold in the same
+//   range — how well the gate converts day guests into passholders.
+//
+// The park filter applies to o.park: where the pass was SOLD for sales,
+// which park's gate scanned it for redemptions. Two-park passes sold at BB
+// count under BB — there is no park-neutral ledger in the source data.
+router.get('/season-passes', async (req, res) => {
+  try {
+    const { start, end } = dateRange(req);
+    const params = [start, end];
+    const parkSql = parkFilter(req, params).replace(' AND park', ' AND o.park');
+    const singleDay = start === end;
+
+    const salesJoin = `
+      FROM analytics_order_line_items li
+      JOIN analytics_orders o ON o.order_id = li.order_id
+      WHERE o.status = 'Active' AND li.type = 'Membership'
+        AND o.business_date BETWEEN $1 AND $2${parkSql}`;
+    const redemptionJoin = `
+      FROM analytics_order_line_items li
+      JOIN analytics_orders o ON o.order_id = li.order_id
+      WHERE o.status = 'Active' AND li.type = 'Rate'
+        AND li.name ILIKE '%Season Pass Redemption%'
+        AND li.event_date BETWEEN $1 AND $2${parkSql}`;
+
+    const kindCase = `
+      CASE WHEN li.name ILIKE '%(UP)%' THEN 'upgrade'
+           WHEN li.subtotal > 0        THEN 'new'
+           ELSE 'comp' END`;
+    const familyCase = `
+      CASE WHEN li.name ILIKE '%Investor%' OR li.name ILIKE '%Comped%' THEN 'Comp / Investor'
+           WHEN li.name ILIKE '%Premium Two-Park%'                      THEN 'Premium Two-Park'
+           WHEN li.name ILIKE '%Two-Park%'                               THEN 'Two-Park'
+           WHEN li.name ILIKE '%Blue Bayou%'                              THEN 'Blue Bayou'
+           WHEN li.name ILIKE '%Gulf Islands%' OR li.name ILIKE 'GI %'     THEN 'Gulf Islands'
+           ELSE 'Other' END`;
+
+    const salesTrendSql = singleDay
+      ? `SELECT to_char(date_trunc('hour', o.created_date AT TIME ZONE 'America/Chicago'), 'FMHH12AM') AS "bucket",
+                COALESCE(SUM(li.quantity) FILTER (WHERE ${kindCase} = 'new'), 0)::int      AS "newQty",
+                COALESCE(SUM(li.subtotal) FILTER (WHERE ${kindCase} = 'new'), 0)::float     AS "newRevenue",
+                COALESCE(SUM(li.quantity) FILTER (WHERE ${kindCase} = 'upgrade'), 0)::int    AS "upgradeQty",
+                COALESCE(SUM(li.subtotal) FILTER (WHERE ${kindCase} = 'upgrade'), 0)::float   AS "upgradeRevenue"
+         ${salesJoin}
+         GROUP BY date_trunc('hour', o.created_date AT TIME ZONE 'America/Chicago')
+         ORDER BY date_trunc('hour', o.created_date AT TIME ZONE 'America/Chicago')`
+      : `SELECT o.business_date::text AS "bucket",
+                COALESCE(SUM(li.quantity) FILTER (WHERE ${kindCase} = 'new'), 0)::int      AS "newQty",
+                COALESCE(SUM(li.subtotal) FILTER (WHERE ${kindCase} = 'new'), 0)::float     AS "newRevenue",
+                COALESCE(SUM(li.quantity) FILTER (WHERE ${kindCase} = 'upgrade'), 0)::int    AS "upgradeQty",
+                COALESCE(SUM(li.subtotal) FILTER (WHERE ${kindCase} = 'upgrade'), 0)::float   AS "upgradeRevenue"
+         ${salesJoin} GROUP BY 1 ORDER BY 1`;
+
+    const [byProduct, salesTrend, redemptions, redemptionTrend, gaSold, replacementFees] = await Promise.all([
+      pool.query(
+        `SELECT li.name AS "name", ${kindCase} AS "kind", ${familyCase} AS "family",
+                SUM(li.quantity)::int AS "quantity",
+                COALESCE(SUM(li.subtotal), 0)::float AS "revenue"
+         ${salesJoin}
+         GROUP BY li.name, 2, 3 ORDER BY "revenue" DESC, "quantity" DESC`,
+        params
+      ),
+      pool.query(salesTrendSql, params),
+      pool.query(
+        `SELECT COALESCE(SUM(li.quantity), 0)::int AS "total",
+                COALESCE(SUM(li.quantity) FILTER (WHERE li.name ILIKE '%Premium%'), 0)::int AS "premium",
+                COALESCE(SUM(li.quantity) FILTER (WHERE o.park = 'BB'), 0)::int AS "bb",
+                COALESCE(SUM(li.quantity) FILTER (WHERE o.park = 'GI'), 0)::int AS "gi"
+         ${redemptionJoin}`,
+        params
+      ),
+      pool.query(
+        singleDay
+          ? `SELECT to_char(date_trunc('hour', o.created_date AT TIME ZONE 'America/Chicago'), 'FMHH12AM') AS "bucket",
+                    SUM(li.quantity)::int AS "visits"
+             ${redemptionJoin}
+             GROUP BY date_trunc('hour', o.created_date AT TIME ZONE 'America/Chicago')
+             ORDER BY date_trunc('hour', o.created_date AT TIME ZONE 'America/Chicago')`
+          : `SELECT li.event_date::text AS "bucket", SUM(li.quantity)::int AS "visits"
+             ${redemptionJoin} GROUP BY 1 ORDER BY 1`,
+        params
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(li.quantity), 0)::int AS "total"
+         FROM analytics_order_line_items li
+         JOIN analytics_orders o ON o.order_id = li.order_id
+         WHERE o.status = 'Active' AND li.type = 'Rate'
+           AND li.name ILIKE '%General Admission Rate%'
+           AND o.business_date BETWEEN $1 AND $2${parkSql}`,
+        params
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(li.quantity), 0)::int AS "quantity",
+                COALESCE(SUM(li.subtotal), 0)::float AS "revenue"
+         FROM analytics_order_line_items li
+         JOIN analytics_orders o ON o.order_id = li.order_id
+         WHERE o.status = 'Active' AND li.name ILIKE '%Season Pass Replacement Fee%'
+           AND o.business_date BETWEEN $1 AND $2${parkSql}`,
+        params
+      ),
+    ]);
+
+    const kinds = { new: { quantity: 0, revenue: 0 }, upgrade: { quantity: 0, revenue: 0 }, comp: { quantity: 0, revenue: 0 } };
+    const families = {};
+    for (const p of byProduct.rows) {
+      kinds[p.kind].quantity += p.quantity;
+      kinds[p.kind].revenue  += p.revenue;
+      const f = families[p.family] ||= { quantity: 0, revenue: 0 };
+      f.quantity += p.quantity;
+      f.revenue  += p.revenue;
+    }
+    const ga = gaSold.rows[0].total;
+
+    res.json({
+      kinds,
+      families,
+      // upgrades sold per 100 GA tickets sold in the same range
+      upgradeCapture: ga ? (kinds.upgrade.quantity / ga) * 100 : null,
+      gaSold: ga,
+      replacementFees: replacementFees.rows[0],
+      byProduct: byProduct.rows,
+      salesTrend: salesTrend.rows,
+      redemptions: redemptions.rows[0],
+      redemptionTrend: redemptionTrend.rows,
+      granularity: singleDay ? 'hour' : 'day',
+    });
+  } catch (err) {
+    console.error('analytics season-passes error:', err.message);
+    res.status(500).json({ error: 'Failed to load season pass report' });
+  }
+});
+
 // GET /api/analytics/sync-status
 router.get('/sync-status', async (_req, res) => {
   try {

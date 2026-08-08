@@ -13,6 +13,7 @@ const NAV_SECTIONS = [
       { to: '/products',        label: 'Product Mix' },
       { to: '/drinks',          label: 'Drinks' },
       { to: '/cabanas',         label: 'Cabanas' },
+      { to: '/season-passes',   label: 'Season Passes' },
       { to: '/offices',         label: 'Sales Offices' },
       { to: '/payment-methods', label: 'Payment Methods' },
       { to: '/refunds',         label: 'Refunds' },
