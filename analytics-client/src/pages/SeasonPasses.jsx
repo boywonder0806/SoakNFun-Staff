@@ -94,7 +94,7 @@ export default function SeasonPasses() {
 
   if (!data) return loading ? <LoadingBlock h="h-96" /> : <div className="text-sm text-gray-400">Failed to load.</div>;
 
-  const { kinds, families, upgradeCapture, gaSold, replacementFees, byProduct, salesTrend, redemptions, redemptionTrend, granularity } = data;
+  const { kinds, families, upgradeCapture, gaGuests, replacementFees, byProduct, salesTrend, redemptions, redemptionTrend, granularity } = data;
   const compareLabel = singleDay ? 'vs yesterday' : `vs previous ${data.prevDays} days`;
   const passRevenue = kinds.new.revenue + kinds.upgrade.revenue;
   const prevPassRevenue = prev ? prev.kinds.new.revenue + prev.kinds.upgrade.revenue : null;
@@ -128,7 +128,7 @@ export default function SeasonPasses() {
         <KpiTile
           label="Upgrade Capture" icon="🎯"
           value={upgradeCapture == null ? '—' : `${upgradeCapture.toFixed(1)}%`}
-          sub={`of ${number(gaSold)} GA tickets sold became passes`}
+          sub={`of ${number(gaGuests)} GA guests upgraded to a pass`}
         />
       </div>
 
@@ -152,6 +152,10 @@ export default function SeasonPasses() {
               </BarChart>
             </ResponsiveContainer>
           )}
+          <p className="mt-2 text-[11px] text-gray-400 leading-relaxed">
+            Upgrades count on the guest's visit day — the (UP) membership is added to their original
+            GA ticket order, so the order date can be weeks earlier for advance web purchases.
+          </p>
         </SectionCard>
 
         <SectionCard title="Revenue by Pass Family">

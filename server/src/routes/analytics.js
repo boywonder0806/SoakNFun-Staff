@@ -97,6 +97,10 @@ router.get('/revenue-trend', async (req, res) => {
 // averages. Category revenue comes from line-item subtotals (pre-tax), so
 // the stack won't exactly equal the order-total headline — that's expected
 // and labeled in the UI. Channel and DOW figures use order totals.
+// Known nuance: '(UP)' upgrade memberships are appended to the guest's
+// original GA order, so in the passes category they land on the GA purchase
+// date. Every category here is deliberately order-date based; the Season
+// Passes page re-dates upgrades to visit day where it matters.
 router.get('/revenue-breakdown', async (req, res) => {
   try {
     const { start, end } = dateRange(req);
@@ -238,11 +242,23 @@ router.get('/daily', async (req, res) => {
          GROUP BY o.is_web_order`,
         params
       ),
+      // Pass sales: '(UP)' upgrade memberships are APPENDED to the guest's
+      // original GA order, so business_date would backdate them to the GA
+      // purchase date (weeks earlier for advance web buys). Date upgrades
+      // by the GA ticket's visit date on the same order instead, falling
+      // back to business_date for standalone upgrade orders.
       pool.query(
         `SELECT li.name                               AS "name",
                 SUM(li.quantity)::int                  AS "quantity",
                 COALESCE(SUM(li.subtotal), 0)::float    AS "revenue"
-         ${baseJoin} AND li.type = 'Membership'
+         FROM analytics_order_line_items li
+         JOIN analytics_orders o ON o.order_id = li.order_id
+         WHERE o.status = 'Active' AND li.type = 'Membership'
+           AND (CASE WHEN li.name ILIKE '%(UP)%' THEN COALESCE(
+                  (SELECT MIN(li2.event_date) FROM analytics_order_line_items li2
+                   WHERE li2.order_id = o.order_id AND li2.type = 'Rate'
+                     AND li2.event_name ILIKE '%Admission%'), o.business_date)
+                ELSE o.business_date END) BETWEEN $1 AND $2${parkSql}
          GROUP BY li.name ORDER BY "revenue" DESC`,
         params
       ),
@@ -1076,16 +1092,24 @@ router.get('/reports/cash-out', async (req, res) => {
 // GET /api/analytics/season-passes — season pass program report.
 //
 // Three distinct signals, two date bases (same split as /daily):
-// - SALES are type='Membership' line items on business_date. Products whose
-//   name carries the '(UP)' suffix are day-ticket-to-season-pass UPGRADES
-//   (sold at a $10–35 upgrade price at the gate); $0 memberships (investor /
-//   comped passes) are counted separately so giveaways don't dilute average
-//   prices. Replacement fees ($10 Product items) are tracked as their own
-//   small bucket.
+// - SALES are type='Membership' line items. Products whose name carries the
+//   '(UP)' suffix are day-ticket-to-season-pass UPGRADES: per the owner, the
+//   (UP) membership is APPENDED to the guest's original GA ticket order, so
+//   the order's business_date is the GA PURCHASE date, not the upgrade date
+//   (36% of upgrade orders differ, by up to 55 days for advance web buys).
+//   Upgrades are therefore dated by the GA ticket's EVENT (visit) date on
+//   the same order — the day the guest was physically at the park upgrading
+//   — falling back to business_date for standalone upgrade orders with no
+//   GA item (~15%). New/comp pass sales stay on business_date: they're
+//   bought outright that day. $0 memberships (investor / comped) are
+//   counted separately so giveaways don't dilute average prices.
+//   Replacement fees ($10 Product items) are tracked as their own bucket.
 // - REDEMPTIONS ('% Season Pass Redemption' rate items, always $0) are
 //   passholder gate visits, counted on EVENT (visit) date like attendance.
-// - Upgrade capture = upgrades sold per 100 GA tickets sold in the same
-//   range — how well the gate converts day guests into passholders.
+// - Upgrade capture = upgrades per 100 GA guests in the range, both on
+//   visit-date basis — how well the gate converts day guests into
+//   passholders. (Same-basis on both sides; previously compared against GA
+//   tickets *sold*, which mixed purchase and visit dates.)
 //
 // The park filter applies to o.park: where the pass was SOLD for sales,
 // which park's gate scanned it for redemptions. Two-park passes sold at BB
@@ -1097,11 +1121,21 @@ router.get('/season-passes', async (req, res) => {
     const parkSql = parkFilter(req, params).replace(' AND park', ' AND o.park');
     const singleDay = start === end;
 
+    // Effective date of a membership line item: (UP) upgrades ride the GA
+    // ticket's visit date on the same order; everything else (and standalone
+    // upgrades) uses the order's business_date.
+    const effDate = `
+      CASE WHEN li.name ILIKE '%(UP)%' THEN COALESCE(
+        (SELECT MIN(li2.event_date) FROM analytics_order_line_items li2
+         WHERE li2.order_id = o.order_id AND li2.type = 'Rate'
+           AND li2.event_name ILIKE '%Admission%'), o.business_date)
+      ELSE o.business_date END`;
+
     const salesJoin = `
       FROM analytics_order_line_items li
       JOIN analytics_orders o ON o.order_id = li.order_id
       WHERE o.status = 'Active' AND li.type = 'Membership'
-        AND o.business_date BETWEEN $1 AND $2${parkSql}`;
+        AND (${effDate}) BETWEEN $1 AND $2${parkSql}`;
     const redemptionJoin = `
       FROM analytics_order_line_items li
       JOIN analytics_orders o ON o.order_id = li.order_id
@@ -1121,6 +1155,10 @@ router.get('/season-passes', async (req, res) => {
            WHEN li.name ILIKE '%Gulf Islands%' OR li.name ILIKE 'GI %'     THEN 'Gulf Islands'
            ELSE 'Other' END`;
 
+    // Hour buckets use the order's created hour — right for gate sales
+    // (order created when the guest walks up); for an advance-web order
+    // upgraded on the visit day the append time isn't recorded anywhere, so
+    // its hour is the original purchase hour. The DAY is still correct.
     const salesTrendSql = singleDay
       ? `SELECT to_char(date_trunc('hour', o.created_date AT TIME ZONE 'America/Chicago'), 'FMHH12AM') AS "bucket",
                 COALESCE(SUM(li.quantity) FILTER (WHERE ${kindCase} = 'new'), 0)::int      AS "newQty",
@@ -1130,7 +1168,7 @@ router.get('/season-passes', async (req, res) => {
          ${salesJoin}
          GROUP BY date_trunc('hour', o.created_date AT TIME ZONE 'America/Chicago')
          ORDER BY date_trunc('hour', o.created_date AT TIME ZONE 'America/Chicago')`
-      : `SELECT o.business_date::text AS "bucket",
+      : `SELECT (${effDate})::text AS "bucket",
                 COALESCE(SUM(li.quantity) FILTER (WHERE ${kindCase} = 'new'), 0)::int      AS "newQty",
                 COALESCE(SUM(li.subtotal) FILTER (WHERE ${kindCase} = 'new'), 0)::float     AS "newRevenue",
                 COALESCE(SUM(li.quantity) FILTER (WHERE ${kindCase} = 'upgrade'), 0)::int    AS "upgradeQty",
@@ -1172,7 +1210,7 @@ router.get('/season-passes', async (req, res) => {
          JOIN analytics_orders o ON o.order_id = li.order_id
          WHERE o.status = 'Active' AND li.type = 'Rate'
            AND li.name ILIKE '%General Admission Rate%'
-           AND o.business_date BETWEEN $1 AND $2${parkSql}`,
+           AND li.event_date BETWEEN $1 AND $2${parkSql}`,
         params
       ),
       pool.query(
@@ -1200,9 +1238,9 @@ router.get('/season-passes', async (req, res) => {
     res.json({
       kinds,
       families,
-      // upgrades sold per 100 GA tickets sold in the same range
+      // upgrades per 100 GA guests in range — both sides on visit-date basis
       upgradeCapture: ga ? (kinds.upgrade.quantity / ga) * 100 : null,
-      gaSold: ga,
+      gaGuests: ga,
       replacementFees: replacementFees.rows[0],
       byProduct: byProduct.rows,
       salesTrend: salesTrend.rows,
