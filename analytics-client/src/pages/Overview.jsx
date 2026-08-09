@@ -171,14 +171,16 @@ export default function Overview() {
           label="Booked Attendance" icon="🎟️" accent
           value={number(att.total)}
           delta={delta(att.total, prevDaily.attendance.total)}
+          compareLabel={compareLabel}
           sub={att.byPark?.length > 1
             ? `${att.byPark.map(p => `${p.park} ${number(p.quantity)}`).join(' · ')} · not gate scans`
-            : `reserved, not gate scans · ${compareLabel}`}
+            : 'reserved, not gate scans'}
         />
         <KpiTile
           label="Per Cap (In-Park)" icon="💰" accent
           value={moneyPrecise(daily.inPark.perCap)}
           delta={delta(daily.inPark.perCap, prevDaily.inPark.perCap)}
+          compareLabel={compareLabel}
           sub="in-park spend per booked guest"
           warning={lockersWarning}
         />
@@ -186,13 +188,14 @@ export default function Overview() {
           label="Total Revenue" icon="📈"
           value={money(overview.revenue)}
           delta={delta(overview.revenue, prevOverview.revenue)}
-          sub={compareLabel}
+          compareLabel={compareLabel}
         />
         <KpiTile
           label="Admissions Revenue" icon="🏷️"
           value={money(daily.admissions.revenue)}
           delta={delta(daily.admissions.revenue, prevDaily.admissions.revenue)}
-          sub={`GA ticket value · ${compareLabel}`}
+          compareLabel={compareLabel}
+          sub="GA ticket value"
         />
       </div>
 
@@ -225,7 +228,7 @@ export default function Overview() {
       <div className="grid lg:grid-cols-2 gap-4">
         <SectionCard
           title="Attendance & Ticketing"
-          right={<DeltaChip delta={delta(att.total, prevDaily.attendance.total)} />}
+          right={<DeltaChip delta={delta(att.total, prevDaily.attendance.total)} compareLabel={compareLabel} />}
         >
           <ShareBar segments={BUCKETS.map(b => ({ value: att[b.key], color: b.color }))} />
           <div className="mt-4 space-y-2.5">
@@ -285,7 +288,7 @@ export default function Overview() {
         <div className="space-y-4">
           <SectionCard
             title="In-Park Revenue"
-            right={<span className="text-xs text-gray-400">per cap {moneyPrecise(daily.inPark.perCap)}</span>}
+            right={<span className="text-xs text-gray-400">per cap {moneyPrecise(daily.inPark.perCap)} · deltas {compareLabel}</span>}
           >
             <ShareBar segments={[
               { value: daily.inPark.fnb,     color: CATEGORICAL[0] },
@@ -323,7 +326,7 @@ export default function Overview() {
 
           <SectionCard
             title="Season Pass Sales"
-            right={<DeltaChip delta={delta(daily.passSales.revenue, prevDaily.passSales.revenue)} />}
+            right={<DeltaChip delta={delta(daily.passSales.revenue, prevDaily.passSales.revenue)} compareLabel={compareLabel} />}
           >
             <div className="flex items-baseline gap-3">
               <p className="text-2xl font-bold text-gray-900 tabular-nums">{number(daily.passSales.quantity)}</p>

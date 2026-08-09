@@ -153,7 +153,7 @@ export default function RevenueTrends() {
           label="Total Revenue" icon="📈" accent
           value={money(overview.revenue)}
           delta={delta(overview.revenue, prevOverview.revenue)}
-          sub={compareLabel}
+          compareLabel={compareLabel}
         />
         <KpiTile
           label={`Avg per ${bucketNoun}`} icon="📊" accent
@@ -169,6 +169,7 @@ export default function RevenueTrends() {
           label="Avg Order Value" icon="🧾"
           value={moneyPrecise(overview.avgOrderValue)}
           delta={delta(overview.avgOrderValue, prevOverview.avgOrderValue)}
+          compareLabel={compareLabel}
           sub={`${number(overview.orderCount)} orders`}
         />
       </div>

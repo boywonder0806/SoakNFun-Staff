@@ -130,7 +130,7 @@ export default function Refunds() {
           label="Total Refunded" icon="↩️" accent
           value={money(kpis.refunded)}
           delta={delta(kpis.refunded, prevKpis?.refunded)} deltaInvert
-          sub={compareLabel}
+          compareLabel={compareLabel}
         />
         <KpiTile
           label="Refunded Orders" icon="🧾" accent

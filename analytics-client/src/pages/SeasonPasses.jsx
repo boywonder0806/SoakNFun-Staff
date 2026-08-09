@@ -111,18 +111,20 @@ export default function SeasonPasses() {
           label="Pass Revenue" icon="🎫" accent
           value={money(passRevenue)}
           delta={delta(passRevenue, prevPassRevenue)}
-          sub={compareLabel}
+          compareLabel={compareLabel}
         />
         <KpiTile
           label="New Passes Sold" icon="🆕" accent
           value={number(kinds.new.quantity)}
           delta={delta(kinds.new.quantity, prev?.kinds.new.quantity)}
+          compareLabel={compareLabel}
           sub={`avg ${moneyPrecise(avgNewPrice)} · ${number(kinds.comp.quantity)} comp/investor`}
         />
         <KpiTile
           label="Upgrades Sold" icon="⤴️"
           value={number(kinds.upgrade.quantity)}
           delta={delta(kinds.upgrade.quantity, prev?.kinds.upgrade.quantity)}
+          compareLabel={compareLabel}
           sub={`${money(kinds.upgrade.revenue)} · avg ${moneyPrecise(avgUpgradePrice)}`}
         />
         <KpiTile
