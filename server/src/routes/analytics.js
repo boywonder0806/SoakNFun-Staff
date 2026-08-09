@@ -1016,6 +1016,15 @@ router.delete('/refunds/:orderId/flag', async (req, res) => {
 // it nets out any cash refunds, since those physically leave the drawer too.
 // Terminal and GL Code from the native report aren't exposed by the Orders
 // API this app syncs from, so they're intentionally left off here.
+//
+// LEFT JOIN LATERAL (not the old implicit comma-join) on purpose: an order
+// with an empty payment_methods array — which real orders do have, not just
+// $0 ones — used to vanish from the whole report with zero trace, on every
+// cashier, because jsonb_array_elements produces no rows for []. Orders with
+// no payment recorded now still surface as a "No Payment Recorded" line
+// whenever their total is nonzero, so real money can't silently disappear;
+// genuinely $0 no-payment orders (redemptions, comps) are still dropped —
+// nothing to reconcile there and there were 1,400+ of them on a normal day.
 router.get('/reports/cash-out', async (req, res) => {
   try {
     const { start, end } = dateRange(req);
@@ -1028,8 +1037,10 @@ router.get('/reports/cash-out', async (req, res) => {
               o.park, o.sales_office_name AS "office",
               COALESCE(NULLIF(TRIM(o.sales_person_name), ''), 'Unattributed') AS "cashier",
               pm->>'paymentMethod' AS "method",
-              (pm->>'paymentAmount')::numeric::float AS "amount"
-       FROM analytics_orders o, jsonb_array_elements(o.payment_methods) pm
+              (pm->>'paymentAmount')::numeric::float AS "amount",
+              o.total::float AS "orderTotal"
+       FROM analytics_orders o
+       LEFT JOIN LATERAL jsonb_array_elements(o.payment_methods) pm ON true
        WHERE o.status = 'Active' AND o.business_date BETWEEN $1 AND $2${parkSql}
        ORDER BY o.business_date, o.sales_person_name, o.created_date`,
       params
@@ -1037,22 +1048,39 @@ router.get('/reports/cash-out', async (req, res) => {
 
     const round2 = n => Math.round(n * 100) / 100;
     const dateMap = new Map();
-    let totalCash = 0, totalAll = 0;
+    let totalCash = 0, totalAll = 0, unaccountedTotal = 0;
     const allOrderIds = new Set();
+    const unaccountedOrderIds = new Set();
+    const seenCashiers = new Set();
 
     for (const r of rows) {
-      totalAll += r.amount;
-      allOrderIds.add(r.orderId);
-      const isCash = /cash/i.test(r.method);
-      if (isCash) totalCash += r.amount;
+      const noPayment = r.method == null;
+      if (noPayment && !(r.orderTotal > 0)) continue; // $0, nothing owed — not worth surfacing
+      seenCashiers.add(r.cashier);
 
       let d = dateMap.get(r.date);
       if (!d) dateMap.set(r.date, d = { date: r.date, cashiers: new Map() });
       let c = d.cashiers.get(r.cashier);
       if (!c) d.cashiers.set(r.cashier, c = { cashier: r.cashier, total: 0, cashTotal: 0, orderIds: new Set(), methods: new Map() });
+      c.orderIds.add(r.orderId);
+      allOrderIds.add(r.orderId);
+
+      if (noPayment) {
+        unaccountedTotal += r.orderTotal;
+        unaccountedOrderIds.add(r.orderId);
+        const key = '⚠️ No Payment Recorded';
+        let m = c.methods.get(key);
+        if (!m) c.methods.set(key, m = { method: key, total: 0, payments: [] });
+        m.total += r.orderTotal;
+        m.payments.push({ orderId: r.orderId, time: r.time, office: r.office, park: r.park, amount: round2(r.orderTotal) });
+        continue; // not real collected money — excluded from total/cashTotal on purpose
+      }
+
+      totalAll += r.amount;
+      const isCash = /cash/i.test(r.method);
+      if (isCash) totalCash += r.amount;
       c.total += r.amount;
       if (isCash) c.cashTotal += r.amount;
-      c.orderIds.add(r.orderId);
       let m = c.methods.get(r.method);
       if (!m) c.methods.set(r.method, m = { method: r.method, total: 0, payments: [] });
       m.total += r.amount;
@@ -1075,6 +1103,7 @@ router.get('/reports/cash-out', async (req, res) => {
     })).sort((a, b) => a.date.localeCompare(b.date));
 
     res.json({
+      unaccounted: { orderCount: unaccountedOrderIds.size, total: round2(unaccountedTotal) },
       kpis: {
         totalCash: round2(totalCash),
         totalAll: round2(totalAll),

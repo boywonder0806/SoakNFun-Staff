@@ -59,17 +59,20 @@ function CashierCard({ c, defaultOpen }) {
       <div className={`${open ? 'block' : 'hidden'} print:block px-4 py-3 print:px-1 space-y-4`}>
         <div className="space-y-1.5">
           {c.methods.map(m => (
-            <div key={m.method} className="flex items-center gap-2.5 text-sm">
-              <span className="text-gray-600">{m.method}</span>
+            <div key={m.method} className={`flex items-center gap-2.5 text-sm ${m.method.startsWith('⚠️') ? 'text-amber-700' : ''}`}>
+              <span className={m.method.startsWith('⚠️') ? 'font-medium' : 'text-gray-600'}>{m.method}</span>
               <span className="text-[11px] text-gray-400">{m.payments.length} txn</span>
-              <span className="ml-auto tabular-nums font-medium text-gray-900">{money(m.total)}</span>
+              <span className={`ml-auto tabular-nums font-medium ${m.method.startsWith('⚠️') ? 'text-amber-700' : 'text-gray-900'}`}>{money(m.total)}</span>
             </div>
           ))}
         </div>
 
         {c.methods.map(m => (
           <div key={m.method}>
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">{m.method}</p>
+            <p className={`text-[11px] font-semibold uppercase tracking-wide mb-1 ${m.method.startsWith('⚠️') ? 'text-amber-600' : 'text-gray-500'}`}>
+              {m.method}
+              {m.method.startsWith('⚠️') && <span className="normal-case font-normal text-amber-600/80 ml-1">— order total shown, not counted toward Cash Out Total below</span>}
+            </p>
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-gray-400">
@@ -205,6 +208,14 @@ export default function CashOutReport() {
         <p className="text-lg font-bold text-gray-900">Cash Out Report</p>
         <p className="text-xs text-gray-500">{rangeLabel} · {parkLabel}</p>
       </div>
+
+      {data?.unaccounted?.orderCount > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-800 leading-relaxed">
+          ⚠️ <strong>{data.unaccounted.orderCount} order{data.unaccounted.orderCount === 1 ? '' : 's'} totaling {money(data.unaccounted.total)}</strong> {data.unaccounted.orderCount === 1 ? 'has' : 'have'} no
+          payment method recorded in RocketRez — the order exists and has a balance due, but no tender is on file. Flagged as "⚠️ No Payment
+          Recorded" under the cashier below; not counted toward any cash total since it's unclear anything was actually collected.
+        </div>
+      )}
 
       {!data ? (
         <LoadingBlock h="h-72" />
