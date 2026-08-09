@@ -128,7 +128,7 @@ async function recordFailure(orderId, camId, message) {
 // the outcome. Safe to call repeatedly — already-posted orders are skipped.
 export async function syncCrewLineToProtect() {
   const camId = cameraId();
-  if (!camId || !process.env.PROTECT_API_KEY) return; // not configured on this environment — no-op
+  if (!camId || !process.env.PROTECT_API_KEY) return 'Not configured on this environment';
 
   const { rows: orders } = await pool.query(
     `SELECT o.order_id, o.created_date, o.total, o.sales_office_id, o.sales_office_name, o.payment_methods
@@ -141,7 +141,7 @@ export async function syncCrewLineToProtect() {
      ORDER BY o.created_date`,
     [MAX_ATTEMPTS]
   );
-  if (!orders.length) return;
+  if (!orders.length) return 'No new orders to post';
 
   const { rows: liRows } = await pool.query(
     `SELECT order_id, name, quantity, price, subtotal FROM analytics_order_line_items
@@ -185,4 +185,9 @@ export async function syncCrewLineToProtect() {
     await sleep(150);
   }
   if (posted || failed) console.log(`Protect POS sync (Crew Line): ${posted} posted, ${failed} failed`);
+  // Individual order-level failures are already durable in analytics_pos_events
+  // (retried up to MAX_ATTEMPTS on later ticks) — throwing here is purely to
+  // surface the job as degraded in the automations health view, not a retry signal.
+  if (failed > 0) throw new Error(`${posted} posted, ${failed} failed of ${orders.length} orders`);
+  return `${posted} posted`;
 }

@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { syncRange, syncTrailingDays, ensureBackfilled } from '../services/analyticsOrders.js';
 import { centralToday } from '../services/rocketrez.js';
 import { syncCrewLineToProtect } from '../services/protectPos.js';
+import { ensureAutomation, runTracked } from '../services/automations.js';
 
 /**
  * Tiered sync for the analytics dashboard's order history.
@@ -29,16 +30,41 @@ let todayJobRunning = false;
 let recentJobRunning = false;
 
 export function startAnalyticsOrderSyncCron() {
+  ensureAutomation('analytics-sync-today', {
+    name: 'Analytics Sync — Today', category: 'sync',
+    description: "Pulls today's RocketRez orders into the analytics tables so the dashboard shows new sales quickly.",
+    scheduleDescription: 'Every 5 minutes', expectedIntervalMinutes: 5,
+  }).catch(() => {});
+  ensureAutomation('analytics-sync-recent', {
+    name: 'Analytics Sync — Recent (7-day)', category: 'sync',
+    description: 'Re-pulls the trailing 7 days to catch line items RocketRez appended to recent orders after the fact.',
+    scheduleDescription: 'Every 15 minutes', expectedIntervalMinutes: 15,
+  }).catch(() => {});
+  ensureAutomation('analytics-sync-nightly', {
+    name: 'Analytics Sync — Nightly (30-day)', category: 'sync',
+    description: 'Re-pulls the trailing 30 days, catching order corrections older than the 7-day reconciliation window.',
+    scheduleDescription: 'Daily at 5:20 AM Central', expectedIntervalMinutes: 24 * 60,
+  }).catch(() => {});
+  ensureAutomation('protect-pos-crewline', {
+    name: 'Protect POS — Crew Line', category: 'integration',
+    description: 'Posts BB Crew Kitchen orders to UniFi Protect as POS events, overlaid on the Crew Line camera\'s footage.',
+    scheduleDescription: 'Piggybacked on the 5-minute Analytics Sync — Today tier', expectedIntervalMinutes: 5,
+  }).catch(() => {});
+
   // Every 5 minutes: today only
   cron.schedule('*/5 * * * *', async () => {
     if (todayJobRunning) return; // don't stack if a prior run is still going
     todayJobRunning = true;
     try {
       const today = centralToday();
-      await syncRange(today, today, 'today');
+      await runTracked('analytics-sync-today', async () => {
+        const written = await syncRange(today, today, 'today');
+        return `${written} orders synced`;
+      });
       // Piggybacks on this tier: Crew Line POS-camera overlay needs orders
       // as fresh as they land, and this is the tightest cycle we already run.
-      await syncCrewLineToProtect().catch(e => console.error('Protect POS sync failed:', e.message));
+      await runTracked('protect-pos-crewline', syncCrewLineToProtect)
+        .catch(e => console.error('Protect POS sync failed:', e.message));
     } catch (e) {
       console.error('Analytics today sync failed:', e.message);
     } finally {
@@ -51,7 +77,10 @@ export function startAnalyticsOrderSyncCron() {
     if (recentJobRunning) return;
     recentJobRunning = true;
     try {
-      await syncTrailingDays(RECENT_WINDOW_DAYS, 'recent');
+      await runTracked('analytics-sync-recent', async () => {
+        const written = await syncTrailingDays(RECENT_WINDOW_DAYS, 'recent');
+        return `${written} orders synced`;
+      });
     } catch (e) {
       console.error('Analytics recent-window sync failed:', e.message);
     } finally {
@@ -64,8 +93,10 @@ export function startAnalyticsOrderSyncCron() {
   // paginated pull in the same instant. They also share a request gate
   // (rocketrez.js withRRGate) that queues either job if they do overlap.
   cron.schedule('20 5 * * *', () => {
-    syncTrailingDays(NIGHTLY_LOOKBACK_DAYS, 'nightly')
-      .catch(e => console.error('Analytics nightly sync failed:', e.message));
+    runTracked('analytics-sync-nightly', async () => {
+      const written = await syncTrailingDays(NIGHTLY_LOOKBACK_DAYS, 'nightly');
+      return `${written} orders synced`;
+    }).catch(e => console.error('Analytics nightly sync failed:', e.message));
   }, { timezone: 'America/Chicago' });
 
   // One minute after boot: backfill history if the table is empty

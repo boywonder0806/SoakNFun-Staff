@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { hubUrl } from '../lib/hub.js';
 import api from '../lib/api.js';
 import ApiManagement from './ApiManagement.jsx';
+import Automations from './Automations.jsx';
 
 const ROLES = [
   { value: 'crew_member', label: 'Staff' },
@@ -180,8 +181,9 @@ export default function Console() {
         <nav className="flex-1 px-3 py-4 space-y-1">
           <p className="text-[10px] font-bold text-stone-500 uppercase tracking-widest px-3 mb-2">Administration</p>
           {[
-            { id: 'users', label: 'User Management', Icon: UsersNavIcon },
-            { id: 'api',   label: 'API Management',  Icon: PlugIcon },
+            { id: 'users',       label: 'User Management', Icon: UsersNavIcon },
+            { id: 'api',         label: 'API Management',  Icon: PlugIcon },
+            { id: 'automations', label: 'Automations',     Icon: GearIcon },
           ].map(({ id, label, Icon }) => {
             const isActive = tab === id;
             return (
@@ -227,11 +229,15 @@ export default function Console() {
         {/* Page header */}
         <div className="bg-white/80 backdrop-blur border-b border-gray-200 px-8 py-4 shrink-0 flex items-center justify-between">
           <div>
-            <h2 className="text-base font-bold text-gray-900">{tab === 'users' ? 'User Management' : 'API Management'}</h2>
+            <h2 className="text-base font-bold text-gray-900">
+              {tab === 'users' ? 'User Management' : tab === 'api' ? 'API Management' : 'Automations'}
+            </h2>
             <p className="text-xs text-gray-400 mt-0.5">
               {tab === 'users'
                 ? 'Accounts, roles, and tool access across the staff platform'
-                : 'Live status and billing for every external service the platform depends on'}
+                : tab === 'api'
+                  ? 'Live status and billing for every external service the platform depends on'
+                  : 'Server-side cron jobs and integrations — health, run history, and anything you track manually'}
             </p>
           </div>
           <div className="flex items-center gap-4">
@@ -246,7 +252,7 @@ export default function Console() {
 
         {/* Content */}
         <div className="flex-1 min-h-0 overflow-y-auto">
-          {tab === 'api' ? <ApiManagement /> : (
+          {tab === 'api' ? <ApiManagement /> : tab === 'automations' ? <Automations /> : (
           <div className="max-w-5xl mx-auto px-8 py-6 space-y-5">
 
             {/* Stats */}
@@ -790,6 +796,15 @@ function UsersNavIcon() {
       <circle cx="9" cy="7" r="4" />
       <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
       <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 shrink-0">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }

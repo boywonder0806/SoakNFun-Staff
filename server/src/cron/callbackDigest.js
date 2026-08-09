@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { randomUUID } from 'crypto';
 import pool from '../db/index.js';
 import { sendCallbackDigestEmail } from '../services/email.js';
+import { ensureAutomation, runTracked } from '../services/automations.js';
 
 async function getOrCreateToken(employeeId) {
   const { rows } = await pool.query(
@@ -69,12 +70,31 @@ async function sendDigests(triggeredBy = null) {
   }
 }
 
+// sendDigests catches its own errors and returns 0 rather than throwing (a
+// contract runCallbackDigestNow's caller in reception.js relies on), so a
+// real failure inside it won't surface as a run-level 'error' here — only
+// as a low/zero count. Known limitation, not worth changing that contract for.
+function trackedDigest(triggeredBy) {
+  return runTracked('callback-digest', async () => {
+    const count = await sendDigests(triggeredBy);
+    // { result, summary }: callers of runCallbackDigestNow (reception.js)
+    // need the raw count back, while the automation log gets a readable line.
+    return { result: count, summary: `${count} digest${count === 1 ? '' : 's'} sent` };
+  });
+}
+
 export function startCallbackDigestCron() {
-  cron.schedule('0 11 * * *', sendDigests, { timezone: 'America/Chicago' });
-  cron.schedule('0 18 * * *', sendDigests, { timezone: 'America/Chicago' });
+  ensureAutomation('callback-digest', {
+    name: 'Callback Digest Emails', category: 'notification',
+    description: 'Emails each staff member their pending reception callback requests.',
+    scheduleDescription: '11:00 AM and 6:00 PM Central', expectedIntervalMinutes: 7 * 60,
+  }).catch(() => {});
+
+  cron.schedule('0 11 * * *', () => trackedDigest(), { timezone: 'America/Chicago' });
+  cron.schedule('0 18 * * *', () => trackedDigest(), { timezone: 'America/Chicago' });
   console.log('[Callback digest] Scheduled for 11:00 AM and 6:00 PM Central');
 }
 
 export function runCallbackDigestNow(triggeredBy = null) {
-  return sendDigests(triggeredBy);
+  return trackedDigest(triggeredBy);
 }
