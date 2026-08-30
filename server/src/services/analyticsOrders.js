@@ -43,6 +43,9 @@ pool.query(`CREATE TABLE IF NOT EXISTS analytics_orders (
     pool.query('CREATE INDEX IF NOT EXISTS idx_analytics_orders_bdate ON analytics_orders (business_date)'),
     pool.query('CREATE INDEX IF NOT EXISTS idx_analytics_orders_park_bdate ON analytics_orders (park, business_date)'),
     pool.query('CREATE INDEX IF NOT EXISTS idx_analytics_orders_office ON analytics_orders (sales_office_name)'),
+    // Billing postal code — only present on RocketRez orders where an address
+    // was collected (online checkout), added for zip-code catchment reporting.
+    pool.query('ALTER TABLE analytics_orders ADD COLUMN IF NOT EXISTS postal_code TEXT'),
   ]))
   .then(() => pool.query(`CREATE TABLE IF NOT EXISTS analytics_order_line_items (
     id                 BIGSERIAL PRIMARY KEY,
@@ -103,6 +106,7 @@ function mapOrderRow(order) {
     contactGroupName:    order.contactGroupName?.trim() || null,
     primaryContactName:  [order.primaryContact?.firstName, order.primaryContact?.lastName].filter(Boolean).join(' ').trim() || null,
     primaryContactEmail: order.primaryContact?.email || null,
+    postalCode:          order.primaryContact?.billingAddress?.postalCode?.trim() || null,
     subTotal:            order.subTotal || 0,
     discountTotal:       order.discountTotal || 0,
     taxTotal:            order.taxTotal || 0,
@@ -158,13 +162,13 @@ export async function upsertOrders(rawOrders) {
       const oValues = [];
       const oParams = [];
       orderRows.forEach((r, j) => {
-        const b = j * 19;
-        oValues.push(`($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12},$${b+13},$${b+14},$${b+15},$${b+16},$${b+17},$${b+18},$${b+19}::jsonb)`);
+        const b = j * 20;
+        oValues.push(`($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12},$${b+13},$${b+14},$${b+15},$${b+16},$${b+17},$${b+18},$${b+19}::jsonb,$${b+20})`);
         oParams.push(
           r.orderId, r.createdDate, r.businessDate, r.status, r.salesOfficeId, r.salesOfficeName,
           r.park, r.isWebOrder, r.salesPersonName, r.contactGroupName, r.primaryContactName,
           r.primaryContactEmail, r.subTotal, r.discountTotal, r.taxTotal, r.gratuityTotal,
-          r.variableFeeTotal, r.total, JSON.stringify(r.paymentMethods),
+          r.variableFeeTotal, r.total, JSON.stringify(r.paymentMethods), r.postalCode,
         );
       });
       if (oValues.length) {
@@ -173,7 +177,7 @@ export async function upsertOrders(rawOrders) {
              order_id, created_date, business_date, status, sales_office_id, sales_office_name,
              park, is_web_order, sales_person_name, contact_group_name, primary_contact_name,
              primary_contact_email, sub_total, discount_total, tax_total, gratuity_total,
-             variable_fee_total, total, payment_methods
+             variable_fee_total, total, payment_methods, postal_code
            ) VALUES ${oValues.join(',')}
            ON CONFLICT (order_id) DO UPDATE SET
              created_date = EXCLUDED.created_date, business_date = EXCLUDED.business_date,
@@ -184,7 +188,8 @@ export async function upsertOrders(rawOrders) {
              primary_contact_email = EXCLUDED.primary_contact_email, sub_total = EXCLUDED.sub_total,
              discount_total = EXCLUDED.discount_total, tax_total = EXCLUDED.tax_total,
              gratuity_total = EXCLUDED.gratuity_total, variable_fee_total = EXCLUDED.variable_fee_total,
-             total = EXCLUDED.total, payment_methods = EXCLUDED.payment_methods, synced_at = NOW()`,
+             total = EXCLUDED.total, payment_methods = EXCLUDED.payment_methods,
+             postal_code = EXCLUDED.postal_code, synced_at = NOW()`,
           oParams
         );
       }
