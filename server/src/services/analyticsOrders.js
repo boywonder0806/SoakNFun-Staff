@@ -52,6 +52,12 @@ pool.query(`CREATE TABLE IF NOT EXISTS analytics_orders (
     pool.query('ALTER TABLE analytics_orders ADD COLUMN IF NOT EXISTS city TEXT'),
     pool.query('ALTER TABLE analytics_orders ADD COLUMN IF NOT EXISTS province TEXT'),
     pool.query('ALTER TABLE analytics_orders ADD COLUMN IF NOT EXISTS primary_contact_phone TEXT'),
+    // Full raw RocketRez order object (incl. nested lineItems, taxItems, serials,
+    // questions, concierge/sales-office ids, etc.) — every structured column above
+    // is also derivable from this, but keeping the whole thing means a future
+    // question about a field we haven't mapped yet doesn't require re-pulling
+    // history from RocketRez; it's already sitting here to query with ->/->>.
+    pool.query('ALTER TABLE analytics_orders ADD COLUMN IF NOT EXISTS raw_data JSONB'),
   ]))
   .then(() => pool.query(`CREATE TABLE IF NOT EXISTS analytics_order_line_items (
     id                 BIGSERIAL PRIMARY KEY,
@@ -69,6 +75,7 @@ pool.query(`CREATE TABLE IF NOT EXISTS analytics_orders (
     event_name         TEXT,
     event_date         DATE
   )`))
+  .then(() => pool.query('ALTER TABLE analytics_order_line_items ADD COLUMN IF NOT EXISTS coupon_amount NUMERIC(10,2) NOT NULL DEFAULT 0'))
   .then(() => Promise.all([
     pool.query('CREATE INDEX IF NOT EXISTS idx_analytics_li_order ON analytics_order_line_items (order_id)'),
     pool.query('CREATE INDEX IF NOT EXISTS idx_analytics_li_product ON analytics_order_line_items (product_id)'),
@@ -124,6 +131,7 @@ function mapOrderRow(order) {
     variableFeeTotal:    order.variableFeeTotal || 0,
     total:               order.total || 0,
     paymentMethods:      order.paymentMethods || [],
+    rawData:             order,
   };
 }
 
@@ -144,6 +152,7 @@ function mapLineItemRows(order) {
         price:           rt.price || 0,
         subtotal:        rt.subTotal || 0,
         taxTotal:        rt.taxTotal || 0,
+        couponAmount:    rt.couponAmount || 0,
         eventName:       li.event?.name || null,
         eventDate:       li.event?.schedule?.date || null,
       });
@@ -172,14 +181,14 @@ export async function upsertOrders(rawOrders) {
       const oValues = [];
       const oParams = [];
       orderRows.forEach((r, j) => {
-        const b = j * 24;
-        oValues.push(`($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12},$${b+13},$${b+14},$${b+15},$${b+16},$${b+17},$${b+18},$${b+19}::jsonb,$${b+20},$${b+21},$${b+22},$${b+23},$${b+24})`);
+        const b = j * 25;
+        oValues.push(`($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12},$${b+13},$${b+14},$${b+15},$${b+16},$${b+17},$${b+18},$${b+19}::jsonb,$${b+20},$${b+21},$${b+22},$${b+23},$${b+24},$${b+25}::jsonb)`);
         oParams.push(
           r.orderId, r.createdDate, r.businessDate, r.status, r.salesOfficeId, r.salesOfficeName,
           r.park, r.isWebOrder, r.salesPersonName, r.contactGroupName, r.primaryContactName,
           r.primaryContactEmail, r.subTotal, r.discountTotal, r.taxTotal, r.gratuityTotal,
           r.variableFeeTotal, r.total, JSON.stringify(r.paymentMethods), r.postalCode,
-          r.addressLine1, r.city, r.province, r.primaryContactPhone,
+          r.addressLine1, r.city, r.province, r.primaryContactPhone, JSON.stringify(r.rawData),
         );
       });
       if (oValues.length) {
@@ -189,7 +198,7 @@ export async function upsertOrders(rawOrders) {
              park, is_web_order, sales_person_name, contact_group_name, primary_contact_name,
              primary_contact_email, sub_total, discount_total, tax_total, gratuity_total,
              variable_fee_total, total, payment_methods, postal_code,
-             address_line1, city, province, primary_contact_phone
+             address_line1, city, province, primary_contact_phone, raw_data
            ) VALUES ${oValues.join(',')}
            ON CONFLICT (order_id) DO UPDATE SET
              created_date = EXCLUDED.created_date, business_date = EXCLUDED.business_date,
@@ -203,7 +212,8 @@ export async function upsertOrders(rawOrders) {
              total = EXCLUDED.total, payment_methods = EXCLUDED.payment_methods,
              postal_code = EXCLUDED.postal_code, address_line1 = EXCLUDED.address_line1,
              city = EXCLUDED.city, province = EXCLUDED.province,
-             primary_contact_phone = EXCLUDED.primary_contact_phone, synced_at = NOW()`,
+             primary_contact_phone = EXCLUDED.primary_contact_phone, raw_data = EXCLUDED.raw_data,
+             synced_at = NOW()`,
           oParams
         );
       }
@@ -217,18 +227,18 @@ export async function upsertOrders(rawOrders) {
         const lValues = [];
         const lParams = [];
         liChunk.forEach((r, k) => {
-          const b = k * 13;
-          lValues.push(`($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12},$${b+13})`);
+          const b = k * 14;
+          lValues.push(`($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12},$${b+13},$${b+14})`);
           lParams.push(
             r.orderId, r.lineItemId, r.name, r.type, r.productId, r.salesOfficeName,
-            r.rateType, r.quantity, r.price, r.subtotal, r.taxTotal, r.eventName, r.eventDate,
+            r.rateType, r.quantity, r.price, r.subtotal, r.taxTotal, r.eventName, r.eventDate, r.couponAmount,
           );
         });
         if (lValues.length) {
           await client.query(
             `INSERT INTO analytics_order_line_items (
                order_id, line_item_id, name, type, product_id, sales_office_name,
-               rate_type, quantity, price, subtotal, tax_total, event_name, event_date
+               rate_type, quantity, price, subtotal, tax_total, event_name, event_date, coupon_amount
              ) VALUES ${lValues.join(',')}`,
             lParams
           );
