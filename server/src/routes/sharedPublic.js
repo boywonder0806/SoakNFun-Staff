@@ -51,43 +51,57 @@ setInterval(() => { const now = Date.now(); for (const [k, e] of pinAttempts) if
 
 const lockedMsg = (t) => `Too many incorrect attempts. Try again in ${t.retryMin} minute${t.retryMin === 1 ? '' : 's'}.`;
 
-function pinPage(res, report, { error = '', status = 200 } = {}) {
-  const disabled = status === 429 ? 'disabled' : '';
+function pinPage(res, report, { error = '', status = 200, agreed = false } = {}) {
+  const locked = status === 429;
+  const dis = locked ? 'disabled' : '';
   res.status(status);
   res.set('Content-Type', 'text/html; charset=utf-8');
   res.set('X-Robots-Tag', 'noindex, nofollow');
   res.set('Cache-Control', 'no-store');
   res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(report.title)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-  :root{color-scheme:light dark;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink-2:#52514e;--muted:#898781;--border:rgba(11,11,11,.12);--accent:#0b0b0b;--err:#c8463c}
-  @media (prefers-color-scheme:dark){:root{--page:#0d0d0d;--surface:#1a1a19;--ink:#fff;--ink-2:#c3c2b7;--muted:#898781;--border:rgba(255,255,255,.12);--accent:#fff}}
-  body{margin:0;background:var(--page);color:var(--ink);font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box}
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px 28px;max-width:380px;width:100%;text-align:center}
-  .eyebrow{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
-  h1{font-size:20px;font-weight:800;margin:0 0 6px;letter-spacing:-.01em}
-  p{font-size:13.5px;color:var(--ink-2);line-height:1.5;margin:0 0 20px}
-  input{font:inherit;font-size:26px;font-weight:700;letter-spacing:.35em;text-align:center;width:100%;padding:12px 10px;border:1px solid var(--border);border-radius:12px;background:var(--page);color:var(--ink);box-sizing:border-box;font-variant-numeric:tabular-nums}
-  input:focus{outline:2px solid var(--accent);outline-offset:1px}
-  button{margin-top:12px;font:inherit;font-size:14px;font-weight:700;width:100%;padding:12px;border:0;border-radius:12px;background:var(--accent);color:var(--page);cursor:pointer}
-  button:disabled,input:disabled{opacity:.5;cursor:default}
-  .err{color:var(--err);font-size:13px;font-weight:600;margin:12px 0 0}
-  .notice{text-align:left;font-size:13px;line-height:1.55;color:var(--ink-2);background:rgba(201,133,0,.10);border-left:3px solid #c98500;border-radius:8px;padding:10px 12px;margin:0 0 16px}
-  .notice b{color:var(--ink)}
-  .agree{display:flex;gap:10px;align-items:flex-start;text-align:left;font-size:13px;line-height:1.5;color:var(--ink-2);margin:0 0 18px;cursor:pointer}
-  .agree input{width:16px;height:16px;margin:2px 0 0;flex:none;accent-color:var(--accent)}
+  :root{color-scheme:light dark;--page:#f4f4f1;--surface:#ffffff;--ink:#0b0b0b;--ink-2:#4f4e4a;--muted:#8a8882;--border:rgba(11,11,11,.10);--ring:rgba(42,120,214,.35);--blue:#2a78d6;--blue-2:#1f63b6;--err:#c8463c;--field:#f7f7f4}
+  @media (prefers-color-scheme:dark){:root{--page:#0b0b0b;--surface:#161615;--ink:#f5f5f3;--ink-2:#c3c2b7;--muted:#8a8882;--border:rgba(255,255,255,.10);--ring:rgba(57,135,229,.45);--blue:#3987e5;--blue-2:#2f76cc;--err:#e06b62;--field:#0f0f0e}}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:28px 20px;background:var(--page);color:var(--ink);font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{width:100%;max-width:400px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:34px 30px 26px;box-shadow:0 1px 2px rgba(0,0,0,.06),0 24px 60px -30px rgba(0,0,0,.45);text-align:center}
+  .lock{width:44px;height:44px;border-radius:14px;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--blue) 14%,transparent);color:var(--blue)}
+  .eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+  h1{font-size:19px;font-weight:800;letter-spacing:-.01em;line-height:1.25;margin:0 0 10px;text-wrap:balance}
+  .notice{font-size:13px;line-height:1.55;color:var(--ink-2);margin:0 0 22px}
+  .agree{display:flex;gap:11px;align-items:flex-start;text-align:left;font-size:13px;line-height:1.5;color:var(--ink-2);padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--field);margin:0 0 16px;cursor:pointer;transition:border-color .15s}
+  .agree:has(input:checked){border-color:var(--blue)}
+  .agree input{width:17px;height:17px;margin:1px 0 0;flex:none;accent-color:var(--blue);cursor:pointer}
+  .field{display:block;text-align:left;margin:0 0 14px}
+  .flabel{display:block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 7px}
+  .pin{font:inherit;font-size:26px;font-weight:700;letter-spacing:.45em;text-indent:.45em;text-align:center;width:100%;height:58px;padding:0 12px;border:1px solid var(--border);border-radius:12px;background:var(--field);color:var(--ink);font-variant-numeric:tabular-nums;transition:border-color .15s,box-shadow .15s}
+  .pin::placeholder{color:var(--muted);opacity:.45;letter-spacing:.45em}
+  .pin:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 4px var(--ring)}
+  button{font:inherit;font-size:14.5px;font-weight:700;width:100%;height:50px;border:0;border-radius:12px;background:var(--blue);color:#fff;cursor:pointer;transition:background .15s,transform .05s}
+  button:hover:not(:disabled){background:var(--blue-2)} button:active:not(:disabled){transform:translateY(1px)}
+  button:disabled{background:color-mix(in srgb,var(--ink) 12%,transparent);color:var(--muted);cursor:not-allowed}
+  input:disabled{opacity:.5}
+  .err{display:flex;gap:8px;align-items:flex-start;text-align:left;color:var(--err);font-size:13px;font-weight:600;line-height:1.45;margin:14px 0 0}
+  .err svg{flex:none;margin-top:1px}
+  .fine{font-size:12px;color:var(--muted);margin:18px 0 0}
+  .brand{text-align:center;font-size:11.5px;color:var(--muted);margin:18px 0 0;letter-spacing:.02em}
 </style></head>
-<body><form class="card" method="post" action="/shared/${escapeHtml(report.token)}/unlock" autocomplete="off">
+<body><main class="wrap"><form class="card" method="post" action="/shared/${escapeHtml(report.token)}/unlock" autocomplete="off">
+  <div class="lock" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10.5" width="16" height="10.5" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg></div>
   <p class="eyebrow">Internal &middot; Confidential</p>
   <h1>${escapeHtml(report.title)}</h1>
-  <div class="notice"><b>This report is internal and confidential.</b> It contains company financial and operating information for authorized Blue Bayou &amp; Gulf Islands staff only. Do not share the link, the PIN, or the contents outside the company.</div>
-  <label class="agree"><input type="checkbox" name="agree" value="yes" id="agree" ${disabled}><span>I confirm that I am authorized to view this material and agree not to share or distribute it.</span></label>
-  <p>Enter the PIN you were given to open this report.</p>
-  <input type="password" name="pin" inputmode="numeric" pattern="[0-9]*" maxlength="8" autofocus autocomplete="one-time-code" aria-label="PIN" ${disabled}>
+  <p class="notice">Access is restricted to authorized Blue Bayou &amp; Gulf Islands staff. Do not share this link or the PIN.</p>
+  <label class="agree"><input type="checkbox" name="agree" value="yes" id="agree" ${agreed ? 'checked' : ''} ${dis}><span>I confirm that I am authorized to view this report and will not share or distribute it.</span></label>
+  <label class="field"><span class="flabel">PIN</span><input class="pin" type="password" name="pin" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="&bull;&bull;&bull;&bull;" autofocus autocomplete="one-time-code" aria-label="PIN" ${dis}></label>
   <button type="submit" id="open" disabled>Open report</button>
-  ${error ? `<p class="err">${escapeHtml(error)}</p>` : ''}
-</form>
-<script>(function(){var a=document.getElementById('agree'),b=document.getElementById('open');if(!a||!b)return;function s(){b.disabled=${status === 429 ? 'true' : '!a.checked'};}a.addEventListener('change',s);s();})();</script>
+  ${error ? `<p class="err"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg><span>${escapeHtml(error)}</span></p>` : ''}
+  <p class="fine">Don't have the PIN? Ask the person who sent you this link.</p>
+</form><p class="brand">Blue Bayou &amp; Gulf Islands Waterparks &middot; Analytics</p></main>
+<script>(function(){var a=document.getElementById('agree'),b=document.getElementById('open');if(!a||!b)return;function s(){b.disabled=${locked ? 'true' : '!a.checked'};}a.addEventListener('change',s);s();})();</script>
 </body></html>`);
 }
 
@@ -139,7 +153,7 @@ router.post('/shared/:token/unlock', async (req, res) => {
     const pin = String(req.body?.pin || '').trim();
     if (!verifyPin(pin, report.pin_hash)) {
       t.fail();
-      return pinPage(res, report, { error: 'That PIN isn’t right.', status: 401 });
+      return pinPage(res, report, { error: 'That PIN isn’t right.', status: 401, agreed: true });
     }
     t.clear();
     const exp = String(Date.now() + UNLOCK_TTL_MS);
