@@ -50,6 +50,28 @@ export default function SharedReports() {
     }
   }
 
+  async function setPin(r, clear = false) {
+    let pin = null;
+    if (!clear) {
+      pin = window.prompt(`${r.has_pin ? 'New' : 'Set a'} PIN for "${r.title}" (4–8 digits). Viewers will need it before the report loads.`);
+      if (pin === null) return;
+      pin = pin.trim();
+      if (!/^\d{4,8}$/.test(pin)) { setError('PIN must be 4–8 digits.'); return; }
+    } else if (!window.confirm(`Remove the PIN from "${r.title}"? Anyone with the link will be able to open it again.`)) {
+      return;
+    }
+    setBusyToken(r.token);
+    try {
+      await api.patch(`/analytics/shared-reports/${r.token}/pin`, { pin });
+      setError('');
+      await load();
+    } catch {
+      setError('Failed to update the PIN.');
+    } finally {
+      setBusyToken('');
+    }
+  }
+
   async function remove(r) {
     if (!window.confirm(`Permanently delete "${r.title}"? The link will stop working immediately.`)) return;
     setBusyToken(r.token);
@@ -99,7 +121,10 @@ export default function SharedReports() {
                     <p className="font-medium text-gray-900">{r.title}</p>
                     <p className="text-[11px] text-gray-400">{r.created_by || 'unknown'}</p>
                   </td>
-                  <td className="px-4 py-3"><StatusPill report={r} /></td>
+                  <td className="px-4 py-3">
+                    <StatusPill report={r} />
+                    {r.has_pin && <span className="ml-1.5 inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700">PIN</span>}
+                  </td>
                   <td className="px-4 py-3 text-gray-500">{relativeTime(r.created_at)}</td>
                   <td className="px-4 py-3 text-gray-700 tabular-nums">
                     {number(r.view_count)}
@@ -114,6 +139,22 @@ export default function SharedReports() {
                     </button>
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
+                    <button
+                      disabled={busyToken === r.token}
+                      onClick={() => setPin(r)}
+                      className="text-xs font-medium text-gray-500 hover:text-gray-800 mr-3 disabled:opacity-40"
+                    >
+                      {r.has_pin ? 'Change PIN' : 'Set PIN'}
+                    </button>
+                    {r.has_pin && (
+                      <button
+                        disabled={busyToken === r.token}
+                        onClick={() => setPin(r, true)}
+                        className="text-xs font-medium text-gray-500 hover:text-gray-800 mr-3 disabled:opacity-40"
+                      >
+                        Remove PIN
+                      </button>
+                    )}
                     <button
                       disabled={busyToken === r.token}
                       onClick={() => toggleRevoke(r)}

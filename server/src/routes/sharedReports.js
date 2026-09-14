@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAnalytics } from '../middleware/auth.js';
-import { createSharedReport, listSharedReports, updateSharedReport, setRevoked, deleteSharedReport } from '../services/sharedReports.js';
+import { createSharedReport, listSharedReports, updateSharedReport, setRevoked, deleteSharedReport, setSharedReportPin } from '../services/sharedReports.js';
 
 const router = Router();
 router.use(requireAnalytics);
@@ -49,6 +49,20 @@ router.put('/:token', async (req, res) => {
   } catch (err) {
     console.error('shared-reports update error:', err.message);
     res.status(500).json({ error: 'Failed to update shared report' });
+  }
+});
+
+// PATCH /api/analytics/shared-reports/:token/pin — set a PIN ({ pin: "7593" }) or clear it ({ pin: null })
+router.patch('/:token/pin', async (req, res) => {
+  try {
+    const pin = req.body?.pin;
+    if (pin != null && !/^\d{4,8}$/.test(String(pin))) return res.status(400).json({ error: 'PIN must be 4–8 digits' });
+    const ok = await setSharedReportPin(req.params.token, pin ? String(pin) : null);
+    if (!ok) return res.status(404).json({ error: 'Not found' });
+    res.json({ hasPin: !!pin });
+  } catch (err) {
+    console.error('shared-reports pin error:', err.message);
+    res.status(500).json({ error: 'Failed to update PIN' });
   }
 });
 

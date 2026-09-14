@@ -7,7 +7,7 @@
 import crypto from 'crypto';
 import pool from '../db/index.js';
 
-pool.query(`CREATE TABLE IF NOT EXISTS shared_reports (
+export const schemaReady = pool.query(`CREATE TABLE IF NOT EXISTS shared_reports (
   token          TEXT PRIMARY KEY,
   title          TEXT NOT NULL,
   html           TEXT NOT NULL,
@@ -19,7 +19,30 @@ pool.query(`CREATE TABLE IF NOT EXISTS shared_reports (
   last_viewed_at TIMESTAMPTZ
 )`)
   .then(() => pool.query('CREATE INDEX IF NOT EXISTS idx_shared_reports_created ON shared_reports (created_at DESC)'))
+  .then(() => pool.query('ALTER TABLE shared_reports ADD COLUMN IF NOT EXISTS pin_hash TEXT'))
   .catch(e => console.error('shared_reports migration:', e.message));
+
+// Optional PIN gate. Only a salted scrypt hash is stored; the public route
+// checks it server-side so the report HTML never leaves the server unlocked.
+export function hashPin(pin) {
+  const salt = crypto.randomBytes(16);
+  return `${salt.toString('hex')}:${crypto.scryptSync(String(pin), salt, 32).toString('hex')}`;
+}
+
+export function verifyPin(pin, stored) {
+  if (!stored || !pin) return false;
+  const [saltHex, hashHex] = stored.split(':');
+  const actual = crypto.scryptSync(String(pin), Buffer.from(saltHex, 'hex'), 32);
+  const expected = Buffer.from(hashHex, 'hex');
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+
+export async function setSharedReportPin(token, pin) {
+  const { rowCount } = await pool.query(
+    `UPDATE shared_reports SET pin_hash = $2 WHERE token = $1`, [token, pin ? hashPin(pin) : null]
+  );
+  return rowCount > 0;
+}
 
 function generateToken() {
   // 24 random bytes as unpadded base64url — short-ish (32 chars), URL-safe,
@@ -40,7 +63,7 @@ export async function createSharedReport({ title, html, createdBy, expiresInDays
 export async function listSharedReports() {
   const { rows } = await pool.query(
     `SELECT token, title, created_by, created_at, expires_at, revoked, view_count, last_viewed_at,
-            length(html) AS size_bytes
+            length(html) AS size_bytes, (pin_hash IS NOT NULL) AS has_pin
      FROM shared_reports ORDER BY created_at DESC`
   );
   return rows;
