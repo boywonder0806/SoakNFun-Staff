@@ -72,15 +72,23 @@ function pinPage(res, report, { error = '', status = 200 } = {}) {
   button{margin-top:12px;font:inherit;font-size:14px;font-weight:700;width:100%;padding:12px;border:0;border-radius:12px;background:var(--accent);color:var(--page);cursor:pointer}
   button:disabled,input:disabled{opacity:.5;cursor:default}
   .err{color:var(--err);font-size:13px;font-weight:600;margin:12px 0 0}
+  .notice{text-align:left;font-size:13px;line-height:1.55;color:var(--ink-2);background:rgba(201,133,0,.10);border-left:3px solid #c98500;border-radius:8px;padding:10px 12px;margin:0 0 16px}
+  .notice b{color:var(--ink)}
+  .agree{display:flex;gap:10px;align-items:flex-start;text-align:left;font-size:13px;line-height:1.5;color:var(--ink-2);margin:0 0 18px;cursor:pointer}
+  .agree input{width:16px;height:16px;margin:2px 0 0;flex:none;accent-color:var(--accent)}
 </style></head>
 <body><form class="card" method="post" action="/shared/${escapeHtml(report.token)}/unlock" autocomplete="off">
-  <p class="eyebrow">Protected report</p>
+  <p class="eyebrow">Internal &middot; Confidential</p>
   <h1>${escapeHtml(report.title)}</h1>
+  <div class="notice"><b>This report is internal and confidential.</b> It contains company financial and operating information for authorized Blue Bayou &amp; Gulf Islands staff only. Do not share the link, the PIN, or the contents outside the company.</div>
+  <label class="agree"><input type="checkbox" name="agree" value="yes" id="agree" ${disabled}><span>I confirm that I am authorized to view this material and agree not to share or distribute it.</span></label>
   <p>Enter the PIN you were given to open this report.</p>
   <input type="password" name="pin" inputmode="numeric" pattern="[0-9]*" maxlength="8" autofocus autocomplete="one-time-code" aria-label="PIN" ${disabled}>
-  <button type="submit" ${disabled}>Open report</button>
+  <button type="submit" id="open" disabled>Open report</button>
   ${error ? `<p class="err">${escapeHtml(error)}</p>` : ''}
-</form></body></html>`);
+</form>
+<script>(function(){var a=document.getElementById('agree'),b=document.getElementById('open');if(!a||!b)return;function s(){b.disabled=${status === 429 ? 'true' : '!a.checked'};}a.addEventListener('change',s);s();})();</script>
+</body></html>`);
 }
 
 async function loadShared(req, res) {
@@ -126,6 +134,8 @@ router.post('/shared/:token/unlock', async (req, res) => {
     if (!report.pin_hash) return res.redirect(303, `/shared/${report.token}`);
     const t = pinThrottle(req, report.token);
     if (t.locked) return pinPage(res, report, { error: lockedMsg(t), status: 429 });
+    // The acknowledgement is required server-side too; a missing one is not a PIN attempt.
+    if (req.body?.agree !== 'yes') return pinPage(res, report, { error: 'Please confirm that you are authorized to view this report.', status: 400 });
     const pin = String(req.body?.pin || '').trim();
     if (!verifyPin(pin, report.pin_hash)) {
       t.fail();
