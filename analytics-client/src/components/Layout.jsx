@@ -23,6 +23,7 @@ const NAV_SECTIONS = [
     heading: 'Reporting',
     items: [
       { to: '/reports/cash-out', label: 'Cash Out Report' },
+      { to: '/reports/shared',   label: 'Shared Reports' },
     ],
   },
 ];

@@ -20,6 +20,8 @@ import hrRouter from './routes/hr.js';
 import bayoubotRouter from './routes/bayoubot.js';
 import ticketsRouter from './routes/tickets.js';
 import analyticsRouter from './routes/analytics.js';
+import sharedReportsRouter from './routes/sharedReports.js';
+import { getSharedReport, recordView } from './services/sharedReports.js';
 import { startCallbackDigestCron } from './cron/callbackDigest.js';
 import { startCrewOrderSyncCron } from './cron/crewOrderSync.js';
 import { startAnalyticsOrderSyncCron } from './cron/analyticsOrderSync.js';
@@ -76,8 +78,35 @@ app.use('/api/hr',         hrRouter);
 app.use('/api/bayoubot',   bayoubotRouter);
 app.use('/api/tickets',    ticketsRouter);
 app.use('/api/analytics',  analyticsRouter);
+app.use('/api/analytics/shared-reports', sharedReportsRouter);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'Blue Bayou Staff API' }));
+
+// Public report links — no login. The token in the URL is the only
+// credential, so this must sit ahead of the static/SPA catch-all below,
+// and it must never echo anything but the stored HTML back to the caller.
+app.get('/shared/:token', async (req, res) => {
+  try {
+    const report = await getSharedReport(req.params.token);
+    const unavailable = (msg) => res.status(404).send(
+      `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+       <title>Report unavailable</title>
+       <body style="font:15px system-ui,sans-serif;color:#333;max-width:32rem;margin:15vh auto;padding:0 20px;text-align:center">
+         <p style="font-size:15px">${msg}</p>
+       </body>`
+    );
+    if (!report) return unavailable('This report link doesn’t exist.');
+    if (report.revoked) return unavailable('This report link has been revoked.');
+    if (report.expires_at && new Date(report.expires_at) < new Date()) return unavailable('This report link has expired.');
+    recordView(req.params.token).catch(() => {});
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.set('X-Robots-Tag', 'noindex, nofollow');
+    res.send(report.html);
+  } catch (err) {
+    console.error('shared report view error:', err.message);
+    res.status(500).send('Something went wrong loading this report.');
+  }
+});
 
 // Serve React builds in production — route by Host header
 if (process.env.NODE_ENV === 'production') {
