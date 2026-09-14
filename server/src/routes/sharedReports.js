@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAnalytics } from '../middleware/auth.js';
-import { createSharedReport, listSharedReports, setRevoked, deleteSharedReport } from '../services/sharedReports.js';
+import { createSharedReport, listSharedReports, updateSharedReport, setRevoked, deleteSharedReport } from '../services/sharedReports.js';
 
 const router = Router();
 router.use(requireAnalytics);
@@ -35,6 +35,20 @@ router.get('/', async (req, res) => {
   } catch (err) {
     console.error('shared-reports list error:', err.message);
     res.status(500).json({ error: 'Failed to load shared reports' });
+  }
+});
+
+// PUT /api/analytics/shared-reports/:token — republish corrected content to the same link
+router.put('/:token', async (req, res) => {
+  try {
+    const { title, html } = req.body || {};
+    if (!title && !html) return res.status(400).json({ error: 'title or html required' });
+    const ok = await updateSharedReport(req.params.token, { title, html });
+    if (!ok) return res.status(404).json({ error: 'Not found' });
+    res.json({ url: publicUrl(req, req.params.token) });
+  } catch (err) {
+    console.error('shared-reports update error:', err.message);
+    res.status(500).json({ error: 'Failed to update shared report' });
   }
 });
 

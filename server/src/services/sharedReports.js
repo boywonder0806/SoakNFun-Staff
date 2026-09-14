@@ -58,6 +58,14 @@ export async function recordView(token) {
   );
 }
 
+export async function updateSharedReport(token, { title, html }) {
+  const { rowCount } = await pool.query(
+    `UPDATE shared_reports SET title = COALESCE($2, title), html = COALESCE($3, html) WHERE token = $1`,
+    [token, title || null, html || null]
+  );
+  return rowCount > 0;
+}
+
 export async function setRevoked(token, revoked) {
   const { rowCount } = await pool.query(
     `UPDATE shared_reports SET revoked = $2 WHERE token = $1`, [token, revoked]
