@@ -17,7 +17,15 @@ const PIN_MAX_FAILS = 5, PIN_WINDOW_MS = 15 * 60 * 1000;
 const pinAttempts = new Map(); // `${ip}|${token}` -> { fails, windowStart, lockedUntil }
 
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const clientIp = (req) => (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+// nginx sets X-Real-IP to the connecting address and APPENDS it to any
+// X-Forwarded-For the client sent, so trust X-Real-IP first and otherwise the
+// last forwarded entry — never the first, which the caller controls.
+const clientIp = (req) => {
+  const real = (req.headers['x-real-ip'] || '').trim();
+  if (real) return real;
+  const xff = (req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
+  return xff[xff.length - 1] || req.socket.remoteAddress || 'unknown';
+};
 const unlockSig = (token, pinHash, exp) => createHmac('sha256', process.env.JWT_SECRET).update(`${token}|${pinHash}|${exp}`).digest('base64url');
 const cookieName = (token) => `sr_unlock_${token}`;
 
