@@ -271,3 +271,39 @@ function buildCallbackEmail({ toName, callerName, callerPhone, reason, notes, lo
     </div>
   `;
 }
+
+export async function sendSharedReportInvite({ toEmail, toName, reportTitle, url, pin, invitedBy, triggeredBy }) {
+  if (!resend || !toEmail) return false;
+  const subject = `${reportTitle} — your access PIN`;
+  const html    = buildSharedReportInviteEmail({ toName, reportTitle, url, pin, invitedBy });
+  try {
+    await resend.emails.send({ from: FROM, to: toEmail, subject, html });
+    logEmail({ type: 'shared_report_invite', toEmail, toName, subject, htmlBody: html, triggeredBy });
+    return true;
+  } catch (err) {
+    console.error('Shared report invite email failed:', err.message);
+    return false;
+  }
+}
+
+function buildSharedReportInviteEmail({ toName, reportTitle, url, pin, invitedBy }) {
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  return `
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto">
+      <div style="background:#0b0b0b;padding:24px 28px;border-radius:12px 12px 0 0">
+        <p style="color:#9ca3af;margin:0;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase">Internal &middot; Confidential</p>
+        <h1 style="color:#fff;margin:4px 0 0;font-size:20px">${esc(reportTitle)}</h1>
+      </div>
+      <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
+        <p style="color:#374151;margin:0 0 16px">Hi ${esc(toName || 'there')},${invitedBy ? ` ${esc(invitedBy)} has` : ' you have been'} shared a confidential report with you. Open the link and enter your personal PIN.</p>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+          <tr><td style="padding:8px 0;color:#9ca3af;font-size:13px;width:110px">Your PIN</td>
+              <td style="padding:8px 0"><span style="font-family:monospace;font-size:22px;font-weight:700;letter-spacing:.25em;background:#f3f4f6;padding:6px 12px;border-radius:6px;color:#111827">${esc(pin)}</span></td></tr>
+        </table>
+        <a href="${esc(url)}" style="display:inline-block;background:#2a78d6;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;font-size:14px">Open the report</a>
+        <p style="color:#6b7280;font-size:13px;margin:20px 0 0;line-height:1.5">This PIN is yours alone and access is logged. Please don't forward the link or the PIN. If you weren't expecting this, you can ignore it.</p>
+        <p style="margin:24px 0 0;color:#9ca3af;font-size:12px">Blue Bayou &amp; Gulf Islands Waterparks &middot; Analytics</p>
+      </div>
+    </div>
+  `;
+}

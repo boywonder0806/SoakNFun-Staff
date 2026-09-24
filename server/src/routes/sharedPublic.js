@@ -10,7 +10,7 @@
  */
 import { Router } from 'express';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { getSharedReport, recordView, verifyPin } from '../services/sharedReports.js';
+import { getSharedReport, recordView, verifyPin, getActiveRecipients, matchRecipientPin, recordViewDetail } from '../services/sharedReports.js';
 
 const UNLOCK_TTL_MS = 12 * 60 * 60 * 1000;
 const PIN_MAX_FAILS = 5, PIN_WINDOW_MS = 15 * 60 * 1000;
@@ -26,7 +26,9 @@ const clientIp = (req) => {
   const xff = (req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
   return xff[xff.length - 1] || req.socket.remoteAddress || 'unknown';
 };
-const unlockSig = (token, pinHash, exp) => createHmac('sha256', process.env.JWT_SECRET).update(`${token}|${pinHash}|${exp}`).digest('base64url');
+// Bound to the unlocking recipient (0 = the report's general PIN) and to that
+// recipient's stored PIN, so a regenerated PIN invalidates their old unlock.
+const unlockSig = (token, rid, binding, exp) => createHmac('sha256', process.env.JWT_SECRET).update(`${token}|${rid}|${binding}|${exp}`).digest('base64url');
 const cookieName = (token) => `sr_unlock_${token}`;
 
 function readCookie(req, name) {
@@ -34,13 +36,17 @@ function readCookie(req, name) {
   return m ? decodeURIComponent(m.slice(name.length + 1)) : null;
 }
 
-function hasValidUnlock(req, report) {
+// Returns the unlocking recipient id (0 = general PIN), or null if not unlocked.
+function validUnlock(req, report, recipients) {
   const raw = readCookie(req, cookieName(report.token));
-  if (!raw) return false;
-  const [exp, sig] = raw.split('.');
-  if (!exp || !sig || Number(exp) < Date.now()) return false;
-  const expected = unlockSig(report.token, report.pin_hash, exp);
-  return sig.length === expected.length && timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+  if (!raw) return null;
+  const [rid, exp, sig] = raw.split('.');
+  if (!rid || !exp || !sig || Number(exp) < Date.now()) return null;
+  let binding;
+  if (rid === '0') { if (!report.pin_hash) return null; binding = report.pin_hash; }
+  else { const r = recipients.find(x => String(x.id) === rid); if (!r) return null; binding = r.pin_enc; }
+  const expected = unlockSig(report.token, rid, binding, exp);
+  return sig.length === expected.length && timingSafeEqual(Buffer.from(sig), Buffer.from(expected)) ? Number(rid) : null;
 }
 
 function pinThrottle(req, token) {
@@ -134,11 +140,17 @@ router.get('/shared/:token', async (req, res) => {
   try {
     const report = await loadShared(req, res);
     if (!report) return;
-    if (report.pin_hash && !hasValidUnlock(req, report)) {
-      const t = pinThrottle(req, report.token);
-      return pinPage(res, report, t.locked ? { error: lockedMsg(t), status: 429 } : {});
+    const recipients = await getActiveRecipients(report.token);
+    let rid = 0;
+    if (report.pin_hash || recipients.length) {
+      rid = validUnlock(req, report, recipients);
+      if (rid === null) {
+        const t = pinThrottle(req, report.token);
+        return pinPage(res, report, t.locked ? { error: lockedMsg(t), status: 429 } : {});
+      }
     }
     recordView(req.params.token).catch(() => {});
+    recordViewDetail({ token: report.token, recipientId: rid || null, recipientEmail: rid ? recipients.find(x => x.id === rid)?.email : null, ip: clientIp(req), userAgent: req.headers['user-agent'] }).catch(() => {});
     res.set('Content-Type', 'text/html; charset=utf-8');
     res.set('X-Robots-Tag', 'noindex, nofollow');
     res.set('Cache-Control', report.pin_hash ? 'private, no-store' : 'no-cache');
@@ -153,20 +165,25 @@ router.post('/shared/:token/unlock', async (req, res) => {
   try {
     const report = await loadShared(req, res);
     if (!report) return;
-    if (!report.pin_hash) return res.redirect(303, `/shared/${report.token}`);
+    const recipients = await getActiveRecipients(report.token);
+    if (!report.pin_hash && !recipients.length) return res.redirect(303, `/shared/${report.token}`);
     const t = pinThrottle(req, report.token);
     if (t.locked) return pinPage(res, report, { error: lockedMsg(t), status: 429 });
     // The acknowledgement is required server-side too; a missing one is not a PIN attempt.
     if (req.body?.agree !== 'yes') return pinPage(res, report, { error: 'Please confirm that you are authorized to view this report.', status: 400 });
     const pin = String(req.body?.pin || '').trim();
-    if (!verifyPin(pin, report.pin_hash)) {
+    const recipient = matchRecipientPin(recipients, pin);
+    const general = !recipient && !!report.pin_hash && verifyPin(pin, report.pin_hash);
+    if (!recipient && !general) {
       t.fail();
       return pinPage(res, report, { error: 'That PIN isn’t right.', status: 401, agreed: true });
     }
     t.clear();
+    const rid = recipient ? recipient.id : 0;
+    const binding = recipient ? recipient.pin_enc : report.pin_hash;
     const exp = String(Date.now() + UNLOCK_TTL_MS);
     const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-    res.set('Set-Cookie', `${cookieName(report.token)}=${exp}.${unlockSig(report.token, report.pin_hash, exp)}; Path=/shared/${report.token}; Max-Age=${UNLOCK_TTL_MS / 1000}; HttpOnly; SameSite=Lax${secure}`);
+    res.set('Set-Cookie', `${cookieName(report.token)}=${rid}.${exp}.${unlockSig(report.token, rid, binding, exp)}; Path=/shared/${report.token}; Max-Age=${UNLOCK_TTL_MS / 1000}; HttpOnly; SameSite=Lax${secure}`);
     res.redirect(303, `/shared/${report.token}`);
   } catch (err) {
     console.error('shared report unlock error:', err.message);

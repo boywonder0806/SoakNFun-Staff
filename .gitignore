@@ -18,6 +18,10 @@ server/.env
 # Server credentials — keep local only
 SERVER_INFO.md
 
+# Parked report data — not committed, local reference only
+SEASON_PASS_STATE_DATA.md
+season-pass-state-2026.json
+
 # Logs
 *.log
 npm-debug.log*
