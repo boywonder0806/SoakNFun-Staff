@@ -70,6 +70,15 @@ export default function Launcher() {
       href: sso(toolUrl('tickets', 5178)),
     },
     {
+      id: 'analytics',
+      name: 'Analytics',
+      desc: 'Revenue trends, product mix, and shareable sales reports',
+      accent: '#34D399',
+      Icon: ChartIcon,
+      show: user?.role === 'sysadmin' || !!user?.hasAnalyticsAccess,
+      href: sso(toolUrl('analytics', 5179)),
+    },
+    {
       id: 'admin',
       name: 'Admin Console',
       desc: 'User accounts, tool access, and platform administration',
@@ -218,6 +227,17 @@ function TicketIcon({ color = 'currentColor' }) {
       <line x1="13" y1="5" x2="13" y2="7" />
       <line x1="13" y1="11" x2="13" y2="13" />
       <line x1="13" y1="17" x2="13" y2="19" />
+    </svg>
+  );
+}
+
+function ChartIcon({ color = 'currentColor' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+      <line x1="4" y1="20" x2="20" y2="20" />
+      <rect x="6" y="11" width="3" height="6" rx="0.5" />
+      <rect x="11" y="7" width="3" height="10" rx="0.5" />
+      <rect x="16" y="4" width="3" height="13" rx="0.5" />
     </svg>
   );
 }
