@@ -91,6 +91,11 @@ pool.query(`CREATE TABLE IF NOT EXISTS analytics_orders (
     pool.query('CREATE INDEX IF NOT EXISTS idx_analytics_li_type ON analytics_order_line_items (type)'),
   ]))
   .then(() => pool.query('CREATE INDEX IF NOT EXISTS idx_analytics_orders_first_adm ON analytics_orders (first_admission_date) WHERE first_admission_date IS NOT NULL'))
+  // Covering index for the line-item → order join. analytics_orders rows are
+  // ~2.6KB each because of raw_data, so joining tens of thousands of line
+  // items to their orders by primary key was disk-bound; with status/park and
+  // the two dates carried in the index the join is answered index-only.
+  .then(() => pool.query('CREATE INDEX IF NOT EXISTS idx_analytics_orders_join ON analytics_orders (order_id) INCLUDE (status, park, business_date, first_admission_date)'))
   // One-time backfill of first_admission_date from already-synced line items;
   // the sync keeps it current from here on.
   .then(async () => {
