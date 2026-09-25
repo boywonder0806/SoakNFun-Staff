@@ -80,6 +80,10 @@ pool.query(`CREATE TABLE IF NOT EXISTS analytics_orders (
     pool.query('CREATE INDEX IF NOT EXISTS idx_analytics_li_order ON analytics_order_line_items (order_id)'),
     pool.query('CREATE INDEX IF NOT EXISTS idx_analytics_li_product ON analytics_order_line_items (product_id)'),
     pool.query('CREATE INDEX IF NOT EXISTS idx_analytics_li_name ON analytics_order_line_items (name)'),
+    // Visit-date and type indexes: the dashboard's gate/attendance and season
+    // pass queries filter on these and were seq-scanning ~470K rows without them.
+    pool.query('CREATE INDEX IF NOT EXISTS idx_analytics_li_event_date ON analytics_order_line_items (event_date) WHERE event_date IS NOT NULL'),
+    pool.query('CREATE INDEX IF NOT EXISTS idx_analytics_li_type ON analytics_order_line_items (type)'),
   ]))
   .catch(e => console.error('analytics_orders/line_items migration:', e.message));
 
