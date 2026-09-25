@@ -1,9 +1,32 @@
 import { Router } from 'express';
-import pool from '../db/index.js';
+import rawPool from '../db/index.js';
 import { requireAnalytics } from '../middleware/auth.js';
 import { getSyncStatus } from '../services/analyticsOrders.js';
 
 const router = Router();
+
+// Every endpoint here fans out 6–7 queries, and a dashboard load fires several
+// endpoints at once. Cap how many of the shared pool's (10) connections this
+// router can hold so a heavy date range can't starve unrelated requests
+// (login, shared reports, sync) of a connection.
+const MAX_ANALYTICS_QUERIES = 5;
+let analyticsInFlight = 0;
+const analyticsWaiters = [];
+function acquireSlot() {
+  if (analyticsInFlight < MAX_ANALYTICS_QUERIES) { analyticsInFlight++; return Promise.resolve(); }
+  return new Promise(resolve => analyticsWaiters.push(resolve));
+}
+function releaseSlot() {
+  const next = analyticsWaiters.shift();
+  if (next) next(); else analyticsInFlight--;
+}
+const pool = {
+  async query(...args) {
+    await acquireSlot();
+    try { return await rawPool.query(...args); }
+    finally { releaseSlot(); }
+  },
+};
 router.use(requireAnalytics);
 
 // Every route reads from analytics_orders/analytics_order_line_items —
@@ -28,36 +51,20 @@ function parkFilter(req, params) {
 // GET /api/analytics/overview
 // Membership (season pass) sales filtered by "effective date". '(UP)' upgrade
 // memberships are appended to the guest's original GA order, so they're dated
-// by that order's earliest admission visit date, falling back to business_date.
-// The CASE can't use an index, so for short ranges we first narrow to candidate
-// orders (business_date in range OR an admission visit in range) through the
-// date indexes; for long ranges that candidate set is most of the table and a
-// direct scan of the ~30K membership lines is faster.
+// by that order's first admission visit date (precomputed by the sync as
+// analytics_orders.first_admission_date), falling back to business_date. The
+// CASE itself can't use an index, so the indexed OR pre-filter narrows the
+// candidate orders first.
 const EFF_DATE_SQL = `
-      CASE WHEN li.name ILIKE '%(UP)%' THEN COALESCE(
-        (SELECT MIN(li2.event_date) FROM analytics_order_line_items li2
-         WHERE li2.order_id = o.order_id AND li2.type = 'Rate'
-           AND li2.event_name ILIKE '%Admission%'), o.business_date)
+      CASE WHEN li.name ILIKE '%(UP)%' THEN COALESCE(o.first_admission_date, o.business_date)
       ELSE o.business_date END`;
-function membershipSalesJoin(start, end, parkSql) {
-  const days = Math.round((new Date(end) - new Date(start)) / 86400000);
-  const where = `WHERE o.status = 'Active' AND li.type = 'Membership'
-        AND (${EFF_DATE_SQL}) BETWEEN $1 AND $2${parkSql}`;
-  if (days > 62) {
-    return `
+function membershipSalesJoin(parkSql) {
+  return `
       FROM analytics_order_line_items li
       JOIN analytics_orders o ON o.order_id = li.order_id
-      ${where}`;
-  }
-  return `
-      FROM (SELECT order_id FROM analytics_orders
-             WHERE status = 'Active' AND business_date BETWEEN $1 AND $2${parkSql.replace(/o\.park/g, 'park')}
-            UNION
-            SELECT order_id FROM analytics_order_line_items
-             WHERE type = 'Rate' AND event_name ILIKE '%Admission%' AND event_date BETWEEN $1 AND $2) cand
-      JOIN analytics_orders o ON o.order_id = cand.order_id
-      JOIN analytics_order_line_items li ON li.order_id = o.order_id
-      ${where}`;
+      WHERE o.status = 'Active' AND li.type = 'Membership'
+        AND (o.business_date BETWEEN $1 AND $2 OR o.first_admission_date BETWEEN $1 AND $2)
+        AND (${EFF_DATE_SQL}) BETWEEN $1 AND $2${parkSql}`;
 }
 
 router.get('/overview', async (req, res) => {
@@ -285,7 +292,7 @@ router.get('/daily', async (req, res) => {
         `SELECT li.name                               AS "name",
                 SUM(li.quantity)::int                  AS "quantity",
                 COALESCE(SUM(li.subtotal), 0)::float    AS "revenue"
-         ${membershipSalesJoin(start, end, parkSql)}
+         ${membershipSalesJoin(parkSql)}
          GROUP BY li.name ORDER BY "revenue" DESC`,
         params
       ),
@@ -1181,7 +1188,7 @@ router.get('/season-passes', async (req, res) => {
     // ticket's visit date on the same order; everything else (and standalone
     // upgrades) uses the order's business_date.
     const effDate = EFF_DATE_SQL;
-    const salesJoin = membershipSalesJoin(start, end, parkSql);
+    const salesJoin = membershipSalesJoin(parkSql);
     const redemptionJoin = `
       FROM analytics_order_line_items li
       JOIN analytics_orders o ON o.order_id = li.order_id

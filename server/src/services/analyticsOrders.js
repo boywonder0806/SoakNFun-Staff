@@ -58,6 +58,11 @@ pool.query(`CREATE TABLE IF NOT EXISTS analytics_orders (
     // question about a field we haven't mapped yet doesn't require re-pulling
     // history from RocketRez; it's already sitting here to query with ->/->>.
     pool.query('ALTER TABLE analytics_orders ADD COLUMN IF NOT EXISTS raw_data JSONB'),
+    // Earliest admission visit date on the order (min event_date of its Rate
+    // lines on an '%Admission%' event). '(UP)' upgrade memberships are appended
+    // to the guest's GA order, so the dashboards date them by this instead of
+    // business_date; precomputing it here keeps those queries index-driven.
+    pool.query('ALTER TABLE analytics_orders ADD COLUMN IF NOT EXISTS first_admission_date DATE'),
   ]))
   .then(() => pool.query(`CREATE TABLE IF NOT EXISTS analytics_order_line_items (
     id                 BIGSERIAL PRIMARY KEY,
@@ -85,6 +90,19 @@ pool.query(`CREATE TABLE IF NOT EXISTS analytics_orders (
     pool.query('CREATE INDEX IF NOT EXISTS idx_analytics_li_event_date ON analytics_order_line_items (event_date) WHERE event_date IS NOT NULL'),
     pool.query('CREATE INDEX IF NOT EXISTS idx_analytics_li_type ON analytics_order_line_items (type)'),
   ]))
+  .then(() => pool.query('CREATE INDEX IF NOT EXISTS idx_analytics_orders_first_adm ON analytics_orders (first_admission_date) WHERE first_admission_date IS NOT NULL'))
+  // One-time backfill of first_admission_date from already-synced line items;
+  // the sync keeps it current from here on.
+  .then(async () => {
+    const { rows } = await pool.query('SELECT 1 FROM analytics_orders WHERE first_admission_date IS NOT NULL LIMIT 1');
+    if (rows.length) return;
+    await pool.query(`UPDATE analytics_orders o SET first_admission_date = s.d
+      FROM (SELECT order_id, MIN(event_date) AS d FROM analytics_order_line_items
+             WHERE type = 'Rate' AND event_name ILIKE '%Admission%' AND event_date IS NOT NULL
+             GROUP BY order_id) s
+      WHERE s.order_id = o.order_id`);
+    console.log('analytics_orders: backfilled first_admission_date');
+  })
   .catch(e => console.error('analytics_orders/line_items migration:', e.message));
 
 pool.query(`CREATE TABLE IF NOT EXISTS analytics_order_sync_log (
@@ -109,8 +127,19 @@ pool.query(`CREATE TABLE IF NOT EXISTS analytics_refund_flags (
 
 // ── Mapping ───────────────────────────────────────────────────────────────────
 
+function firstAdmissionDate(order) {
+  let min = null;
+  for (const li of order.lineItems || []) {
+    if (li.type !== 'Rate' || !/admission/i.test(li.event?.name || '')) continue;
+    const d = li.event?.schedule?.date;
+    if (d && (!min || d < min)) min = d;
+  }
+  return min;
+}
+
 function mapOrderRow(order) {
   return {
+    firstAdmissionDate:  firstAdmissionDate(order),
     orderId:             order.id,
     createdDate:         order.createdDate,
     businessDate:        centralDate(order.createdDate),
@@ -185,14 +214,15 @@ export async function upsertOrders(rawOrders) {
       const oValues = [];
       const oParams = [];
       orderRows.forEach((r, j) => {
-        const b = j * 25;
-        oValues.push(`($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12},$${b+13},$${b+14},$${b+15},$${b+16},$${b+17},$${b+18},$${b+19}::jsonb,$${b+20},$${b+21},$${b+22},$${b+23},$${b+24},$${b+25}::jsonb)`);
+        const b = j * 26;
+        oValues.push(`($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12},$${b+13},$${b+14},$${b+15},$${b+16},$${b+17},$${b+18},$${b+19}::jsonb,$${b+20},$${b+21},$${b+22},$${b+23},$${b+24},$${b+25}::jsonb,$${b+26})`);
         oParams.push(
           r.orderId, r.createdDate, r.businessDate, r.status, r.salesOfficeId, r.salesOfficeName,
           r.park, r.isWebOrder, r.salesPersonName, r.contactGroupName, r.primaryContactName,
           r.primaryContactEmail, r.subTotal, r.discountTotal, r.taxTotal, r.gratuityTotal,
           r.variableFeeTotal, r.total, JSON.stringify(r.paymentMethods), r.postalCode,
           r.addressLine1, r.city, r.province, r.primaryContactPhone, JSON.stringify(r.rawData),
+          r.firstAdmissionDate,
         );
       });
       if (oValues.length) {
@@ -202,7 +232,7 @@ export async function upsertOrders(rawOrders) {
              park, is_web_order, sales_person_name, contact_group_name, primary_contact_name,
              primary_contact_email, sub_total, discount_total, tax_total, gratuity_total,
              variable_fee_total, total, payment_methods, postal_code,
-             address_line1, city, province, primary_contact_phone, raw_data
+             address_line1, city, province, primary_contact_phone, raw_data, first_admission_date
            ) VALUES ${oValues.join(',')}
            ON CONFLICT (order_id) DO UPDATE SET
              created_date = EXCLUDED.created_date, business_date = EXCLUDED.business_date,
@@ -217,6 +247,7 @@ export async function upsertOrders(rawOrders) {
              postal_code = EXCLUDED.postal_code, address_line1 = EXCLUDED.address_line1,
              city = EXCLUDED.city, province = EXCLUDED.province,
              primary_contact_phone = EXCLUDED.primary_contact_phone, raw_data = EXCLUDED.raw_data,
+             first_admission_date = EXCLUDED.first_admission_date,
              synced_at = NOW()`,
           oParams
         );
