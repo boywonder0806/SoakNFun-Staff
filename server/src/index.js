@@ -22,9 +22,11 @@ import ticketsRouter from './routes/tickets.js';
 import analyticsRouter from './routes/analytics.js';
 import sharedReportsRouter from './routes/sharedReports.js';
 import sharedPublicRouter from './routes/sharedPublic.js';
+import smartwaiverRouter from './routes/smartwaiver.js';
 import { startCallbackDigestCron } from './cron/callbackDigest.js';
 import { startCrewOrderSyncCron } from './cron/crewOrderSync.js';
 import { startAnalyticsOrderSyncCron } from './cron/analyticsOrderSync.js';
+import { startSmartwaiverSyncCron } from './cron/smartwaiverSync.js';
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -79,6 +81,7 @@ app.use('/api/bayoubot',   bayoubotRouter);
 app.use('/api/tickets',    ticketsRouter);
 app.use('/api/analytics',  analyticsRouter);
 app.use('/api/analytics/shared-reports', sharedReportsRouter);
+app.use('/api/smartwaiver',  smartwaiverRouter);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'Blue Bayou Staff API' }));
 
@@ -141,4 +144,5 @@ app.listen(PORT, () => {
   startCallbackDigestCron();
   startCrewOrderSyncCron();
   startAnalyticsOrderSyncCron();
+  startSmartwaiverSyncCron();
 });
