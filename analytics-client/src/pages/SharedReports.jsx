@@ -307,7 +307,10 @@ export default function SharedReports() {
                       {number(r.view_count)}
                       {r.last_viewed_at && <span className="text-[11px] text-gray-400"> &middot; last {relativeTime(r.last_viewed_at)}</span>}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-az hover:text-az-dark mr-3">
+                        Open
+                      </a>
                       <button onClick={() => copyLink(r)} className="text-xs font-medium text-az hover:text-az-dark">
                         {copiedToken === r.token ? 'Copied!' : 'Copy link'}
                       </button>
