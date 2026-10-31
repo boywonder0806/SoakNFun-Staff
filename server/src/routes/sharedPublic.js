@@ -110,7 +110,7 @@ function pinPage(res, report, { error = '', status = 200, agreed = false } = {})
   <h1>${escapeHtml(report.title)}</h1>
   <p class="notice">Access is restricted to authorized Blue Bayou &amp; Gulf Islands staff. Do not share this link or the PIN.</p>
   <label class="agree"><input type="checkbox" name="agree" value="yes" id="agree" ${agreed ? 'checked' : ''} ${dis}><span>I confirm that I am authorized to view this report and will not share or distribute it.</span></label>
-  <label class="field"><span class="flabel">PIN</span><input class="pin" type="password" name="pin" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="&bull;&bull;&bull;&bull;" autofocus autocomplete="one-time-code" aria-label="PIN" ${dis}></label>
+  <label class="field"><span class="flabel">PIN</span><input class="pin" type="text" name="pin" inputmode="numeric" maxlength="32" placeholder="&bull;&bull;&bull;&bull;" autofocus autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore data-lpignore="true" aria-label="PIN" ${dis}></label>
   <button type="submit" id="open" disabled>Open report</button>
   ${error ? `<p class="err"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg><span>${escapeHtml(error)}</span></p>` : ''}
   <p class="fine">Don't have the PIN? Ask the person who sent you this link.</p>
@@ -171,11 +171,16 @@ router.post('/shared/:token/unlock', async (req, res) => {
     if (t.locked) return pinPage(res, report, { error: lockedMsg(t), status: 429 });
     // The acknowledgement is required server-side too; a missing one is not a PIN attempt.
     if (req.body?.agree !== 'yes') return pinPage(res, report, { error: 'Please confirm that you are authorized to view this report.', status: 400 });
-    const pin = String(req.body?.pin || '').trim();
-    const recipient = matchRecipientPin(recipients, pin);
-    const general = !recipient && !!report.pin_hash && verifyPin(pin, report.pin_hash);
+    // Keep only the digits so pasted text ("PIN: 123 456"), stray spaces and
+    // full-width keyboards still match; PINs are always plain 4–8 digit strings.
+    const raw = String(req.body?.pin || '');
+    const pin = raw.normalize('NFKC').replace(/\D/g, '');
+    const recipient = pin ? matchRecipientPin(recipients, pin) : null;
+    const general = !recipient && !!pin && !!report.pin_hash && verifyPin(pin, report.pin_hash);
     if (!recipient && !general) {
       t.fail();
+      // Shape only, never the value — enough to tell a typo from autofill or a paste.
+      console.warn(`shared report PIN rejected: token=${report.token.slice(0, 6)} ip=${clientIp(req)} len=${raw.length} digits=${pin.length} nonDigits=${raw.length !== pin.length}`);
       return pinPage(res, report, { error: 'That PIN isn’t right.', status: 401, agreed: true });
     }
     t.clear();

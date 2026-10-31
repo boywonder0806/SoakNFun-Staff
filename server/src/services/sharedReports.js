@@ -223,6 +223,7 @@ export async function markRecipientEmailed(id) {
 
 // Constant-time match of an entered PIN against every active recipient's PIN.
 export function matchRecipientPin(recipients, pin) {
+  if (!pin) return null;
   const entered = Buffer.from(String(pin));
   let found = null;
   for (const r of recipients) {
