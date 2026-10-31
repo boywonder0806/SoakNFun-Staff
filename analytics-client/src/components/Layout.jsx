@@ -6,6 +6,12 @@ import SyncStatus from './SyncStatus.jsx';
 
 const NAV_SECTIONS = [
   {
+    heading: 'Reporting',
+    items: [
+      { to: '/reports/shared', label: 'Shared Reports' },
+    ],
+  },
+  {
     heading: 'Analytics',
     items: [
       { to: '/',                label: 'Overview' },
@@ -17,13 +23,6 @@ const NAV_SECTIONS = [
       { to: '/offices',         label: 'Sales Offices' },
       { to: '/payment-methods', label: 'Payment Methods' },
       { to: '/refunds',         label: 'Refunds' },
-    ],
-  },
-  {
-    heading: 'Reporting',
-    items: [
-      { to: '/reports/cash-out', label: 'Cash Out Report' },
-      { to: '/reports/shared',   label: 'Shared Reports' },
     ],
   },
 ];

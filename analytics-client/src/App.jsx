@@ -12,7 +12,6 @@ import Refunds from './pages/Refunds.jsx';
 import SeasonPasses from './pages/SeasonPasses.jsx';
 import SalesOffices from './pages/SalesOffices.jsx';
 import PaymentMethods from './pages/PaymentMethods.jsx';
-import CashOutReport from './pages/CashOutReport.jsx';
 import SharedReports from './pages/SharedReports.jsx';
 
 function Gate() {
@@ -39,7 +38,6 @@ function Gate() {
             <Route path="/offices" element={<SalesOffices />} />
             <Route path="/payment-methods" element={<PaymentMethods />} />
             <Route path="/refunds" element={<Refunds />} />
-            <Route path="/reports/cash-out" element={<CashOutReport />} />
             <Route path="/reports/shared" element={<SharedReports />} />
           </Routes>
         </Layout>
