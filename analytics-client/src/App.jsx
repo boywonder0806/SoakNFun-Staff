@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import { FiltersProvider } from './context/FiltersContext.jsx';
 import Login from './pages/Login.jsx';
@@ -29,7 +29,8 @@ function Gate() {
       <BrowserRouter>
         <Layout>
           <Routes>
-            <Route path="/" element={<Overview />} />
+            <Route path="/" element={<Navigate to="/reports/shared" replace />} />
+            <Route path="/overview" element={<Overview />} />
             <Route path="/revenue" element={<RevenueTrends />} />
             <Route path="/products" element={<ProductMix />} />
             <Route path="/drinks" element={<Drinks />} />

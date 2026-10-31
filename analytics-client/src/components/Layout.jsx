@@ -14,7 +14,7 @@ const NAV_SECTIONS = [
   {
     heading: 'Analytics',
     items: [
-      { to: '/',                label: 'Overview' },
+      { to: '/overview',        label: 'Overview' },
       { to: '/revenue',         label: 'Revenue Trends' },
       { to: '/products',        label: 'Product Mix' },
       { to: '/drinks',          label: 'Drinks' },
