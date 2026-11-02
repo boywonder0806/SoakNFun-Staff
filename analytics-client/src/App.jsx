@@ -13,6 +13,10 @@ import SeasonPasses from './pages/SeasonPasses.jsx';
 import SalesOffices from './pages/SalesOffices.jsx';
 import PaymentMethods from './pages/PaymentMethods.jsx';
 import SharedReports from './pages/SharedReports.jsx';
+import UnderDevelopment from './components/UnderDevelopment.jsx';
+import { ANALYTICS_DISABLED } from './lib/features.js';
+
+const gated = el => (ANALYTICS_DISABLED ? <UnderDevelopment /> : el);
 
 function Gate() {
   const { user, loading } = useAuth();
@@ -30,15 +34,15 @@ function Gate() {
         <Layout>
           <Routes>
             <Route path="/" element={<Navigate to="/reports/shared" replace />} />
-            <Route path="/overview" element={<Overview />} />
-            <Route path="/revenue" element={<RevenueTrends />} />
-            <Route path="/products" element={<ProductMix />} />
-            <Route path="/drinks" element={<Drinks />} />
-            <Route path="/cabanas" element={<Cabanas />} />
-            <Route path="/season-passes" element={<SeasonPasses />} />
-            <Route path="/offices" element={<SalesOffices />} />
-            <Route path="/payment-methods" element={<PaymentMethods />} />
-            <Route path="/refunds" element={<Refunds />} />
+            <Route path="/overview" element={gated(<Overview />)} />
+            <Route path="/revenue" element={gated(<RevenueTrends />)} />
+            <Route path="/products" element={gated(<ProductMix />)} />
+            <Route path="/drinks" element={gated(<Drinks />)} />
+            <Route path="/cabanas" element={gated(<Cabanas />)} />
+            <Route path="/season-passes" element={gated(<SeasonPasses />)} />
+            <Route path="/offices" element={gated(<SalesOffices />)} />
+            <Route path="/payment-methods" element={gated(<PaymentMethods />)} />
+            <Route path="/refunds" element={gated(<Refunds />)} />
             <Route path="/reports/shared" element={<SharedReports />} />
           </Routes>
         </Layout>

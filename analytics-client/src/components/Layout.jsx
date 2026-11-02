@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { hubUrl } from '../lib/hub.js';
 import FilterBar from './FilterBar.jsx';
 import SyncStatus from './SyncStatus.jsx';
+import { ANALYTICS_DISABLED, ANALYTICS_DISABLED_MSG } from '../lib/features.js';
 
 const NAV_SECTIONS = [
   {
@@ -13,6 +14,7 @@ const NAV_SECTIONS = [
   },
   {
     heading: 'Analytics',
+    disabled: ANALYTICS_DISABLED,
     items: [
       { to: '/overview',        label: 'Overview' },
       { to: '/revenue',         label: 'Revenue Trends' },
@@ -32,7 +34,8 @@ export default function Layout({ children }) {
   // Reporting pages generate a report on demand with their own date/park
   // controls, rather than reading the shared live-dashboard date filter —
   // so the global filter bar (and its sync-status readout) is irrelevant there.
-  const isReportPage = useLocation().pathname.startsWith('/reports');
+  const { pathname } = useLocation();
+  const isReportPage = ANALYTICS_DISABLED || pathname.startsWith('/reports');
 
   function handleLogout() {
     logout();
@@ -59,6 +62,16 @@ export default function Layout({ children }) {
           {NAV_SECTIONS.map(section => (
             <div key={section.heading}>
               <p className="px-3 pb-1 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">{section.heading}</p>
+              {section.disabled ? (
+                <>
+                  <p className="mx-3 mb-2 mt-1 px-2.5 py-2 text-[11px] leading-snug text-amber-800 bg-amber-50 border border-amber-100 rounded-md">{ANALYTICS_DISABLED_MSG}</p>
+                  <div className="space-y-1">
+                    {section.items.map(item => (
+                      <span key={item.to} aria-disabled="true" className="block px-3 py-2 text-sm font-medium text-gray-300 cursor-not-allowed select-none">{item.label}</span>
+                    ))}
+                  </div>
+                </>
+              ) : (
               <div className="space-y-1">
                 {section.items.map(item => (
                   <NavLink
@@ -75,6 +88,7 @@ export default function Layout({ children }) {
                   </NavLink>
                 ))}
               </div>
+              )}
             </div>
           ))}
         </nav>
