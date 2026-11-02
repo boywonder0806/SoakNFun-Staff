@@ -1,4 +1,4 @@
-  // ---------- Full-report export (CSV + PDF) ----------
+  // ---------- Full-report export (Google Sheets, Excel, PDF) ----------
   // Both exports follow the current park / basis / range, so they match what is on screen.
   // The PDF is built natively with jsPDF + autoTable (lazy-loaded on first use); charts are
   // rasterised from their SVGs with the light palette forced so print colours are consistent.
@@ -51,37 +51,193 @@
     return [['Park', PARKNAME[state.park]], ['Attendance basis', BASISNAME[state.basis]], ['Date range', `${fmtDate(state.from)} – ${fmtDate(state.to)}`], ['Coverage', `${days} operating day${days === 1 ? '' : 's'}${closed ? ` · ${closed} closed` : ''}`]];
   }
 
-  // ----- CSV: every section, its KPIs, tables and notes, plus a day-by-day detail table -----
-  function exportReportCSV(){
-    const rows = []; const blank = () => rows.push([]);
-    rows.push([REPORT_TITLE]); rows.push([`${ORG} · Internal · Confidential`]);
-    paramRows().forEach(r => rows.push(r));
-    rows.push(['Generated', generatedAt()]); rows.push(['Source', location.href.split('#')[0]]);
-    rows.push(['Status', 'Beta — figures are preliminary and may change as definitions are validated']);
-    blank(); rows.push(['HEADLINE FIGURES']); rows.push(['Metric', 'Value', 'Detail']);
-    kpiRows($('#kpis')).forEach(k => rows.push([k.label, k.value, k.sub]));
+  // ----- Spreadsheet workbook (one model, written out as Excel or as a Google Sheet) -----
+  // Cells carry real values — numbers, currency, percentages, dates — not the display strings.
+  const EXCELJS = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+  const FMT = { usd0:'"$"#,##0', usd2:'"$"#,##0.00', pct0:'0%', pct1:'0.0%', int:'#,##0', dec1:'0.0', dec2:'0.00', date:'mmm d, yyyy' };
+  const XC = { ink:'0B0B0B', ink2:'52514E', muted:'898781', head:'F2F1EC', rule:'C3C2B7', brand:'0A8A66' };
+  const S = (v, o) => ({ v: v == null ? '' : String(v), t:'s', ...o });
+  const N = (v, fmt, o) => ({ v, t:'n', fmt, ...o });
+  function parseVal(s){
+    s = String(s ?? '').replace(/ /g, ' ').trim(); let m;
+    if (s === '' || s === '—' || s === '–') return S('');
+    if ((m = s.match(/^(-)?\$(-)?([\d,]+)(\.\d+)?$/))) return N(Number(m[3].replace(/,/g, '') + (m[4] || '')) * (m[1] || m[2] ? -1 : 1), m[4] ? 'usd2' : 'usd0');
+    if ((m = s.match(/^(-?[\d,]*\.?\d+)%$/))) return N(Number(m[1].replace(/,/g, '')) / 100, m[1].includes('.') ? 'pct1' : 'pct0');
+    if (/^-?\d{1,3}(,\d{3})+$|^-?\d+$/.test(s)) return N(Number(s.replace(/,/g, '')), 'int');
+    if ((m = s.match(/^-?\d+\.(\d+)$/))) return N(Number(s), m[1].length === 1 ? 'dec1' : 'dec2');
+    return S(s);
+  }
+  const tabName = s => s.replace(/[\[\]:*?\/\\]/g, '').replace(/&/g, 'and').slice(0, 31);
+
+  function domTableRows(t){
+    if (t.id === 'tbl-products' && t.dataset.full) {
+      const list = JSON.parse(t.dataset.full); const total = list.reduce((a, r) => a + r[5], 0);
+      return [['Product', 'Park', 'Category', 'Type', 'Qty', 'Revenue', 'Avg price', 'Share'].map((h, j) => S(h, { head:true, right: j > 3 })),
+        ...list.map(r => [S(r[0]), S(r[1]), S(r[2]), S(r[3]), N(r[4], 'int'), N(r[5], 'usd2'), r[4] ? N(r[5] / r[4], 'usd2') : S(''), total ? N(r[5] / total, 'pct1') : S('')])];
+    }
+    const thead = t.querySelector('thead');
+    const heads = thead ? [...thead.querySelectorAll('tr')] : [t.querySelector('tr')].filter(Boolean);
+    const body = [...t.querySelectorAll(thead ? 'tbody tr' : 'tr')].slice(thead ? 0 : 1);
+    const span = (r, c, mk) => { r.push(mk()); for (let k = 1; k < (+c.getAttribute('colspan') || 1); k++) r.push(S('')); };
+    return [
+      ...heads.map(tr => { const r = []; [...tr.children].forEach(c => span(r, c, () => S(txt(c), { head:true, right: c.classList.contains('num') }))); return r; }),
+      ...body.map(tr => { const r = [], muted = tr.classList.contains('muted'), brk = tr.classList.contains('group-break');
+        [...tr.children].forEach((c, j) => span(r, c, () => { const x = j === 0 ? S(txt(c)) : parseVal(txt(c)); if (c.querySelector('b, strong')) x.b = true; if (muted) x.muted = true; if (brk) x.top = true; return x; })); return r; }),
+    ];
+  }
+  const kpiBlock = grid => [['Metric', 'Value', 'Detail'].map((h, j) => S(h, { head:true, right: j === 1 })), ...kpiRows(grid).map(k => [S(k.label, { b:true }), parseVal(k.value), S(k.sub, { muted:true })])];
+
+  function buildWorkbook(){
+    const gen = generatedAt(), sheets = [];
+    const sheet = (name, o = {}) => { const sh = { name: tabName(name), rows: [], freeze: 0, grid: false, ...o }; sheets.push(sh); return sh; };
+    const add = (sh, ...rows) => rows.forEach(r => sh.rows.push(r));
+    const summary = sheet('Summary');
+    // Sections
     for (const [id, label] of SECTIONS) {
       const sec = document.getElementById(id); if (!sec) continue;
-      blank(); rows.push([label.toUpperCase()]); const lede = txt(sec.querySelector('.lede')); if (lede) rows.push([lede]);
+      const sh = sheet(label); sh.label = label;
+      add(sh, [S(txt(sec.querySelector('h2')) || label, { title:true, free:true })]);
+      const lede = printable(txt(sec.querySelector('.lede'))); if (lede) add(sh, [S(lede, { sub:true, free:true })]);
       for (const b of sectionBlocks(sec, false)) {
-        if (b.kind === 'h3') { blank(); rows.push([b.text]); }
-        else if (b.kind === 'kpis') { rows.push(['Metric', 'Value', 'Detail']); kpiRows(b.el).forEach(k => rows.push([k.label, k.value, k.sub])); }
-        else if (b.kind === 'table') { if (b.chartData) { blank(); rows.push(['Chart data']); } const t = tableRows(b.el); t.head.forEach(r => rows.push(r)); t.body.forEach(r => rows.push(r)); }
-        else if (b.kind === 'mktmix') { const MK = D.meta.marketing; rows.push(['Component', 'Blue Bayou', 'Gulf Islands', 'Combined']); MK.components.forEach(x => rows.push([x.label, x.BB.toFixed(2), x.GI.toFixed(2), (x.BB + x.GI).toFixed(2)])); }
-        else if (b.kind === 'note') rows.push(['Note: ' + b.text]);
+        if (b.kind === 'h3') add(sh, [], [S(b.text, { h3:true, free:true })]);
+        else if (b.kind === 'kpis') add(sh, [], ...kpiBlock(b.el));
+        else if (b.kind === 'table') { if (b.chartData) add(sh, [], [S('Chart data', { h3:true, free:true })]); else if (sh.rows.length && sh.rows[sh.rows.length - 1].some(c => c && !c.h3)) add(sh, []); add(sh, ...domTableRows(b.el)); }
+        else if (b.kind === 'mktmix') { const MK = D.meta.marketing; add(sh, [], ['Component', 'Blue Bayou', 'Gulf Islands', 'Combined'].map((h, j) => S(h, { head:true, right: j > 0 })), ...MK.components.map(x => [S(x.label), N(x.BB, 'usd0'), N(x.GI, 'usd0'), N(x.BB + x.GI, 'usd0')])); }
+        else if (b.kind === 'note') { const t = printable(b.text); if (t) add(sh, [S(t, { muted:true, i:true, free:true })]); }
       }
     }
-    // Day-by-day detail straight from the embedded data (raw numbers, ready for a pivot table).
-    blank(); rows.push(['DAILY DETAIL']); rows.push([`One row per park per day · per caps divide by ${BASISNAME[state.basis].toLowerCase()} · closed days keep their sales but carry no attendance`]);
-    rows.push(['Date', 'Weekday', 'Park', 'Status', 'Tickets booked', 'Checked in', 'Orders', 'Web orders', ...B.map(b => `${BL[b] || b} revenue`), 'Total revenue', 'In-park revenue', 'Blended per cap', 'In-park per cap']);
+    // Daily detail — one row per park-day, raw values, header on row 1 for pivots and filters.
+    const daily = sheet('Daily Detail', { freeze: 1, grid: true });
+    add(daily, ['Date', 'Weekday', 'Park', 'Status', 'Tickets booked', 'Checked in', 'Orders', 'Web orders', ...B.map(b => BL[b] || b), 'Total revenue', 'In-park revenue', 'Blended per cap', 'In-park per cap'].map((h, j) => S(h, { head:true, right: j > 3 })));
     for (const d of rowsFor(state.park, state.from, state.to).slice().sort((a, b) => a.d.localeCompare(b.d) || a.p.localeCompare(b.p))) {
-      const s = sum([d]); const status = isClosed(d) ? 'Closed' : d.att > 0 ? 'Operating' : 'No attendance';
+      const s = sum([d]), status = isClosed(d) ? 'Closed' : d.att > 0 ? 'Operating' : 'No attendance';
       const n = status === 'Operating' ? denom({ att:d.att, ci:d.ci }) : 0;
-      rows.push([d.d, WEEKDAYS[dt(d.d).getUTCDay()], PARKNAME[d.p], status, d.att, d.ci, d.orders, d.web, ...d.r.map(v => v.toFixed(2)), s.total.toFixed(2), s.inPark.toFixed(2), n ? (s.total / n).toFixed(2) : '', n ? (s.inPark / n).toFixed(2) : '']);
+      add(daily, [{ v:d.d, t:'d', fmt:'date' }, S(WEEKDAYS[dt(d.d).getUTCDay()]), S(PARKNAME[d.p]), S(status), N(d.att, 'int'), N(d.ci, 'int'), N(d.orders, 'int'), N(d.web, 'int'), ...d.r.map(v => N(v, 'usd2')), N(s.total, 'usd2'), N(s.inPark, 'usd2'), n ? N(s.total / n, 'usd2') : S(''), n ? N(s.inPark / n, 'usd2') : S('')]);
     }
-    blank(); rows.push(['METHODOLOGY']); htmlToText(D.meta.footer).forEach(l => rows.push([l]));
-    const csv = '﻿' + rows.map(r => r.map(v => { v = String(v ?? ''); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',')).join('\r\n');
-    download(new Blob([csv], { type:'text/csv;charset=utf-8' }), fileStem() + '.csv');
+    const meth = sheet('Methodology', { wide: true });
+    add(meth, [S('Methodology & definitions', { title:true, free:true })], []);
+    htmlToText(D.meta.footer).forEach(p => add(meth, [S(p, { wrap:true })], []));
+    // Summary (built last so it can list every tab)
+    add(summary, [S(REPORT_TITLE, { title:true, free:true })], [S(`${ORG} · Internal · Confidential`, { sub:true, free:true })], [],
+      [S('Report parameters', { h3:true, free:true })], ...paramRows().map(([k, v]) => [S(k, { b:true }), S(v)]),
+      [S('Generated', { b:true }), S(gen)], [S('Source', { b:true }), S(location.href.split('#')[0])],
+      [S('Status', { b:true }), S('Beta — figures are preliminary and may change as definitions are validated.')], [],
+      [S('Headline figures', { h3:true, free:true })], ...kpiBlock($('#kpis')), [],
+      [S('Contents', { h3:true, free:true })], ...sheets.slice(1).map(sh => [S(sh.label || sh.name, { link: sh.name })]));
+    // Column widths from the table cells (titles, ledes and notes overflow and are ignored).
+    for (const sh of sheets) {
+      const w = []; for (const r of sh.rows) r.forEach((c, j) => { if (!c || c.free || c.wrap || c.link) return; const len = c.t === 'n' ? 12 : c.t === 'd' ? 13 : c.v.length; w[j] = Math.max(w[j] || 0, len); });
+      sh.widths = sh.wide ? [900] : [...Array(Math.max(w.length, 1)).keys()].map(j => Math.round(Math.min(Math.max((w[j] || 8) * 7 + 22, j === 0 ? 170 : 72), j === 0 ? 420 : 260)));
+    }
+    return sheets;
+  }
+
+  function loadScript(src){ return new Promise((res, rej) => { if (document.querySelector(`script[src="${src}"]`) && (src !== EXCELJS || window.ExcelJS)) return res(); const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('Could not load ' + src)); document.head.appendChild(s); }); }
+
+  async function exportReportXLSX(){
+    await loadScript(EXCELJS);
+    const book = buildWorkbook(), wb = new window.ExcelJS.Workbook();
+    wb.creator = ORG; wb.created = new Date(); wb.title = REPORT_TITLE;
+    for (const sh of book) {
+      const ws = wb.addWorksheet(sh.name, { views: [{ state: sh.freeze ? 'frozen' : 'normal', ySplit: sh.freeze || 0, showGridLines: sh.grid }] });
+      sh.widths.forEach((px, j) => { ws.getColumn(j + 1).width = Math.round(px / 7); });
+      sh.rows.forEach((r, i) => r.forEach((c, j) => {
+        if (!c) return; const cell = ws.getCell(i + 1, j + 1);
+        if (c.link) cell.value = { text: c.v, hyperlink: `#'${c.link}'!A1` };
+        else if (c.t === 'd') cell.value = new Date(c.v + 'T00:00:00Z');
+        else cell.value = c.t === 'n' ? c.v : c.v || null;
+        if (FMT[c.fmt]) cell.numFmt = FMT[c.fmt];
+        const font = { name: 'Arial', size: c.title ? 16 : c.h3 ? 12 : c.head ? 9 : 10 };
+        if (c.title || c.h3 || c.head || c.b) font.bold = true; if (c.i) font.italic = true;
+        font.color = { argb: 'FF' + (c.link ? XC.brand : c.head ? XC.ink2 : c.muted || c.sub ? XC.muted : XC.ink) }; if (c.link) font.underline = true;
+        cell.font = font;
+        if (c.head) { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + XC.head } }; cell.border = { bottom: { style: 'thin', color: { argb: 'FF' + XC.rule } } }; }
+        if (c.top) cell.border = { ...(cell.border || {}), top: { style: 'medium', color: { argb: 'FF' + XC.rule } } };
+        if (c.right) cell.alignment = { horizontal: 'right' }; if (c.wrap) cell.alignment = { wrapText: true, vertical: 'top' };
+      }));
+    }
+    const buf = await wb.xlsx.writeBuffer();
+    download(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), fileStem() + '.xlsx');
+  }
+
+  // ----- Google Sheets: created in the viewer's own Drive (drive.file scope = only files this page creates) -----
+  const GSHEETS_CLIENT_ID = '%%GSHEETS_CLIENT_ID%%';
+  const gEnabled = () => /\.apps\.googleusercontent\.com$/.test(GSHEETS_CLIENT_ID);
+  let gClient = null, gTok = null, gTokExp = 0;
+  function initGoogle(){
+    if (!gEnabled()) return;
+    const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.async = true;
+    s.onload = () => { gClient = window.google.accounts.oauth2.initTokenClient({ client_id: GSHEETS_CLIENT_ID, scope: 'https://www.googleapis.com/auth/drive.file', callback: () => {} }); };
+    document.head.appendChild(s);
+  }
+  const gTokenValid = () => gTok && Date.now() < gTokExp - 60000;
+  function gToken(){
+    return new Promise((res, rej) => {
+      if (gTokenValid()) return res(gTok);
+      if (!gClient) return rej(new Error('Google sign-in is still loading. Try again in a moment.'));
+      gClient.callback = r => { if (r.error) return rej(new Error(r.error === 'access_denied' ? 'Google access was not granted.' : r.error_description || r.error)); gTok = r.access_token; gTokExp = Date.now() + (+r.expires_in || 3600) * 1000; res(gTok); };
+      gClient.error_callback = e => rej(new Error(e && e.type === 'popup_closed' ? 'Google sign-in was closed before it finished.' : e && e.type === 'popup_failed_to_open' ? 'Your browser blocked the Google sign-in window. Allow pop-ups for this site and try again.' : 'Google sign-in failed.'));
+      gClient.requestAccessToken();
+    });
+  }
+  const rgbOf = hex => ({ red: parseInt(hex.slice(0, 2), 16) / 255, green: parseInt(hex.slice(2, 4), 16) / 255, blue: parseInt(hex.slice(4, 6), 16) / 255 });
+  const serial = iso => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86400000 + 25569;
+  function gCell(c, gid){
+    if (!c) return {};
+    const ue = {}, f = {}, tf = {};
+    if (c.link) ue.formulaValue = `=HYPERLINK("#gid=${gid[c.link]}","${c.v.replace(/"/g, '""')}")`;
+    else if (c.t === 'n') ue.numberValue = c.v; else if (c.t === 'd') ue.numberValue = serial(c.v); else if (c.v !== '') ue.stringValue = c.v;
+    if (FMT[c.fmt]) f.numberFormat = { type: c.t === 'd' ? 'DATE' : c.fmt.startsWith('pct') ? 'PERCENT' : c.fmt.startsWith('usd') ? 'CURRENCY' : 'NUMBER', pattern: FMT[c.fmt] };
+    if (c.title) tf.fontSize = 16; else if (c.h3) tf.fontSize = 12; else if (c.head) tf.fontSize = 9;
+    if (c.title || c.h3 || c.head || c.b) tf.bold = true; if (c.i) tf.italic = true;
+    const col = c.link ? XC.brand : c.head ? XC.ink2 : c.muted || c.sub ? XC.muted : null; if (col) tf.foregroundColorStyle = { rgbColor: rgbOf(col) };
+    if (Object.keys(tf).length) f.textFormat = tf;
+    if (c.head) { f.backgroundColorStyle = { rgbColor: rgbOf(XC.head) }; f.borders = { bottom: { style: 'SOLID', colorStyle: { rgbColor: rgbOf(XC.rule) } } }; }
+    if (c.top) f.borders = { ...(f.borders || {}), top: { style: 'SOLID_MEDIUM', colorStyle: { rgbColor: rgbOf(XC.rule) } } };
+    if (c.right) f.horizontalAlignment = 'RIGHT'; if (c.wrap) { f.wrapStrategy = 'WRAP'; f.verticalAlignment = 'TOP'; }
+    const out = {}; if (Object.keys(ue).length) out.userEnteredValue = ue; if (Object.keys(f).length) out.userEnteredFormat = f; return out;
+  }
+  function sheetsPayload(book){
+    const gid = Object.fromEntries(book.map((sh, i) => [sh.name, 1000 + i]));
+    return { properties: { title: `${REPORT_TITLE} — ${PARKNAME[state.park]}, ${fmtDate(state.from)} – ${fmtDate(state.to)}`, locale: 'en_US', timeZone: 'America/Chicago' },
+      sheets: book.map((sh, i) => { const cols = Math.max(sh.widths.length, ...sh.rows.map(r => r.length));
+        return { properties: { sheetId: 1000 + i, index: i, title: sh.name, gridProperties: { rowCount: sh.rows.length + 20, columnCount: Math.max(cols + 2, 10), frozenRowCount: sh.freeze || 0, hideGridlines: !sh.grid } },
+          data: [{ startRow: 0, startColumn: 0, rowData: sh.rows.map(r => ({ values: r.map(c => gCell(c, gid)) })), columnMetadata: sh.widths.map(px => ({ pixelSize: px })) }] }; }) };
+  }
+  async function exportReportSheets(win){
+    const token = await gToken();
+    const res = await fetch('https://sheets.googleapis.com/v4/spreadsheets?fields=spreadsheetUrl', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(sheetsPayload(buildWorkbook())) });
+    if (res.status === 401) { gTok = null; throw new Error('Your Google sign-in expired. Click Export again.'); }
+    if (!res.ok) { let m = ''; try { m = (await res.json()).error.message; } catch (e) {} throw new Error('Google Sheets could not create the sheet' + (m ? ': ' + m : '.')); }
+    const { spreadsheetUrl } = await res.json();
+    if (win && !win.closed) { win.location.href = spreadsheetUrl; return; }
+    if (!window.open(spreadsheetUrl, '_blank')) xNotice('Your Google Sheet is ready.', spreadsheetUrl);
+  }
+
+  // ----- Export menu -----
+  function xNotice(msg, url){
+    let el = document.getElementById('x-notice'); if (!el) { el = document.createElement('div'); el.id = 'x-notice'; el.className = 'x-notice'; document.body.appendChild(el); }
+    el.innerHTML = `<span></span>${url ? '<a target="_blank" rel="noopener">Open in Google Sheets</a>' : ''}<button type="button" aria-label="Dismiss">×</button>`;
+    el.querySelector('span').textContent = msg; if (url) el.querySelector('a').href = url;
+    el.querySelector('button').onclick = () => el.classList.remove('show'); el.classList.add('show');
+    clearTimeout(el._t); if (!url) el._t = setTimeout(() => el.classList.remove('show'), 7000);
+  }
+  function initReportExport(){
+    const btn = $('#exp-btn'), pop = $('#exp-pop'); if (!btn || !pop) return;
+    initGoogle(); if (!gEnabled()) pop.querySelector('[data-x="sheets"]').remove();
+    const label = btn.querySelector('span'), close = () => { pop.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
+    btn.onclick = e => { e.stopPropagation(); pop.hidden = !pop.hidden; btn.setAttribute('aria-expanded', String(!pop.hidden)); };
+    document.addEventListener('click', e => { if (!pop.contains(e.target)) close(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+    const run = async (busyLabel, fn) => { close(); btn.disabled = true; label.textContent = busyLabel; try { await fn(); } catch (e) { console.error(e); xNotice(e.message || 'Export failed.'); } finally { btn.disabled = false; label.textContent = 'Export'; } };
+    pop.querySelectorAll('[data-x]').forEach(b => b.onclick = () => {
+      const x = b.dataset.x;
+      if (x === 'pdf') return run('Building PDF…', exportReportPDF);
+      if (x === 'xlsx') return run('Building Excel…', exportReportXLSX);
+      // Signed in already: open the tab now, inside the click, so pop-up blockers allow it.
+      let win = null; if (gTokenValid()) { win = window.open('', '_blank'); if (win) win.document.write('<title>Creating sheet…</title><p style="font:15px system-ui;color:#555;margin:40vh auto;text-align:center">Creating your Google Sheet…</p>'); }
+      run('Creating sheet…', () => exportReportSheets(win).catch(e => { if (win && !win.closed) win.close(); throw e; }));
+    });
   }
 
   // ----- PDF -----
@@ -278,11 +434,4 @@
     } finally {
       if (prevTheme === null) root.removeAttribute('data-theme'); else root.setAttribute('data-theme', prevTheme);
     }
-  }
-
-  function initReportExport(){
-    const csvBtn = $('#exp-csv'), pdfBtn = $('#exp-pdf'); if (!csvBtn || !pdfBtn) return;
-    const busy = (btn, on, label) => { btn.disabled = on; btn.querySelector('span').textContent = label; };
-    csvBtn.onclick = () => { try { exportReportCSV(); } catch (e) { console.error(e); alert('CSV export failed: ' + e.message); } };
-    pdfBtn.onclick = async () => { busy(pdfBtn, true, 'Building PDF…'); try { await exportReportPDF(); } catch (e) { console.error(e); alert('PDF export failed: ' + e.message); } finally { busy(pdfBtn, false, 'Export PDF'); } };
   }
