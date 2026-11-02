@@ -147,23 +147,24 @@ function AccessPanel({ report, onError, onChanged }) {
           <div className="space-y-2">{[0, 1].map(i => <div key={i} className="h-12 rounded-md bg-gray-100 animate-pulse" />)}</div>
         ) : tab === 'people' ? (
           <>
-            <form onSubmit={add} className="bg-white border border-gray-200 rounded-md p-3 flex flex-wrap items-end gap-2.5">
-              <label className="flex-1 min-w-[200px]">
-                <span className="block text-[11px] font-semibold text-gray-500 mb-1">Email</span>
-                <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="person@example.com"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-az/25 focus:border-az" />
+            <form onSubmit={add} className="bg-white border border-gray-200 rounded-md p-4">
+              <div className="flex items-baseline justify-between gap-3 mb-3">
+                <p className="text-sm font-semibold text-gray-900">Give someone access</p>
+                <p className="text-[11px] text-gray-400">They get their own 6-digit PIN</p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.7fr)_auto] gap-2">
+                <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="Email address" aria-label="Email address"
+                  className="h-9 w-full border border-gray-200 rounded-md px-3 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-az/25 focus:border-az" />
+                <input value={name} onChange={e => setName(e.target.value)} placeholder="Name (optional)" aria-label="Name (optional)"
+                  className="h-9 w-full border border-gray-200 rounded-md px-3 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-az/25 focus:border-az" />
+                <button type="submit" disabled={busy === 'add'} className="btn-primary !rounded-md !h-9 !py-0 !px-4 !text-xs whitespace-nowrap">
+                  {busy === 'add' ? 'Adding…' : 'Give access'}
+                </button>
+              </div>
+              <label className="mt-2.5 inline-flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none">
+                <input type="checkbox" checked={sendEmail} onChange={e => setSendEmail(e.target.checked)} className="w-3.5 h-3.5 accent-az" />
+                Email them the link and their PIN
               </label>
-              <label className="w-48">
-                <span className="block text-[11px] font-semibold text-gray-500 mb-1">Name <span className="font-normal text-gray-400">(optional)</span></span>
-                <input value={name} onChange={e => setName(e.target.value)} placeholder="First Last"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-az/25 focus:border-az" />
-              </label>
-              <label className="flex items-center gap-1.5 text-xs text-gray-600 h-9">
-                <input type="checkbox" checked={sendEmail} onChange={e => setSendEmail(e.target.checked)} className="accent-az" /> Email link &amp; PIN
-              </label>
-              <button type="submit" disabled={busy === 'add'} className="btn-primary !rounded-md !py-2 !text-xs">
-                {busy === 'add' ? 'Adding…' : 'Give access'}
-              </button>
             </form>
 
             {recipients.length === 0 ? (
