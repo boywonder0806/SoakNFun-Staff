@@ -360,7 +360,7 @@
       for (const [id, label] of SECTIONS) {
         const sec = document.getElementById(id); if (!sec) continue;
         const blocks = sectionBlocks(sec, true); if (!blocks.length) continue;
-        newPage(); n++; sectionPages.push({ label, page: doc.getNumberOfPages() });
+        newPage(); n++; sectionPages.push({ label, title: txt(sec.querySelector('h2')) || label, page: doc.getNumberOfPages() });
         font(7.5, 'bold', BRAND); doc.text(`SECTION ${String(n).padStart(2, '0')}`, M, y + 6); y += 12;
         font(18, 'bold', INK); doc.text(pdfSafe(txt(sec.querySelector('h2')) || label), M, y + 15); y += 24;
         const lede = printable(txt(sec.querySelector('.lede'))); if (lede) { para(lede, 8.6, INK2, CW * 0.82); y += 8; }
@@ -382,19 +382,53 @@
       for (const p of htmlToText(D.meta.footer)) { para(p, 8.2, INK2, CW * 0.86); y += 5; }
 
       // ---- Contents (inserted as page 2, so every later page shifts by one) ----
-      doc.insertPage(2); doc.setPage(2); y = TOP + 6;
-      font(7.5, 'bold', BRAND); doc.text('CONTENTS', M, y); y += 12;
-      font(18, 'bold', INK); doc.text('In this report', M, y + 15); y += 36;
-      const entries = [{ label: 'Summary & headline figures', page: 1 }, ...sectionPages.map(s => ({ ...s, page: s.page + 1 }))];
+      doc.insertPage(2); doc.setPage(2);
+      const DESC = {
+        'Summary': 'Report scope and the six headline figures',
+        'Per Cap by Park': 'Revenue and every per cap by park, on both attendance bases',
+        'Marketing': 'All-in marketing cost, what it is made of, and marketing per cap',
+        'Trend': 'Per cap through the season for each park',
+        'Revenue Mix': 'Monthly revenue by category, from tickets to lockers',
+        'Alcohol': 'Alcohol revenue, per cap, drink types, hour of day and weekday',
+        'Gift Shops': 'Retail revenue, product groups, registers and top sellers',
+        'Cabanas & Rentals': 'Occupancy, RevPAC and rates by park, unit type and unit',
+        'Products': 'Leading products by revenue with category and average price',
+        'Sales Offices': 'Revenue by register and sales channel',
+        'Day of Week': 'Attendance and per caps by weekday, weekdays versus weekends',
+        'Methodology & definitions': 'Definitions, data sources and basis of preparation',
+      };
+      const PTOP = 58, PBOT = H - 44, LW = 236, RX = M + LW + 34, RW = W - M - RX;
+      // Left panel: what this report covers
+      doc.setFillColor(...FILL); doc.rect(M, PTOP, LW, PBOT - PTOP, 'F'); doc.setFillColor(...BRAND); doc.rect(M, PTOP, 3, PBOT - PTOP, 'F');
+      let ly = PTOP + 34; const LX = M + 22, LIW = LW - 40;
+      font(7.5, 'bold', BRAND); doc.text('CONTENTS', LX, ly); ly += 26;
+      font(24, 'bold', INK); doc.text('In this report', LX, ly); ly += 34;
+      doc.setDrawColor(...RULE); doc.setLineWidth(0.6); doc.line(LX, ly, LX + LIW, ly); ly += 20;
+      for (const [k, v] of paramRows()) {
+        font(6.8, 'bold', MUTED); doc.text(k.toUpperCase(), LX, ly); ly += 13;
+        font(10, 'bold', INK); for (const ln of wrap(v, LIW)) { doc.text(ln, LX, ly); ly += 13; } ly += 9;
+      }
+      font(6.8, 'bold', MUTED); doc.text('GENERATED', LX, ly); ly += 13; font(10, 'bold', INK); doc.text(pdfSafe(gen), LX, ly);
+      font(7.6, 'normal', INK2);
+      const fine = wrap('Figures reflect the filters above. Marketing cost is a full-season figure and is not date-filtered. Product and sales office figures are monthly, so a custom range rounds out to the months it touches.', LIW);
+      let fy = PBOT - 22 - fine.length * 10.5; doc.setDrawColor(...RULE); doc.line(LX, fy - 14, LX + LIW, fy - 14);
+      for (const ln of fine) { doc.text(ln, LX, fy); fy += 10.5; }
+      // Right: the entries
+      const entries = [{ label: 'Summary', title: 'Summary & headline figures', page: 1 }, ...sectionPages.map(s => ({ ...s, title: s.title || s.label, page: s.page + 1 }))];
+      const rowH = Math.min(40, (PBOT - PTOP - 20) / entries.length);
+      let ry = PTOP + 10;
       entries.forEach((e, i) => {
-        const num = i === 0 ? '' : i === entries.length - 1 ? 'A' : String(i).padStart(2, '0');
-        font(10, 'bold', BRAND); doc.text(num, M, y); font(10.5, 'normal', INK); doc.text(pdfSafe(e.label), M + 30, y);
-        font(10.5, 'bold', INK); doc.text(String(e.page), M + CW * 0.62, y, { align:'right' });
-        doc.setDrawColor(...RULE); doc.setLineWidth(0.5); doc.line(M, y + 8, M + CW * 0.62, y + 8);
-        doc.link(M, y - 11, CW * 0.62, 20, { pageNumber: e.page }); y += 24;
+        const appendix = i === entries.length - 1, num = i === 0 ? '—' : appendix ? 'A' : String(i).padStart(2, '0');
+        const mid = ry + rowH / 2;
+        font(15, 'bold', i === 0 ? MUTED : BRAND); doc.text(num, RX, mid + 2);
+        font(11.5, 'bold', INK); doc.text(pdfSafe(e.title), RX + 40, mid - 2);
+        font(8, 'normal', MUTED); doc.text(pdfSafe(DESC[e.label] || ''), RX + 40, mid + 10);
+        font(12, 'bold', INK); doc.text(String(e.page), RX + RW, mid + 2, { align: 'right' });
+        font(6.5, 'bold', MUTED); doc.text('PAGE', RX + RW - doc.getTextWidth(String(e.page)) * 1.85 - 6, mid + 1.5, { align: 'right' });
+        if (i < entries.length - 1) { doc.setDrawColor(...RULE); doc.setLineWidth(0.5); doc.line(RX, ry + rowH, RX + RW, ry + rowH); }
+        doc.link(RX, ry, RW, rowH, { pageNumber: e.page });
+        ry += rowH;
       });
-      y += 10; font(8, 'normal', MUTED);
-      for (const ln of wrap(`All figures reflect the filters applied when this report was generated: ${PARKNAME[state.park]}, divided by ${BASISNAME[state.basis].toLowerCase()}, ${fmtDate(state.from)} – ${fmtDate(state.to)}. Marketing cost is a full-season figure and is not date-filtered. Product and sales office figures are monthly, so a custom range rounds out to the months it touches.`, CW * 0.62)) { doc.text(ln, M, y); y += 11; }
 
       // ---- Running header & footer on every page ----
       const total = doc.getNumberOfPages(); const scope = pdfSafe(`${PARKNAME[state.park]}  ·  ${BASISNAME[state.basis]}  ·  ${fmtDate(state.from)} – ${fmtDate(state.to)}`);
