@@ -61,10 +61,14 @@ export async function createSharedReport({ title, html, createdBy, expiresInDays
 }
 
 export async function listSharedReports() {
+  await recipientsReady;
   const { rows } = await pool.query(
-    `SELECT token, title, created_by, created_at, expires_at, revoked, view_count, last_viewed_at,
-            length(html) AS size_bytes, (pin_hash IS NOT NULL) AS has_pin
-     FROM shared_reports ORDER BY created_at DESC`
+    // Never touch `html` here — dashboards are multi-MB and length() would
+    // decompress every one of them just to list titles.
+    `SELECT s.token, s.title, s.created_by, s.created_at, s.expires_at, s.revoked, s.view_count, s.last_viewed_at,
+            (s.pin_hash IS NOT NULL) AS has_pin,
+            (SELECT COUNT(*)::int FROM shared_report_recipients r WHERE r.token = s.token AND NOT r.revoked) AS people_count
+     FROM shared_reports s ORDER BY s.created_at DESC`
   );
   return rows;
 }
