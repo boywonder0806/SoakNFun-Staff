@@ -29,7 +29,7 @@ function Pill({ tone = 'gray', children }) {
     blue:  'bg-sky-50 text-sky-700 ring-sky-600/15',
     gray:  'bg-gray-100 text-gray-500 ring-gray-500/10',
   };
-  return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ring-1 ring-inset ${tones[tone]}`}>{children}</span>;
+  return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold ring-1 ring-inset ${tones[tone]}`}>{children}</span>;
 }
 
 function StatusPill({ report }) {
@@ -56,11 +56,11 @@ function MoreMenu({ items, disabled }) {
   return (
     <div ref={ref} className="relative">
       <button disabled={disabled} onClick={() => setOpen(o => !o)} aria-label="More actions"
-        className="h-9 w-9 inline-flex items-center justify-center rounded-xl border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-800 disabled:opacity-40">
+        className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-800 disabled:opacity-40">
         <DotsIcon />
       </button>
       {open && (
-        <div className="absolute right-0 mt-1.5 w-48 z-20 bg-white border border-gray-200 rounded-xl shadow-lg py-1">
+        <div className="absolute right-0 mt-1.5 w-48 z-20 bg-white border border-gray-200 rounded-md shadow-lg py-1">
           {items.map(it => (
             <button key={it.label} onClick={() => { setOpen(false); it.onClick(); }}
               className={`w-full text-left px-3.5 py-2 text-sm ${it.danger ? 'text-red-600 hover:bg-red-50' : 'text-gray-700 hover:bg-gray-50'}`}>
@@ -130,7 +130,7 @@ function AccessPanel({ report, onError, onChanged }) {
   const views = data?.views || [];
 
   return (
-    <div className="border-t border-gray-100 bg-slate-50/70 rounded-b-2xl">
+    <div className="border-t border-gray-100 bg-slate-50/70 rounded-b-lg">
       <div className="px-5 pt-3 flex items-center gap-1 border-b border-gray-100">
         {[['people', `People${data ? ` · ${recipients.length}` : ''}`], ['activity', `Activity${data ? ` · ${views.length}` : ''}`]].map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
@@ -144,10 +144,10 @@ function AccessPanel({ report, onError, onChanged }) {
         {notice && <div className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">{notice}</div>}
 
         {!data ? (
-          <div className="space-y-2">{[0, 1].map(i => <div key={i} className="h-12 rounded-xl bg-gray-100 animate-pulse" />)}</div>
+          <div className="space-y-2">{[0, 1].map(i => <div key={i} className="h-12 rounded-md bg-gray-100 animate-pulse" />)}</div>
         ) : tab === 'people' ? (
           <>
-            <form onSubmit={add} className="bg-white border border-gray-200 rounded-xl p-3 flex flex-wrap items-end gap-2.5">
+            <form onSubmit={add} className="bg-white border border-gray-200 rounded-md p-3 flex flex-wrap items-end gap-2.5">
               <label className="flex-1 min-w-[200px]">
                 <span className="block text-[11px] font-semibold text-gray-500 mb-1">Email</span>
                 <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="person@example.com"
@@ -161,7 +161,7 @@ function AccessPanel({ report, onError, onChanged }) {
               <label className="flex items-center gap-1.5 text-xs text-gray-600 h-9">
                 <input type="checkbox" checked={sendEmail} onChange={e => setSendEmail(e.target.checked)} className="accent-az" /> Email link &amp; PIN
               </label>
-              <button type="submit" disabled={busy === 'add'} className="btn-primary !py-2 !text-xs">
+              <button type="submit" disabled={busy === 'add'} className="btn-primary !rounded-md !py-2 !text-xs">
                 {busy === 'add' ? 'Adding…' : 'Give access'}
               </button>
             </form>
@@ -171,7 +171,7 @@ function AccessPanel({ report, onError, onChanged }) {
                 No one has a personal PIN yet{data.hasGeneralPin ? ' — right now the report only opens with the general PIN.' : ' — anyone with the link can open this report.'}
               </p>
             ) : (
-              <ul className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
+              <ul className="bg-white border border-gray-200 rounded-md divide-y divide-gray-100">
                 {recipients.map(r => (
                   <li key={r.id} className={`px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2 ${r.revoked ? 'opacity-60' : ''}`}>
                     <div className="w-8 h-8 rounded-full bg-az/10 text-az-dark text-[11px] font-bold flex items-center justify-center shrink-0">{initials(r.name || r.email)}</div>
@@ -204,7 +204,7 @@ function AccessPanel({ report, onError, onChanged }) {
         ) : views.length === 0 ? (
           <p className="text-xs text-gray-500 px-1">No views logged yet.</p>
         ) : (
-          <div className="bg-white border border-gray-200 rounded-xl max-h-72 overflow-y-auto">
+          <div className="bg-white border border-gray-200 rounded-md max-h-72 overflow-y-auto">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-white">
                 <tr className="text-left text-[10px] font-semibold text-gray-400 uppercase tracking-wide border-b border-gray-100">
@@ -232,9 +232,9 @@ function AccessPanel({ report, onError, onChanged }) {
 function ReportCard({ r, open, onToggle, busy, copied, onCopy, onSetPin, onRevoke, onDelete, onError, onChanged }) {
   const live = isLive(r);
   return (
-    <div className={`card transition-shadow ${open ? 'shadow-md ring-1 ring-az/20' : 'hover:shadow-md'} ${live ? '' : 'opacity-75'}`}>
+    <div className={`card rounded-lg transition-shadow ${open ? 'shadow-md ring-1 ring-az/20' : 'hover:shadow-md'} ${live ? '' : 'opacity-75'}`}>
       <div className="p-5 flex flex-wrap items-center gap-x-5 gap-y-4">
-        <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${live ? 'bg-az/10 text-az-dark' : 'bg-gray-100 text-gray-400'}`}>
+        <div className={`w-11 h-11 rounded-md flex items-center justify-center shrink-0 ${live ? 'bg-az/10 text-az-dark' : 'bg-gray-100 text-gray-400'}`}>
           <ReportIcon />
         </div>
 
@@ -255,14 +255,14 @@ function ReportCard({ r, open, onToggle, busy, copied, onCopy, onSetPin, onRevok
         </div>
 
         <div className="flex items-center gap-2 ml-auto">
-          <a href={r.url} target="_blank" rel="noopener noreferrer" className="btn-primary !py-2 !px-3.5 !text-xs">
+          <a href={r.url} target="_blank" rel="noopener noreferrer" className="btn-primary !rounded-md !py-2 !px-3.5 !text-xs">
             Open <ExternalIcon />
           </a>
-          <button onClick={onCopy} className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+          <button onClick={onCopy} className="h-9 px-3.5 inline-flex items-center gap-1.5 rounded-md border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50">
             {copied ? <><CheckIcon />Copied</> : <><LinkIcon />Copy link</>}
           </button>
           <button onClick={onToggle}
-            className={`h-9 px-3.5 inline-flex items-center gap-1.5 rounded-xl border text-xs font-semibold ${open ? 'border-az/40 bg-az/5 text-az-dark' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}>
+            className={`h-9 px-3.5 inline-flex items-center gap-1.5 rounded-md border text-xs font-semibold ${open ? 'border-az/40 bg-az/5 text-az-dark' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}>
             <PeopleIcon />Access
             <Chevron open={open} />
           </button>
@@ -280,13 +280,13 @@ function ReportCard({ r, open, onToggle, busy, copied, onCopy, onSetPin, onRevok
 
 function SkeletonCard() {
   return (
-    <div className="card p-5 flex items-center gap-5">
-      <div className="w-11 h-11 rounded-xl bg-gray-100 animate-pulse" />
+    <div className="card rounded-lg p-5 flex items-center gap-5">
+      <div className="w-11 h-11 rounded-md bg-gray-100 animate-pulse" />
       <div className="flex-1 space-y-2">
         <div className="h-4 w-64 rounded bg-gray-100 animate-pulse" />
         <div className="h-3 w-80 rounded bg-gray-100 animate-pulse" />
       </div>
-      <div className="h-9 w-48 rounded-xl bg-gray-100 animate-pulse" />
+      <div className="h-9 w-48 rounded-md bg-gray-100 animate-pulse" />
     </div>
   );
 }
@@ -397,7 +397,7 @@ export default function SharedReports() {
       </div>
 
       {error && (
-        <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-2.5 flex items-center justify-between gap-3">
+        <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-4 py-2.5 flex items-center justify-between gap-3">
           <span>{error}</span>
           <button onClick={() => { setError(''); load(); }} className="text-xs font-semibold underline">Retry</button>
         </div>
@@ -406,8 +406,8 @@ export default function SharedReports() {
       {!reports ? (
         error ? null : <div className="space-y-3">{[0, 1, 2].map(i => <SkeletonCard key={i} />)}</div>
       ) : reports.length === 0 ? (
-        <div className="card p-12 text-center">
-          <div className="w-12 h-12 mx-auto rounded-2xl bg-az/10 text-az-dark flex items-center justify-center"><ReportIcon /></div>
+        <div className="card rounded-lg p-12 text-center">
+          <div className="w-12 h-12 mx-auto rounded-lg bg-az/10 text-az-dark flex items-center justify-center"><ReportIcon /></div>
           <p className="mt-4 text-sm font-semibold text-gray-900">No shared reports yet</p>
           <p className="mt-1 text-sm text-gray-500">Ask Claude to build one and it will show up here with a link.</p>
         </div>
@@ -417,7 +417,7 @@ export default function SharedReports() {
             <div className="relative max-w-sm">
               <SearchIcon />
               <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search reports"
-                className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-az/25 focus:border-az" />
+                className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-az/25 focus:border-az" />
             </div>
           )}
 
@@ -439,7 +439,7 @@ export default function SharedReports() {
 
 function Stat({ label, value }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-xl px-3.5 py-2 min-w-[76px]">
+    <div className="bg-white border border-gray-200 rounded-md px-3.5 py-2 min-w-[76px]">
       <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">{label}</p>
       <p className="text-base font-bold text-gray-900 tabular-nums leading-tight">{value}</p>
     </div>
