@@ -148,10 +148,7 @@ function AccessPanel({ report, onError, onChanged }) {
         ) : tab === 'people' ? (
           <>
             <form onSubmit={add} className="bg-white border border-gray-200 rounded-md p-4">
-              <div className="flex items-baseline justify-between gap-3 mb-3">
-                <p className="text-sm font-semibold text-gray-900">Give someone access</p>
-                <p className="text-[11px] text-gray-400">They get their own 6-digit PIN</p>
-              </div>
+              <p className="text-sm font-semibold text-gray-900 mb-3">Give someone access</p>
               <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.7fr)_auto] gap-2">
                 <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="Email address" aria-label="Email address"
                   className="h-9 w-full border border-gray-200 rounded-md px-3 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-az/25 focus:border-az" />
@@ -380,13 +377,9 @@ export default function SharedReports() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Shared Reports</h1>
-          <p className="text-sm text-gray-500 mt-1 max-w-2xl">
-            Published reports with a shareable link. Use <span className="font-semibold text-gray-700">Access</span> to give
-            someone their own PIN — every view is logged under their name.
-          </p>
         </div>
         {reports && reports.length > 0 && (
           <div className="flex items-center gap-2">
