@@ -1,4 +1,4 @@
-  // ---------- Full-report export (Google Sheets, Excel, PDF) ----------
+  // ---------- Full-report export (Excel, CSV, PDF) ----------
   // Both exports follow the current park / basis / range, so they match what is on screen.
   // The PDF is built natively with jsPDF + autoTable (lazy-loaded on first use); charts are
   // rasterised from their SVGs with the light palette forced so print colours are consistent.
@@ -160,71 +160,50 @@
     download(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), fileStem() + '.xlsx');
   }
 
-  // ----- Google Sheets: created in the viewer's own Drive (drive.file scope = only files this page creates) -----
-  const GSHEETS_CLIENT_ID = '%%GSHEETS_CLIENT_ID%%';
-  const gEnabled = () => /\.apps\.googleusercontent\.com$/.test(GSHEETS_CLIENT_ID);
-  let gClient = null, gTok = null, gTokExp = 0;
-  function initGoogle(){
-    if (!gEnabled()) return;
-    const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.async = true;
-    s.onload = () => { gClient = window.google.accounts.oauth2.initTokenClient({ client_id: GSHEETS_CLIENT_ID, scope: 'https://www.googleapis.com/auth/drive.file', callback: () => {} }); };
-    document.head.appendChild(s);
-  }
-  const gTokenValid = () => gTok && Date.now() < gTokExp - 60000;
-  function gToken(){
-    return new Promise((res, rej) => {
-      if (gTokenValid()) return res(gTok);
-      if (!gClient) return rej(new Error('Google sign-in is still loading. Try again in a moment.'));
-      gClient.callback = r => { if (r.error) return rej(new Error(r.error === 'access_denied' ? 'Google access was not granted.' : r.error_description || r.error)); gTok = r.access_token; gTokExp = Date.now() + (+r.expires_in || 3600) * 1000; res(gTok); };
-      gClient.error_callback = e => rej(new Error(e && e.type === 'popup_closed' ? 'Google sign-in was closed before it finished.' : e && e.type === 'popup_failed_to_open' ? 'Your browser blocked the Google sign-in window. Allow pop-ups for this site and try again.' : 'Google sign-in failed.'));
-      gClient.requestAccessToken();
-    });
-  }
-  const rgbOf = hex => ({ red: parseInt(hex.slice(0, 2), 16) / 255, green: parseInt(hex.slice(2, 4), 16) / 255, blue: parseInt(hex.slice(4, 6), 16) / 255 });
-  const serial = iso => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86400000 + 25569;
-  function gCell(c, gid){
-    if (!c) return {};
-    const ue = {}, f = {}, tf = {};
-    if (c.link) ue.formulaValue = `=HYPERLINK("#gid=${gid[c.link]}","${c.v.replace(/"/g, '""')}")`;
-    else if (c.t === 'n') ue.numberValue = c.v; else if (c.t === 'd') ue.numberValue = serial(c.v); else if (c.v !== '') ue.stringValue = c.v;
-    if (FMT[c.fmt]) f.numberFormat = { type: c.t === 'd' ? 'DATE' : c.fmt.startsWith('pct') ? 'PERCENT' : c.fmt.startsWith('usd') ? 'CURRENCY' : 'NUMBER', pattern: FMT[c.fmt] };
-    if (c.title) tf.fontSize = 16; else if (c.h3) tf.fontSize = 12; else if (c.head) tf.fontSize = 9;
-    if (c.title || c.h3 || c.head || c.b) tf.bold = true; if (c.i) tf.italic = true;
-    const col = c.link ? XC.brand : c.head ? XC.ink2 : c.muted || c.sub ? XC.muted : null; if (col) tf.foregroundColorStyle = { rgbColor: rgbOf(col) };
-    if (Object.keys(tf).length) f.textFormat = tf;
-    if (c.head) { f.backgroundColorStyle = { rgbColor: rgbOf(XC.head) }; f.borders = { bottom: { style: 'SOLID', colorStyle: { rgbColor: rgbOf(XC.rule) } } }; }
-    if (c.top) f.borders = { ...(f.borders || {}), top: { style: 'SOLID_MEDIUM', colorStyle: { rgbColor: rgbOf(XC.rule) } } };
-    if (c.right) f.horizontalAlignment = 'RIGHT'; if (c.wrap) { f.wrapStrategy = 'WRAP'; f.verticalAlignment = 'TOP'; }
-    const out = {}; if (Object.keys(ue).length) out.userEnteredValue = ue; if (Object.keys(f).length) out.userEnteredFormat = f; return out;
-  }
-  function sheetsPayload(book){
-    const gid = Object.fromEntries(book.map((sh, i) => [sh.name, 1000 + i]));
-    return { properties: { title: `${REPORT_TITLE} — ${PARKNAME[state.park]}, ${fmtDate(state.from)} – ${fmtDate(state.to)}`, locale: 'en_US', timeZone: 'America/Chicago' },
-      sheets: book.map((sh, i) => { const cols = Math.max(sh.widths.length, ...sh.rows.map(r => r.length));
-        return { properties: { sheetId: 1000 + i, index: i, title: sh.name, gridProperties: { rowCount: sh.rows.length + 20, columnCount: Math.max(cols + 2, 10), frozenRowCount: sh.freeze || 0, hideGridlines: !sh.grid } },
-          data: [{ startRow: 0, startColumn: 0, rowData: sh.rows.map(r => ({ values: r.map(c => gCell(c, gid)) })), columnMetadata: sh.widths.map(px => ({ pixelSize: px })) }] }; }) };
-  }
-  async function exportReportSheets(win){
-    const token = await gToken();
-    const res = await fetch('https://sheets.googleapis.com/v4/spreadsheets?fields=spreadsheetUrl', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(sheetsPayload(buildWorkbook())) });
-    if (res.status === 401) { gTok = null; throw new Error('Your Google sign-in expired. Click Export again.'); }
-    if (!res.ok) { let m = ''; try { m = (await res.json()).error.message; } catch (e) {} throw new Error('Google Sheets could not create the sheet' + (m ? ': ' + m : '.')); }
-    const { spreadsheetUrl } = await res.json();
-    if (win && !win.closed) { win.location.href = spreadsheetUrl; return; }
-    if (!window.open(spreadsheetUrl, '_blank')) xNotice('Your Google Sheet is ready.', spreadsheetUrl);
+  // ----- CSV: the workbook flattened into one file — data only, consistent value formats -----
+  // Money "$1,234.56", percentages "12.5%", dates ISO: Excel and Google Sheets read all three as
+  // numbers/dates on open. Prose (section intros, notes, KPI detail text) is left to the PDF.
+  const csvVal = c => !c ? '' : c.t === 'd' ? c.v : c.t !== 'n' ? c.v
+    : c.fmt === 'usd0' || c.fmt === 'usd2' ? (c.v < 0 ? '-' : '') + '$' + Math.abs(c.v).toLocaleString('en-US', c.fmt === 'usd2' ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : { maximumFractionDigits: 0 })
+    : c.fmt === 'pct0' || c.fmt === 'pct1' ? (c.v * 100).toFixed(1) + '%'
+    : c.fmt === 'dec1' ? c.v.toFixed(1) : c.fmt === 'dec2' ? c.v.toFixed(2) : String(c.v);
+  function exportReportCSV(){
+    let parent = '';
+    const out = [], blank = () => { if (out.length && out[out.length - 1].length) out.push([]); };
+    for (const sh of buildWorkbook()) {
+      if (sh.name === 'Methodology') continue;
+      blank(); if (out.length) out.push([]);
+      if (!(sh.rows[0] && sh.rows[0][0] && sh.rows[0][0].title)) out.push([sh.name.toUpperCase()], []);
+      for (const r of sh.rows) {
+        const c0 = r.find(Boolean);
+        if (!c0) { blank(); continue; }
+        if (c0.title) { out.push([sh.name === 'Summary' ? c0.v : c0.v.toUpperCase()]); continue; }
+        if (c0.link) continue;
+        if (c0.sub || (c0.free && !c0.h3)) { if (sh.name === 'Summary' && c0.sub) out.push([c0.v]); continue; }
+        if (c0.h3) { if (c0.v === 'Contents') break; blank(); out.push([c0.v]); continue; }
+        // KPI blocks: Metric, Value (the detail column is prose)
+        const kpi = r.length === 3 && r[2] && ((r[0].head && r[2].v === 'Detail') || (r[0].b && r[2].muted && !r[0].head));
+        const cells = r.map(csvVal); if (kpi) cells.length = 2;
+        // Sub-rows like "per checked-in guest" only make sense under their parent row; name it.
+        if (r[0] && !r[0].head) { if (r[0].muted && /^[a-z]/.test(r[0].v) && parent) cells[0] = `${parent} — ${r[0].v}`; else if (!r[0].muted) parent = r[0].v; }
+        while (cells.length && cells[cells.length - 1] === '') cells.pop();
+        out.push(cells);
+      }
+    }
+    const enc = v => { v = String(v ?? ''); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    download(new Blob(['\ufeff' + out.map(r => r.map(enc).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' }), fileStem() + '.csv');
   }
 
   // ----- Export menu -----
-  function xNotice(msg, url){
+  function xNotice(msg, url, sticky){
     let el = document.getElementById('x-notice'); if (!el) { el = document.createElement('div'); el.id = 'x-notice'; el.className = 'x-notice'; document.body.appendChild(el); }
-    el.innerHTML = `<span></span>${url ? '<a target="_blank" rel="noopener">Open in Google Sheets</a>' : ''}<button type="button" aria-label="Dismiss">×</button>`;
+    el.innerHTML = `<span></span>${url ? '<a target="_blank" rel="noopener">New Google Sheet</a>' : ''}<button type="button" aria-label="Dismiss">×</button>`;
     el.querySelector('span').textContent = msg; if (url) el.querySelector('a').href = url;
     el.querySelector('button').onclick = () => el.classList.remove('show'); el.classList.add('show');
-    clearTimeout(el._t); if (!url) el._t = setTimeout(() => el.classList.remove('show'), 7000);
+    clearTimeout(el._t); if (!url && !sticky) el._t = setTimeout(() => el.classList.remove('show'), 7000);
   }
   function initReportExport(){
     const btn = $('#exp-btn'), pop = $('#exp-pop'); if (!btn || !pop) return;
-    initGoogle(); if (!gEnabled()) pop.querySelector('[data-x="sheets"]').remove();
     const label = btn.querySelector('span'), close = () => { pop.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
     btn.onclick = e => { e.stopPropagation(); pop.hidden = !pop.hidden; btn.setAttribute('aria-expanded', String(!pop.hidden)); };
     document.addEventListener('click', e => { if (!pop.contains(e.target)) close(); });
@@ -234,9 +213,7 @@
       const x = b.dataset.x;
       if (x === 'pdf') return run('Building PDF…', exportReportPDF);
       if (x === 'xlsx') return run('Building Excel…', exportReportXLSX);
-      // Signed in already: open the tab now, inside the click, so pop-up blockers allow it.
-      let win = null; if (gTokenValid()) { win = window.open('', '_blank'); if (win) win.document.write('<title>Creating sheet…</title><p style="font:15px system-ui;color:#555;margin:40vh auto;text-align:center">Creating your Google Sheet…</p>'); }
-      run('Creating sheet…', () => exportReportSheets(win).catch(e => { if (win && !win.closed) win.close(); throw e; }));
+      if (x === 'csv') return run('Building CSV…', async () => exportReportCSV());
     });
   }
 

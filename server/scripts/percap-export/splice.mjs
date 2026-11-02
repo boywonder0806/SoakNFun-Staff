@@ -9,7 +9,7 @@ const M = { css: ['  /* report-export:css */\n', '  /* /report-export:css */\n']
 const ICON = {
   export: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M7 9l5-5 5 5M5 14v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5"/></svg>',
   chevron: '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
-  sheets: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 9v12"/></svg>',
+  csv: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 9v12"/></svg>',
   xlsx: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 12l6 6M15 12l-6 6"/></svg>',
   pdf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>',
 };
@@ -34,8 +34,8 @@ const CSS = `  .hero-row{ display:flex; gap:18px 28px; align-items:flex-start; j
 `;
 const UI = `<div class="export-menu"><button class="btn btn-x" id="exp-btn" type="button" aria-haspopup="menu" aria-expanded="false">${ICON.export}<span>Export</span>${ICON.chevron}</button>`
   + `<div class="export-pop" id="exp-pop" role="menu" hidden>`
-  + `<button type="button" role="menuitem" data-x="sheets">${ICON.sheets}Open in Google Sheets</button>`
   + `<button type="button" role="menuitem" data-x="xlsx">${ICON.xlsx}Download Excel (.xlsx)</button>`
+  + `<button type="button" role="menuitem" data-x="csv">${ICON.csv}Download CSV</button>`
   + `<button type="button" role="menuitem" data-x="pdf">${ICON.pdf}Download PDF</button>`
   + `</div></div>`;
 
@@ -62,12 +62,12 @@ export function stripExport(h) {
   return h.split(INIT + ' initReportExport();').join(INIT);
 }
 
-export function applyExport(html, mod, clientId = '') {
+export function applyExport(html, mod) {
   let h = stripExport(html);
   const once = (a, b) => { const p = h.split(a); if (p.length !== 2) throw new Error(`expected one match for: ${a.slice(0, 60)} (found ${p.length - 1})`); h = p.join(b); };
   once('  .totop:hover{', M.css[0] + CSS + M.css[1] + '  .totop:hover{');
   once('<header class="hero">\n', HERO_OPEN);
   once('</p>\n  </header>', `${HERO_TAIL}${M.ui[0]}${UI}${M.ui[1]}\n  </div></header>`);
-  once(INIT, M.js[0] + mod.split('%%GSHEETS_CLIENT_ID%%').join(clientId) + M.js[1] + INIT + ' initReportExport();');
+  once(INIT, M.js[0] + mod + M.js[1] + INIT + ' initReportExport();');
   return h;
 }
