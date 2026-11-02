@@ -63,14 +63,16 @@ export default function Layout({ children }) {
             <div key={section.heading}>
               <p className="px-3 pb-1 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">{section.heading}</p>
               {section.disabled ? (
-                <>
-                  <p className="mx-3 mb-2 mt-1 px-2.5 py-2 text-[11px] leading-snug text-amber-800 bg-amber-50 border border-amber-100 rounded-md">{ANALYTICS_DISABLED_MSG}</p>
-                  <div className="space-y-1">
+                <div className="relative">
+                  <div className="space-y-1" aria-hidden="true">
                     {section.items.map(item => (
-                      <span key={item.to} aria-disabled="true" className="block px-3 py-2 text-sm font-medium text-gray-300 cursor-not-allowed select-none">{item.label}</span>
+                      <span key={item.to} className="block px-3 py-2 text-sm font-medium text-gray-300 cursor-not-allowed select-none">{item.label}</span>
                     ))}
                   </div>
-                </>
+                  <div className="absolute inset-0 flex items-center justify-center px-2 bg-white/40 backdrop-blur-[1.5px] cursor-not-allowed">
+                    <p className="px-3 py-2.5 text-[11px] leading-snug text-center text-amber-800 bg-amber-50 border border-amber-200 rounded-md shadow-sm">{ANALYTICS_DISABLED_MSG}</p>
+                  </div>
+                </div>
               ) : (
               <div className="space-y-1">
                 {section.items.map(item => (
