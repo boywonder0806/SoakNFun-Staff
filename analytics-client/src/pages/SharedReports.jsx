@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import api from '../lib/api.js';
 import { number, relativeTime } from '../lib/format.js';
+import WhatsNew from '../components/WhatsNew.jsx';
 
 // The list is tiny metadata (no report HTML), so paint the last copy instantly
 // and refresh underneath instead of blocking on a progress screen.
@@ -377,6 +378,7 @@ export default function SharedReports() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
+      <WhatsNew />
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Shared Reports</h1>
