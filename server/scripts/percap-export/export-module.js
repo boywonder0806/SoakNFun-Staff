@@ -3,11 +3,13 @@
   // The PDF is built natively with jsPDF + autoTable (lazy-loaded on first use); charts are
   // rasterised from their SVGs with the light palette forced so print colours are consistent.
   const XLIBS = ['https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'];
-  const REPORT_TITLE = '2026 Season Per Cap Dashboard';
+  const REPORT_TITLE = (document.title || 'Season Per Cap Dashboard').trim();
+  const HAS_MKT = !!(D.meta.marketing && document.getElementById('sec-marketing'));
+  const IS_BETA = !!document.querySelector('.beta');
   const ORG = 'Blue Bayou & Gulf Islands Waterparks';
   const BASISNAME = { booked:'Tickets booked', ci:'Checked in at the gate' };
   const txt = el => (el ? el.textContent : '').replace(/\s+/g, ' ').trim();
-  const fileStem = () => `2026-Season-Per-Cap-${PARKNAME[state.park].replace(/\s+/g, '-')}-${state.from}_${state.to}`;
+  const fileStem = () => `${REPORT_TITLE.replace(/\s*dashboard\s*/i, ' ').replace(/[—–]/g, ' ').trim().replace(/[^A-Za-z0-9]+/g, '-')}-${PARKNAME[state.park].replace(/\s+/g, '-')}-${state.from}_${state.to}`.replace(/-Gulf-Islands-Gulf-Islands/, '-Gulf-Islands');
   const generatedAt = () => new Date().toLocaleString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' });
   function download(blob, name){ const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
   function htmlToText(html){ const d = document.createElement('div'); d.innerHTML = html; d.querySelectorAll('br').forEach(b => b.replaceWith('\n')); d.querySelectorAll('p, li, div').forEach(p => p.append('\n')); return d.textContent.split('\n').map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean); }
@@ -121,7 +123,7 @@
     add(summary, [S(REPORT_TITLE, { title:true, free:true })], [S(`${ORG} · Internal · Confidential`, { sub:true, free:true })], [],
       [S('Report parameters', { h3:true, free:true })], ...paramRows().map(([k, v]) => [S(k, { b:true }), S(v)]),
       [S('Generated', { b:true }), S(gen)], [S('Source', { b:true }), S(location.href.split('#')[0])],
-      [S('Status', { b:true }), S('Beta — figures are preliminary and may change as definitions are validated.')], [],
+      ...(IS_BETA ? [[S('Status', { b:true }), S('Beta — figures are preliminary and may change as definitions are validated.')]] : []), [],
       [S('Headline figures', { h3:true, free:true })], ...kpiBlock($('#kpis')), [],
       [S('Contents', { h3:true, free:true })], ...sheets.slice(1).map(sh => [S(sh.label || sh.name, { link: sh.name })]));
     // Column widths from the table cells (titles, ledes and notes overflow and are ignored).
@@ -349,11 +351,13 @@
       y += 44; doc.setDrawColor(...RULE); doc.setLineWidth(0.6); doc.line(M, y, M + CW, y); y += 16;
       font(11, 'bold', INK); doc.text('Headline figures', M, y + 8); y += 18;
       kpiTiles(kpiRows($('#kpis')), 3);
+      if (IS_BETA) {
       // beta notice
       const betaLines = (() => { font(8); return wrap('This dashboard is in beta. The numbers are still being validated and the definitions behind them may be refined, so figures can change between versions. Treat everything here as preliminary rather than final.', CW - 70); })();
       const bh = 14 + betaLines.length * 10.5; need(bh);
       doc.setFillColor(253, 246, 232); doc.setDrawColor(...AMBER); doc.setLineWidth(0.6); doc.rect(M, y, CW, bh, 'FD'); doc.setFillColor(...AMBER); doc.rect(M, y, 3, bh, 'F');
       font(7, 'bold', AMBER); doc.text('BETA', M + 14, y + 13); font(8, 'normal', INK2); betaLines.forEach((ln, q) => doc.text(ln, M + 56, y + 13 + q * 10.5)); y += bh + 10;
+      }
 
       // ---- Sections ----
       let n = 0;
@@ -410,7 +414,7 @@
       }
       font(6.8, 'bold', MUTED); doc.text('GENERATED', LX, ly); ly += 13; font(10, 'bold', INK); doc.text(pdfSafe(gen), LX, ly);
       font(7.6, 'normal', INK2);
-      const fine = wrap('Figures reflect the filters above. Marketing cost is a full-season figure and is not date-filtered. Product and sales office figures are monthly, so a custom range rounds out to the months it touches.', LIW);
+      const fine = wrap(`Figures reflect the filters above.${HAS_MKT ? ' Marketing cost is a full-season figure and is not date-filtered.' : ''} Product and sales office figures are monthly, so a custom range rounds out to the months it touches.`, LIW);
       let fy = PBOT - 22 - fine.length * 10.5; doc.setDrawColor(...RULE); doc.line(LX, fy - 14, LX + LIW, fy - 14);
       for (const ln of fine) { doc.text(ln, LX, fy); fy += 10.5; }
       // Right: the entries
