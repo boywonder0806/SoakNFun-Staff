@@ -84,6 +84,9 @@ if (!data.alc.days.length) {   // no alcohol sold: drop the section and its rend
   const a = h.indexOf('<section id="sec-alcohol">'), b = h.indexOf('</section>', a) + '</section>'.length;
   if (a < 0) throw new Error('alcohol section not found'); h = h.slice(0, a) + h.slice(b).replace(/^\s*\n/, '');
   swap(' renderAlcohol();', '');
+  swap("    $('#ametric').value = state.ametric;", "    if ($('#ametric')) { $('#ametric').value = state.ametric;");
+  swap("    $('#agran').value = state.agran; $('#agran').onchange = e => { state.agran = e.target.value; renderAlcTrend(); writeHash(); };",
+       "    $('#agran').value = state.agran; $('#agran').onchange = e => { state.agran = e.target.value; renderAlcTrend(); writeHash(); }; }");
 }
 h = applyExport(h, fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../percap-export/export-module.js'), 'utf8'));
 fs.writeFileSync(outFile, h);
