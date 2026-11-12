@@ -2,14 +2,20 @@
 // orders: [{ id, d (business date), h (Central hour), s (status), o (office), p (park), w (web) }]
 // lines:  [{ id, n, t, q, st (pre-tax subtotal), e (event), ed (event date) }]
 // D25 / D26: the published 2025 and 2026 dashboard datasets, used for product, retail-group and unit maps.
-import { norm, pkey, isAdmission, abOf, OVERRIDE, RULES, ACATS, acat, rgroupRule, CABRX, unitName, unitTypeRule } from './rules.mjs';
+import { norm, pkey, isAdmission, abOf, OVERRIDE, RGROUP_OVERRIDE, isPassCoupon, RULES, ACATS, acat, rgroupRule, CABRX, unitName, unitTypeRule } from './rules.mjs';
 
-export function buildSeason({ orders, lines, seasonStart, seasonEnd, openDay, D25, D26 }) {
+export function buildSeason({ orders, lines, seasonStart, seasonEnd, openDay, D25, D26, passCoupons = false }) {
   const B = D25.buckets, BL = D25.bucketLabels;
 
   // ---- Product → bucket: hand overrides, exact product-list match (2025 wins over 2026), last segment, rules
-  const exact = new Map(), byLast = new Map();
-  for (const p of [...D26.products, ...D25.products]) { exact.set(p.n + '|' + p.t, p.b); byLast.set(p.n.split(' · ').pop().toLowerCase() + '|' + p.t, p.b); }
+  // Names are matched with spacing collapsed. The 2025 list sometimes has one name under two buckets
+  // (rung at different registers); the bucket carrying most of that product's revenue wins, 2025 before 2026.
+  const vote = list => { const m = new Map(); for (const p of list) { const ks = [norm(p.n) + '|' + p.t, '~' + norm(p.n).split(' · ').pop().toLowerCase() + '|' + p.t];
+    const rev = Object.values(p.m).reduce((a, v) => a + Math.abs(v[1]), 0) + 1e-6; for (const k of ks) { const e = m.get(k) || {}; e[p.b] = (e[p.b] || 0) + rev; m.set(k, e); } }
+    return new Map([...m].map(([k, e]) => [k, Object.entries(e).sort((a, c) => c[1] - a[1])[0][0]])); };
+  const v25 = vote(D25.products), v26 = vote(D26.products);
+  const exact = { get: k => v25.get(k) || v26.get(k), has: k => v25.has(k) || v26.has(k) };
+  const byLast = { get: k => v25.get('~' + k) || v26.get('~' + k), has: k => v25.has('~' + k) || v26.has('~' + k) };
   const overrideOf = new Map(Object.entries(OVERRIDE).flatMap(([bk, ns]) => ns.map(n => [n, bk])));
   const unclassified = new Map();
   const note = (k, t, b, l) => { const u = unclassified.get(k + '|' + t) || { k, t, b, rev: 0, q: 0 }; u.rev += l.st; u.q += l.q; unclassified.set(k + '|' + t, u); return b; };
@@ -39,7 +45,7 @@ export function buildSeason({ orders, lines, seasonStart, seasonEnd, openDay, D2
     day(o.d).r[B.indexOf(l.b)] += l.st;
     // Season pass scans (2024) carry no event, so no visit date: they are rung up at the gate on the day of the visit.
     const vd = l.ed || (isAdmission(l) ? o.d : null);
-    if (isAdmission(l) && vd && vd >= openDay && vd <= seasonEnd) { const x = day(vd); x.att += l.q; x.ab[abOf(norm(l.n))] += l.q; }
+    if (isAdmission(l) && vd && vd >= openDay && vd <= seasonEnd) { const x = day(vd); x.att += l.q; x.ab[passCoupons && isPassCoupon(l) ? 'sp' : abOf(norm(l.n))] += l.q; }
   }
   const dayList = [...days.values()].sort((a, b) => a.d.localeCompare(b.d)).map(x => ({ ...x, r: x.r.map(v => +v.toFixed(2)) }));
   for (const x of dayList) if (!x.att) delete x.ab;
@@ -65,12 +71,13 @@ export function buildSeason({ orders, lines, seasonStart, seasonEnd, openDay, D2
   const alcDays = [...alc.values()].sort((a, b) => a.d.localeCompare(b.d)).map(a => ({ ...a, ord: a.ord.size, c: r2(a.c), h: r2(a.h) }));
 
   // ---- Gift shops ($0 lines are left out of item counts; hour of day is in-park registers only)
-  const rgroup = n => D25.ret.cat[n] || D26.ret?.cat?.[n] || rgroupRule(n);
+  const rgroup = n => RGROUP_OVERRIDE[n] || D25.ret.cat[n] || D26.ret?.cat?.[n] || rgroupRule(n);
   const retCat = {}, ret = new Map(), retOff = new Map();
   for (const l of L) { if (l.b !== 'retail') continue; const o = O.get(l.id), n = pkey(l), g = rgroup(n); retCat[n] = g;
     const x = ret.get(o.d) || { d: o.d, p: 'GI', q: 0, ord: new Set(), wob: new Set(), wr: 0, c: {}, h: {} };
     if (l.st !== 0) { x.q += l.q; x.c[g] = x.c[g] || [0, 0]; x.c[g][0] += l.q; x.c[g][1] += l.st; }
-    if (o.w) { x.wob.add(l.id); x.wr += l.st; } else { x.ord.add(l.id); if (l.st !== 0) { x.h[o.h] = x.h[o.h] || [0, 0]; x.h[o.h][0] += l.q; x.h[o.h][1] += l.st; } }
+    x.ord.add(l.id); // every order with retail, web included (the page subtracts wob for in-person attach)
+    if (o.w) { x.wob.add(l.id); x.wr += l.st; } else if (l.st !== 0) { x.h[o.h] = x.h[o.h] || [0, 0]; x.h[o.h][0] += l.q; x.h[o.h][1] += l.st; }
     ret.set(o.d, x);
     const on = (o.o || '').trim(), m = month(o.d); const of = retOff.get(on) || { o: on, p: 'GI', m: {} }; const v = of.m[m] || [0, 0, new Set()];
     if (l.st !== 0) v[0] += l.q; v[1] += l.st; v[2].add(l.id); of.m[m] = v; retOff.set(on, of); }

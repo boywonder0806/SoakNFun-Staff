@@ -15,7 +15,7 @@ export const abOf = n => /season pass (redemption|scan)/i.test(n) ? 'sp' : /empl
 
 // Hand-reviewed classifications for products first seen in 2024 (not in the 2025/2026 product lists)
 export const OVERRIDE = {
-  food: ['Frios', 'Frios (CS)', 'Frios (Employee)', 'Apple Sauce Pouch', 'Bugles & Chex Mix', 'Fritos Pie', 'Add Strawberries', 'Add Whipped Cream', 'Slim Jim', 'fried oreos', 'Box Lunch', 'Extra Powdered Sugar', 'taco', 'Add Condensed Milk', 'Choc Covered Strawberries', 'Add Jalapenos', 'Cinnamon Roll', 'Marinara Sauce', 'Steak (Taco)', 'Chicken (Taco)', 'Corn Tortilla', 'Flour Tortilla', 'Meal Voucher Tickets', 'Buffalo Wild Wings - Gulfport', 'Abramson Si Academy Marching Band - Meal Voucher', 'TEST - Meal Voucher Comp'],
+  food: ['Cheez Its', 'Veggie Straws', 'Tummi Yummi', 'Frios', 'Frios (CS)', 'Frios (Employee)', 'Apple Sauce Pouch', 'Bugles & Chex Mix', 'Fritos Pie', 'Add Strawberries', 'Add Whipped Cream', 'Slim Jim', 'fried oreos', 'Box Lunch', 'Extra Powdered Sugar', 'taco', 'Add Condensed Milk', 'Choc Covered Strawberries', 'Add Jalapenos', 'Cinnamon Roll', 'Marinara Sauce', 'Steak (Taco)', 'Chicken (Taco)', 'Corn Tortilla', 'Flour Tortilla', 'Meal Voucher Tickets', 'Buffalo Wild Wings - Gulfport', 'Abramson Si Academy Marching Band - Meal Voucher', 'TEST - Meal Voucher Comp'],
   retail: ['Ladies 2 piece set', 'Cover up long Dress', 'Tank Top', 'Croc Charm', 'Employee Visor', 'Kids Bucket Hat', 'Staff Shirt $10', 'Little Swimmers', 'Silicone Large Cups'],
   ticket: ['Heritage Plastics', 'COMP - COCA COLA', 'Coast Coca Cola', 'Hotel Partnership', 'COMP - Robinson Construction', 'Brian Aluminum Enclosures', 'JZ 94.5 Summer Reading Program', 'Exit Realty Heart Properties', 'Abramson Si Academy Marching Band - One Day Pass', 'Crew Member Admission'],
   otherInPark: ['Airbrush Sales Commission', 'The Shed', 'Sponsorship'],
@@ -31,6 +31,13 @@ export const RULES = [
   [/phone|case|pouch|cup|sunglass|goggle|towel|bag|shirt|hat|apparel|sandal|shoe|sunscreen|toy|souvenir|jewelry|float|swim|clearance|retail/i, 'retail'],
   [/cabana|clam ?shell|fish camp|sundeck|pier house|boat house|hangout|covered area|parking|fee|rental/i, 'otherInPark'],
 ];
+
+// Gift shop groups that override the inherited 2025 mapping (misspelled jewelry, charms)
+export const RGROUP_OVERRIDE = { 'Jewerly $9': 'Toys & novelties', 'Jewerly $3': 'Toys & novelties', 'White Bracelet': 'Toys & novelties', 'Croc Charm': 'Toys & novelties' };
+
+// 2024: before season pass scans began (Jul 5), passholders were admitted on a $0 General Admission Rate
+// with a 100% coupon at the gate (12K+ in 2024 vs 174 in all of 2025). Counted as season pass visits.
+export const isPassCoupon = l => /general admission rate$/i.test(norm(l.n)) && l.st === 0 && l.cp > 0 && Math.abs(l.cp - l.pr * l.q) < 0.01;
 
 export const ACATS = ['Daiquiri', 'Beer', 'Seltzer & hard tea', 'Cocktail'];
 export const acat = n => /daiquiri/i.test(n) ? 'Daiquiri' : /truly|twisted tea|seltzer/i.test(n) ? 'Seltzer & hard tea' : /margarita|absolut|cocktail|mimosa/i.test(n) ? 'Cocktail' : 'Beer';
