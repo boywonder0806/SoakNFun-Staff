@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import pool from '../db/index.js';
 import { requireAdmin, requireSysAdmin } from '../middleware/auth.js';
-import { sendWelcomeEmail, sendReceptionWelcomeEmail, resendStaffWelcomeEmail, sendPasswordResetEmail, sendAccountSetupEmail } from '../services/email.js';
+import { sendReceptionWelcomeEmail, sendPasswordResetEmail, sendAccountSetupEmail } from '../services/email.js';
 import { nvrRequest } from './hr.js';
 
 const router = Router();
@@ -164,7 +164,7 @@ router.post('/employees/:id/send-password-reset', requireAdmin, async (req, res)
        VALUES ($1, $2, NOW() + INTERVAL '24 hours')`,
       [empId, tokenHash]
     );
-    await sendPasswordResetEmail({ toEmail: rows[0].email, toName: rows[0].name, resetToken: token });
+    await sendPasswordResetEmail({ toEmail: rows[0].email, toName: rows[0].name, resetToken: token, expiresIn: '24 hours' });
     logEvent(empId, 'Password reset email sent', {}, req.user.id, req.ip);
     res.json({ ok: true });
   } catch (err) {
@@ -336,10 +336,25 @@ router.get('/staff/check', requireAdmin, async (req, res) => {
   }
 });
 
+// New accounts never get a password by email. The owner picks their own via a
+// one-time setup link (same token table as password reset).
+const SETUP_LINK_TTL = '48 hours';
+
+async function issueAccountSetupLink(emp) {
+  const token     = crypto.randomBytes(32).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  await pool.query(
+    `INSERT INTO password_reset_tokens (employee_id, token_hash, expires_at)
+     VALUES ($1, $2, NOW() + $3::interval)`,
+    [emp.id, tokenHash, SETUP_LINK_TTL]
+  );
+  await sendAccountSetupEmail({ toEmail: emp.email, toName: emp.name, setupToken: token });
+}
+
 router.post('/staff', requireAdmin, async (req, res) => {
-  const { name, email, phone, department, position, hireDate, password, linkNetchexName } = req.body;
-  if (!name?.trim() || !email?.trim() || !department || !password) {
-    return res.status(400).json({ error: 'Name, email, department, and password are required.' });
+  const { name, email, phone, department, position, hireDate, linkNetchexName } = req.body;
+  if (!name?.trim() || !email?.trim() || !department) {
+    return res.status(400).json({ error: 'Name, email, and department are required.' });
   }
   const client = await pool.connect();
   try {
@@ -351,7 +366,8 @@ router.post('/staff', requireAdmin, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: 'An account with this email already exists.' });
     }
-    const hash = await bcrypt.hash(password, 10);
+    // Unusable placeholder until they complete setup
+    const hash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10);
     const parts = name.trim().split(/\s+/);
     const avatar = parts.length >= 2
       ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
@@ -374,7 +390,7 @@ router.post('/staff', requireAdmin, async (req, res) => {
       );
     }
     await client.query('COMMIT');
-    sendWelcomeEmail({ toEmail: emp.email, toName: emp.name, tempPassword: password });
+    issueAccountSetupLink(emp).catch(err => console.error('Account setup link error:', err.message));
     res.status(201).json({ employee: emp });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -477,7 +493,7 @@ router.post('/staff/:id/resend-welcome', requireAdmin, async (req, res) => {
       [empId]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Staff member not found.' });
-    await resendStaffWelcomeEmail({ toEmail: rows[0].email, toName: rows[0].name });
+    await issueAccountSetupLink(rows[0]);
     logEvent(empId, 'Welcome email resent', {}, req.user.id, req.ip);
     res.json({ ok: true });
   } catch (err) {
@@ -1259,14 +1275,7 @@ router.post('/sysadmin/users', requireSysAdmin, async (req, res) => {
       [email.toLowerCase().trim(), placeholderHash, name, role||'crew_member',
        department||null, departments||[], position||null, avatar||null, phone||null, hireDate||null]
     );
-    const token     = crypto.randomBytes(32).toString('hex');
-    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-    await pool.query(
-      `INSERT INTO password_reset_tokens (employee_id, token_hash, expires_at)
-       VALUES ($1, $2, NOW() + INTERVAL '7 days')`,
-      [rows[0].id, tokenHash]
-    );
-    sendAccountSetupEmail({ toEmail: rows[0].email, toName: rows[0].name, setupToken: token });
+    issueAccountSetupLink(rows[0]).catch(err => console.error('Account setup link error:', err.message));
     res.status(201).json({ user: rows[0] });
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Email already exists.' });
@@ -1282,14 +1291,7 @@ router.post('/sysadmin/users/:id/resend-welcome', requireSysAdmin, async (req, r
       [empId]
     );
     if (!rows[0]) return res.status(404).json({ error: 'User not found.' });
-    const token     = crypto.randomBytes(32).toString('hex');
-    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-    await pool.query(
-      `INSERT INTO password_reset_tokens (employee_id, token_hash, expires_at)
-       VALUES ($1, $2, NOW() + INTERVAL '7 days')`,
-      [empId, tokenHash]
-    );
-    await sendAccountSetupEmail({ toEmail: rows[0].email, toName: rows[0].name, setupToken: token });
+    await issueAccountSetupLink(rows[0]);
     logEvent(empId, 'Welcome email resent', {}, req.user.id, req.ip);
     res.json({ ok: true });
   } catch (err) {

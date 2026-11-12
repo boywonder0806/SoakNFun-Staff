@@ -687,7 +687,7 @@ export default function StaffProfileContent({ emp, onUpdated, onDeleted, current
                 <div className="panel p-4 flex items-start justify-between">
                   <div>
                     <p className="text-sm font-semibold text-ink">Send Welcome Email</p>
-                    <p className="text-10 text-fog mt-0.5">Email them their login link and account info</p>
+                    <p className="text-10 text-fog mt-0.5">Email a new set-your-password link (expires in 48 hours)</p>
                     {welcomeSent && <p className="text-10 text-green-400 font-semibold mt-1.5">Sent — check their inbox</p>}
                   </div>
                   <button onClick={handleResendWelcome} disabled={welcomeSending}

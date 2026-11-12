@@ -189,7 +189,7 @@ router.post('/forgot-password', async (req, res) => {
        VALUES ($1, $2, NOW() + INTERVAL '1 hour')`,
       [rows[0].id, tokenHash]
     );
-    await sendPasswordResetEmail({ toEmail: rows[0].email, toName: rows[0].name, resetToken: token });
+    await sendPasswordResetEmail({ toEmail: rows[0].email, toName: rows[0].name, resetToken: token, expiresIn: '1 hour' });
   } catch (err) {
     console.error('Forgot password error:', err.message);
   }

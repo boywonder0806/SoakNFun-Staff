@@ -238,7 +238,7 @@ function AddStaffModal({ onClose, onAdded }) {
   const backdropRef = useRef(null);
 
   const [form, setForm] = useState({
-    firstName: '', lastName: '', email: '', phone: '', department: '', position: '', hireDate: '', password: '',
+    firstName: '', lastName: '', email: '', phone: '', department: '', position: '', hireDate: '',
   });
   const [checking, setChecking] = useState(false);
   const [saving, setSaving]     = useState(false);
@@ -257,11 +257,8 @@ function AddStaffModal({ onClose, onAdded }) {
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
-    if (!form.firstName.trim() || !form.lastName.trim() || !form.email.trim() || !form.department || !form.password) {
-      setError('First name, last name, email, department, and password are required.'); return;
-    }
-    if (form.password.length < 6) {
-      setError('Password must be at least 6 characters.'); return;
+    if (!form.firstName.trim() || !form.lastName.trim() || !form.email.trim() || !form.department) {
+      setError('First name, last name, email, and department are required.'); return;
     }
 
     const fullName = `${form.firstName.trim()} ${form.lastName.trim()}`;
@@ -297,7 +294,6 @@ function AddStaffModal({ onClose, onAdded }) {
         position:        form.position.trim() || null,
         department:      form.department,
         hireDate:        form.hireDate || null,
-        password:        form.password,
         linkNetchexName: overrideLinkNetchex ?? linkNetchex ?? null,
       });
       onAdded(data.employee);
@@ -440,14 +436,9 @@ function AddStaffModal({ onClose, onAdded }) {
                 value={form.hireDate} onChange={set('hireDate')} />
             </div>
           </div>
-          <div>
-            <label className="label-xs block mb-2">Temporary Password *</label>
-            <input className="field text-sm" type="password" placeholder="Min. 6 characters"
-              value={form.password} onChange={set('password')} required />
-            <p className="text-10 text-fog mt-1.5">
-              Staff member will be prompted to set a new password on first sign-in.
-            </p>
-          </div>
+          <p className="text-10 text-fog">
+            They&rsquo;ll get a welcome email with a link to set their own password. The link expires in 48 hours.
+          </p>
           {error && <p className="text-xs text-red-400 font-semibold">{error}</p>}
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose}

@@ -44,20 +44,6 @@ export async function sendCallbackNotification({ toEmail, toName, callerName, ca
   }
 }
 
-export async function sendWelcomeEmail({ toEmail, toName, tempPassword }) {
-  if (!resend || !toEmail) return;
-  try {
-    await resend.emails.send({
-      from:    FROM,
-      to:      toEmail,
-      subject: 'Welcome to the Blue Bayou Staff Portal',
-      html:    buildWelcomeEmail({ toName, toEmail, tempPassword, loginUrl: `${APP_URL}/login` }),
-    });
-  } catch (err) {
-    console.error('Welcome email failed:', err.message);
-  }
-}
-
 export async function sendAccountSetupEmail({ toEmail, toName, setupToken }) {
   if (!resend || !toEmail) return;
   const setupUrl = `${APP_URL}/reset-password?token=${setupToken}`;
@@ -65,25 +51,11 @@ export async function sendAccountSetupEmail({ toEmail, toName, setupToken }) {
     await resend.emails.send({
       from:    FROM,
       to:      toEmail,
-      subject: 'Welcome to the Blue Bayou Staff Portal — Set Up Your Account',
-      html:    buildAccountSetupEmail({ toName, setupUrl }),
+      subject: 'Welcome to the Staff Portal — Set Up Your Account',
+      html:    buildAccountSetupEmail({ toName, toEmail, setupUrl }),
     });
   } catch (err) {
     console.error('Account setup email failed:', err.message);
-  }
-}
-
-export async function resendStaffWelcomeEmail({ toEmail, toName }) {
-  if (!resend || !toEmail) return;
-  try {
-    await resend.emails.send({
-      from:    FROM,
-      to:      toEmail,
-      subject: 'Your Blue Bayou Staff Portal Account',
-      html:    buildStaffWelcomeResendEmail({ toName, toEmail, loginUrl: `${APP_URL}/login` }),
-    });
-  } catch (err) {
-    console.error('Staff welcome resend failed:', err.message);
   }
 }
 
@@ -99,7 +71,7 @@ export async function sendReceptionWelcomeEmail({ toEmail, toName, triggeredBy }
   }
 }
 
-export async function sendPasswordResetEmail({ toEmail, toName, resetToken }) {
+export async function sendPasswordResetEmail({ toEmail, toName, resetToken, expiresIn = '24 hours' }) {
   if (!resend || !toEmail) return;
   const resetUrl = `${APP_URL}/reset-password?token=${resetToken}`;
   try {
@@ -107,169 +79,237 @@ export async function sendPasswordResetEmail({ toEmail, toName, resetToken }) {
       from:    FROM,
       to:      toEmail,
       subject: 'Reset Your Password — Blue Bayou Staff Portal',
-      html:    buildPasswordResetEmail({ toName, resetUrl }),
+      html:    buildPasswordResetEmail({ toName, resetUrl, expiresIn }),
     });
   } catch (err) {
     console.error('Password reset email failed:', err.message);
   }
 }
+// ─── Shared email layout ────────────────────────────────────────────────────
+// Table-based with inline styles so it renders consistently in Outlook, Gmail
+// and Apple Mail. Web fonts load where the client allows (Apple Mail, iOS,
+// most Android); everything else falls back to the system sans stack.
 
-function buildWelcomeEmail({ toName, toEmail, tempPassword, loginUrl }) {
-  const row = (label, value) =>
-    `<tr><td style="padding:8px 0;color:#9ca3af;font-size:13px;width:120px;vertical-align:top">${label}</td>
-         <td style="padding:8px 0;color:#111827;font-weight:600">${value}</td></tr>`;
-  return `
-    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto">
-      <div style="background:#0077B6;padding:24px 28px;border-radius:12px 12px 0 0">
-        <p style="color:#90e0ff;margin:0;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase">Blue Bayou Water Park</p>
-        <h1 style="color:#fff;margin:4px 0 0;font-size:20px">Welcome to the Staff Portal</h1>
-      </div>
-      <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
-        <p style="color:#374151;margin:0 0 20px">Hi ${toName || 'there'}, your account has been created. Use the credentials below to sign in.</p>
-        <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
-          ${row('Email', toEmail)}
-          ${row('Password', `<span style="font-family:monospace;background:#f3f4f6;padding:2px 8px;border-radius:4px">${tempPassword}</span>`)}
-        </table>
-        <p style="color:#6b7280;font-size:13px;margin:0 0 20px">You will be asked to set a new password the first time you sign in.</p>
-        <a href="${loginUrl}" style="display:inline-block;background:#0077B6;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;font-size:14px">Sign In to Staff Portal</a>
-        <p style="margin:24px 0 0;color:#9ca3af;font-size:12px">Blue Bayou Water Park · Baton Rouge, LA</p>
-      </div>
-    </div>
-  `;
+const FONT_BODY = "'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+const FONT_HEAD = "'Plus Jakarta Sans','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+const FONT_MONO = "'JetBrains Mono',SFMono-Regular,Menlo,Consolas,'Courier New',monospace";
+
+const C = {
+  deep:   '#0a2540',  // header — deep water
+  ocean:  '#0077b6',  // primary actions
+  lagoon: '#00b4d8',  // accents
+  sun:    '#ffb703',  // waterline highlight
+  foam:   '#f0f8fb',  // panels
+  mist:   '#d6ecf3',  // panel borders
+  page:   '#eaf2f6',
+  ink:    '#0f172a',
+  body:   '#334155',
+  muted:  '#64748b',
+  faint:  '#94a3b8',
+  line:   '#e2e8f0',
+};
+
+const DEFAULT_FOOTER = 'Blue Bayou &amp; Gulf Islands Waterparks';
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+// Served from the staff portal's public folder (client/public/images/email).
+// Must be absolute, public https URLs — mail clients can't reach anything else.
+const ASSET_URL = process.env.EMAIL_ASSET_URL || 'https://bluebayoustaff.com/images/email';
+const LOGOS = {
+  bb: { src: `${ASSET_URL}/blue-bayou-logo.png`,   width: 80,  height: 76, alt: 'Blue Bayou Waterpark' },
+  gi: { src: `${ASSET_URL}/gulf-islands-logo.png`, width: 160, height: 53, alt: 'Gulf Islands Waterpark' },
+};
+
+function layout({ preheader, eyebrow, title, body, footer = DEFAULT_FOOTER, brand = 'Staff Portal', parks = ['bb', 'gi'] }) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>${esc(title)}</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@700;800&family=JetBrains+Mono:wght@600&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; padding:0; -webkit-text-size-adjust:100%; }
+  a { color:${C.ocean}; }
+  @media (max-width:620px) {
+    .bb-wrap { padding:0 !important; }
+    .bb-pad  { padding-left:24px !important; padding-right:24px !important; }
+    .bb-btn a { display:block !important; text-align:center !important; }
+    .bb-label { display:none !important; }
+  }
+</style>
+</head>
+<body style="margin:0;padding:0;background:${C.page}">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${esc(preheader)}&#8199;&#65279;&#847;&#8199;&#65279;&#847;&#8199;&#65279;&#847;&#8199;&#65279;&#847;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${C.page}">
+  <tr><td class="bb-wrap" align="center" style="padding:40px 16px">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid ${C.mist}">
+      <tr><td class="bb-pad" style="background:#ffffff;padding:22px 40px">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td valign="middle">${parks.map((p, i) => `<img src="${LOGOS[p].src}" width="${LOGOS[p].width}" height="${LOGOS[p].height}" alt="${LOGOS[p].alt}" style="display:inline-block;vertical-align:middle;border:0;outline:none;text-decoration:none${i ? ';margin-left:20px' : ''}">`).join('')}</td>
+          <td class="bb-label" valign="middle" align="right" style="font-family:${FONT_BODY};font-size:11px;font-weight:600;letter-spacing:.16em;color:${C.muted};text-transform:uppercase">${esc(brand)}</td>
+        </tr></table>
+      </td></tr>
+      <tr><td style="font-size:0;line-height:0">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td width="62%" height="4" style="background:${C.lagoon};font-size:0;line-height:0">&nbsp;</td>
+          <td width="26%" height="4" style="background:${C.ocean};font-size:0;line-height:0">&nbsp;</td>
+          <td width="12%" height="4" style="background:${C.sun};font-size:0;line-height:0">&nbsp;</td>
+        </tr></table>
+      </td></tr>
+      <tr><td class="bb-pad" style="padding:40px 40px 8px;font-family:${FONT_BODY}">
+        <p style="margin:0 0 10px;font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:${C.ocean}">${esc(eyebrow)}</p>
+        <h1 style="margin:0 0 24px;font-family:${FONT_HEAD};font-size:26px;line-height:1.25;font-weight:800;color:${C.ink};letter-spacing:-.01em">${esc(title)}</h1>
+        ${body}
+      </td></tr>
+      <tr><td class="bb-pad" style="padding:32px 40px 36px;font-family:${FONT_BODY}">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td style="border-top:1px solid ${C.line};padding-top:20px;font-size:12px;line-height:1.6;color:${C.faint}">
+            ${footer}<br>This is an automated message from BayouNet.
+          </td>
+        </tr></table>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
 }
 
-function buildAccountSetupEmail({ toName, setupUrl }) {
+const para = (html, { size = 15, color = C.body, mb = 16 } = {}) =>
+  `<p style="margin:0 0 ${mb}px;font-family:${FONT_BODY};font-size:${size}px;line-height:1.65;color:${color}">${html}</p>`;
+
+const greeting = name => para(`Hi ${esc(name || 'there')},`, { mb: 12 });
+
+const fineprint = html => para(html, { size: 13, color: C.muted, mb: 0 });
+
+function button(href, label) {
   return `
-    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto">
-      <div style="background:#0077B6;padding:24px 28px;border-radius:12px 12px 0 0">
-        <p style="color:#90e0ff;margin:0;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase">Blue Bayou Water Park</p>
-        <h1 style="color:#fff;margin:4px 0 0;font-size:20px">Welcome to the Staff Portal</h1>
-      </div>
-      <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
-        <p style="color:#374151;margin:0 0 20px">Hi ${toName || 'there'}, an account has been created for you. Click below to set up your password and sign in.</p>
-        <a href="${setupUrl}" style="display:inline-block;background:#0077B6;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;font-size:14px">Set Up Your Password</a>
-        <p style="color:#6b7280;font-size:13px;margin:20px 0 0">This link expires in <strong>7 days</strong>. If you weren't expecting this email, you can safely ignore it.</p>
-        <p style="margin:24px 0 0;color:#9ca3af;font-size:12px">Blue Bayou Water Park · Baton Rouge, LA</p>
-      </div>
-    </div>
-  `;
+    <table role="presentation" class="bb-btn" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 28px">
+      <tr><td style="background:${C.ocean}">
+        <a href="${esc(href)}" style="display:inline-block;padding:14px 30px;font-family:${FONT_BODY};font-size:15px;font-weight:600;color:#ffffff;text-decoration:none">${esc(label)}&nbsp;&rarr;</a>
+      </td></tr>
+    </table>`;
+}
+
+// Label/value rows in a soft "pool" panel. Values are raw HTML — escape before passing.
+function details(rows) {
+  const body = rows.filter(([, v]) => v).map(([label, value], i) => `
+    <tr>
+      <td valign="top" style="padding:12px 0;${i ? `border-top:1px solid ${C.mist};` : ''}width:120px;font-family:${FONT_BODY};font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:${C.muted}">${label}</td>
+      <td valign="top" style="padding:12px 0;${i ? `border-top:1px solid ${C.mist};` : ''}font-family:${FONT_BODY};font-size:15px;line-height:1.5;color:${C.ink}">${value}</td>
+    </tr>`).join('');
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 24px;background:${C.foam};border:1px solid ${C.mist}">
+      <tr><td style="padding:6px 22px">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${body}</table>
+      </td></tr>
+    </table>`;
+}
+
+const code = (value, size = 15) =>
+  `<span style="font-family:${FONT_MONO};font-size:${size}px;font-weight:600;color:${C.ink};background:#ffffff;border:1px solid ${C.mist};padding:4px 10px;letter-spacing:.04em">${esc(value)}</span>`;
+
+// ─── Templates ──────────────────────────────────────────────────────────────
+
+function buildAccountSetupEmail({ toName, toEmail, setupUrl }) {
+  return layout({
+    preheader: 'Your Staff Portal account is ready. Set your password to get started — this link expires in 48 hours.',
+    eyebrow:   'New Account',
+    title:     'Welcome to the team',
+    body: `
+      ${greeting(toName)}
+      ${para('An account has been created for you on the Staff Portal. To get started, set your password using the button below.')}
+      ${details([
+        ['Sign-in email', esc(toEmail)],
+      ])}
+      ${button(setupUrl, 'Set your password')}
+      ${fineprint('This link expires in <strong>48 hours</strong> and can only be used once. If it expires, ask your manager to resend your welcome email. If you weren&rsquo;t expecting this, you can safely ignore it.')}`,
+  });
 }
 
 function buildCallbackDigestEmail({ toName, pendingCount, callbacks, digestUrl }) {
-  const fmt = iso => {
-    const d = new Date(iso);
-    return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
-  };
-  const rows = callbacks.map(c => `
-    <tr style="border-bottom:1px solid #f3f4f6">
-      <td style="padding:12px 0">
-        <p style="margin:0;font-weight:600;color:#111827">${c.callerName || 'Unknown caller'}</p>
-        <p style="margin:2px 0 0;color:#6b7280;font-size:13px">${c.callerPhone || '—'}</p>
-        ${c.reason ? `<p style="margin:4px 0 0;color:#374151;font-size:13px">${c.reason}</p>` : ''}
-        <p style="margin:4px 0 0;color:#9ca3af;font-size:11px">${fmt(c.createdAt)}</p>
-      </td>
-    </tr>`).join('');
+  const fmt = iso => new Date(iso).toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/Chicago',
+  });
+  const items = callbacks.map(c => `
+    <tr><td style="padding:0 0 10px">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${C.foam};border:1px solid ${C.mist};border-left:3px solid ${C.lagoon}">
+        <tr><td style="padding:14px 18px;font-family:${FONT_BODY}">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td style="font-size:15px;font-weight:600;color:${C.ink}">${esc(c.callerName || 'Unknown caller')}</td>
+            <td align="right" style="font-size:12px;color:${C.faint};white-space:nowrap">${esc(fmt(c.createdAt))}</td>
+          </tr></table>
+          <p style="margin:3px 0 0;font-size:14px;color:${C.ocean}">${esc(c.callerPhone || 'No number provided')}</p>
+          ${c.reason ? `<p style="margin:6px 0 0;font-size:14px;line-height:1.5;color:${C.body}">${esc(c.reason)}</p>` : ''}
+        </td></tr>
+      </table>
+    </td></tr>`).join('');
+  const plural = pendingCount === 1 ? '' : 's';
 
-  return `
-    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:0 auto">
-      <div style="background:#0077B6;padding:24px 28px;border-radius:12px 12px 0 0">
-        <p style="color:#90e0ff;margin:0;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase">Blue Bayou Water Park</p>
-        <h1 style="color:#fff;margin:4px 0 0;font-size:20px">Pending Callbacks</h1>
-      </div>
-      <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
-        <p style="color:#374151;margin:0 0 4px">Hi ${toName || 'there'},</p>
-        <p style="color:#374151;margin:0 0 20px">You have <strong>${pendingCount} pending callback${pendingCount === 1 ? '' : 's'}</strong> that require your attention.</p>
-        <table style="width:100%;border-collapse:collapse;margin-bottom:24px">${rows}</table>
-        <a href="${digestUrl}" style="display:inline-block;background:#0077B6;color:#fff;text-decoration:none;padding:13px 28px;border-radius:8px;font-weight:600;font-size:14px">View &amp; Update Callbacks</a>
-        <p style="margin:20px 0 0;color:#9ca3af;font-size:12px">This link expires in 48 hours. Blue Bayou Water Park · Baton Rouge, LA</p>
-      </div>
-    </div>
-  `;
+  return layout({
+    preheader: `${pendingCount} callback${plural} still waiting on you.`,
+    eyebrow:   'Daily Digest',
+    brand:     'Reception Portal',
+    title:     `${pendingCount} pending callback${plural}`,
+    body: `
+      ${greeting(toName)}
+      ${para(`The following caller${plural} ${pendingCount === 1 ? 'is' : 'are'} still waiting to hear back. Mark each one as handled once you&rsquo;ve followed up.`, { mb: 20 })}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 14px">${items}</table>
+      ${button(digestUrl, 'Review & update callbacks')}
+      ${fineprint('This link expires in <strong>48 hours</strong>.')}`,
+  });
 }
 
-function buildStaffWelcomeResendEmail({ toName, toEmail, loginUrl }) {
-  return `
-    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto">
-      <div style="background:#0077B6;padding:24px 28px;border-radius:12px 12px 0 0">
-        <p style="color:#90e0ff;margin:0;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase">Blue Bayou Water Park</p>
-        <h1 style="color:#fff;margin:4px 0 0;font-size:20px">Staff Portal Access</h1>
-      </div>
-      <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
-        <p style="color:#374151;margin:0 0 16px">Hi ${toName || 'there'}, here are your Blue Bayou Staff Portal login details.</p>
-        <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
-          <tr><td style="padding:8px 0;color:#9ca3af;font-size:13px;width:120px">Email</td>
-              <td style="padding:8px 0;color:#111827;font-weight:600">${toEmail}</td></tr>
-          <tr><td style="padding:8px 0;color:#9ca3af;font-size:13px">Password</td>
-              <td style="padding:8px 0;color:#6b7280;font-size:13px">Your existing password (use Forgot Password if needed)</td></tr>
-        </table>
-        <a href="${loginUrl}" style="display:inline-block;background:#0077B6;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;font-size:14px">Sign In to Staff Portal</a>
-        <p style="margin:24px 0 0;color:#9ca3af;font-size:12px">Blue Bayou Water Park · Baton Rouge, LA</p>
-      </div>
-    </div>
-  `;
-}
-
-function buildPasswordResetEmail({ toName, resetUrl }) {
-  return `
-    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto">
-      <div style="background:#0077B6;padding:24px 28px;border-radius:12px 12px 0 0">
-        <p style="color:#90e0ff;margin:0;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase">Blue Bayou Water Park</p>
-        <h1 style="color:#fff;margin:4px 0 0;font-size:20px">Password Reset</h1>
-      </div>
-      <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
-        <p style="color:#374151;margin:0 0 20px">Hi ${toName || 'there'}, we received a request to reset your Staff Portal password. Click the button below to set a new one.</p>
-        <a href="${resetUrl}" style="display:inline-block;background:#0077B6;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;font-size:14px">Reset Password</a>
-        <p style="color:#6b7280;font-size:13px;margin:20px 0 0">This link expires in <strong>24 hours</strong>. If you weren't expecting this email, you can safely ignore it.</p>
-        <p style="margin:24px 0 0;color:#9ca3af;font-size:12px">Blue Bayou Water Park · Baton Rouge, LA</p>
-      </div>
-    </div>
-  `;
+function buildPasswordResetEmail({ toName, resetUrl, expiresIn }) {
+  return layout({
+    preheader: 'Use the link inside to choose a new Staff Portal password. It expires in 24 hours.',
+    eyebrow:   'Account Security',
+    title:     'Reset your password',
+    body: `
+      ${greeting(toName)}
+      ${para('We received a request to reset the password for your Staff Portal account. Click the button below to choose a new one.')}
+      ${button(resetUrl, 'Reset password')}
+      ${fineprint('This link expires in <strong>${esc(expiresIn)}</strong>. If you didn&rsquo;t request a reset, you can safely ignore this email &mdash; your password won&rsquo;t change.')}`,
+  });
 }
 
 function buildReceptionWelcomeEmail({ toName, loginUrl }) {
-  return `
-    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto">
-      <div style="background:#0077B6;padding:24px 28px;border-radius:12px 12px 0 0">
-        <p style="color:#90e0ff;margin:0;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase">Blue Bayou Water Park</p>
-        <h1 style="color:#fff;margin:4px 0 0;font-size:20px">Reception Portal Access</h1>
-      </div>
-      <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
-        <p style="color:#374151;margin:0 0 16px">Hi ${toName || 'there'}, you've been granted access to the Blue Bayou Reception Portal.</p>
-        <p style="color:#6b7280;font-size:13px;margin:0 0 20px">Sign in using your existing staff portal credentials (same email and password).</p>
-        <a href="${loginUrl}" style="display:inline-block;background:#0077B6;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;font-size:14px">Open Reception Portal</a>
-        <p style="margin:24px 0 0;color:#9ca3af;font-size:12px">Blue Bayou Water Park · Baton Rouge, LA</p>
-      </div>
-    </div>
-  `;
+  return layout({
+    preheader: 'You now have access to the Reception Portal. Sign in with your staff credentials.',
+    eyebrow:   'Access Granted',
+    brand:     'Reception Portal',
+    title:     "You've been granted access",
+    body: `
+      ${greeting(toName)}
+      ${para('You now have access to the Blue Bayou Reception Portal.')}
+      ${para('Sign in with your existing Staff Portal credentials &mdash; the same email and password you already use.')}
+      ${button(loginUrl, 'Open the Reception Portal')}`,
+  });
 }
 
 function buildCallbackEmail({ toName, callerName, callerPhone, reason, notes, loggedBy }) {
-  const row = (label, value) => value
-    ? `<tr style="border-bottom:1px solid #f3f4f6">
-         <td style="padding:10px 0;color:#9ca3af;font-size:13px;width:110px">${label}</td>
-         <td style="padding:10px 0;color:#111827">${value}</td>
-       </tr>`
-    : '';
-
-  return `
-    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto">
-      <div style="background:#0077B6;padding:24px 28px;border-radius:12px 12px 0 0">
-        <p style="color:#90e0ff;margin:0;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase">Blue Bayou Water Park</p>
-        <h1 style="color:#fff;margin:4px 0 0;font-size:20px">Callback Request</h1>
-      </div>
-      <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
-        <p style="color:#374151;margin:0 0 20px">Hi ${toName || 'there'}, you have a new callback request from reception.</p>
-        <table style="width:100%;border-collapse:collapse">
-          ${row('Caller',    callerName)}
-          ${row('Phone',     callerPhone)}
-          ${row('Reason',    reason)}
-          ${notes ? `<tr style="border-bottom:1px solid #f3f4f6"><td style="padding:10px 0;color:#9ca3af;font-size:13px;width:110px">Notes</td><td style="padding:10px 0;color:#374151;font-style:italic">${notes}</td></tr>` : ''}
-          ${row('Logged by', loggedBy)}
-        </table>
-        <p style="margin:24px 0 0;color:#9ca3af;font-size:12px">Blue Bayou Reception Portal</p>
-      </div>
-    </div>
-  `;
+  return layout({
+    preheader: `${callerName || 'A caller'} is waiting for a call back${reason ? ` — ${reason}` : ''}.`,
+    eyebrow:   'Callback Request',
+    brand:     'Reception Portal',
+    title:     `Please call back ${callerName || 'this caller'}`,
+    body: `
+      ${greeting(toName)}
+      ${para('Reception has logged a new callback request for you.')}
+      ${details([
+        ['Caller',    esc(callerName)],
+        ['Phone',     callerPhone && `<a href="tel:${esc(String(callerPhone).replace(/[^\d+]/g, ''))}" style="color:${C.ocean};text-decoration:none;font-weight:600">${esc(callerPhone)}</a>`],
+        ['Reason',    esc(reason)],
+        ['Notes',     notes && `<span style="color:${C.body};font-style:italic">${esc(notes)}</span>`],
+        ['Logged by', esc(loggedBy)],
+      ])}`,
+    footer: 'Blue Bayou &amp; Gulf Islands Waterparks &middot; Reception Portal',
+  });
 }
 
 export async function sendSharedReportInvite({ toEmail, toName, reportTitle, url, pin, invitedBy, triggeredBy }) {
@@ -287,23 +327,22 @@ export async function sendSharedReportInvite({ toEmail, toName, reportTitle, url
 }
 
 function buildSharedReportInviteEmail({ toName, reportTitle, url, pin, invitedBy }) {
-  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-  return `
-    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto">
-      <div style="background:#0b0b0b;padding:24px 28px;border-radius:12px 12px 0 0">
-        <p style="color:#9ca3af;margin:0;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase">Internal &middot; Confidential</p>
-        <h1 style="color:#fff;margin:4px 0 0;font-size:20px">${esc(reportTitle)}</h1>
-      </div>
-      <div style="background:#fff;padding:24px 28px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
-        <p style="color:#374151;margin:0 0 16px">Hi ${esc(toName || 'there')},${invitedBy ? ` ${esc(invitedBy)} has` : ' you have been'} shared a confidential report with you. Open the link and enter your personal PIN.</p>
-        <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
-          <tr><td style="padding:8px 0;color:#9ca3af;font-size:13px;width:110px">Your PIN</td>
-              <td style="padding:8px 0"><span style="font-family:monospace;font-size:22px;font-weight:700;letter-spacing:.25em;background:#f3f4f6;padding:6px 12px;border-radius:6px;color:#111827">${esc(pin)}</span></td></tr>
-        </table>
-        <a href="${esc(url)}" style="display:inline-block;background:#2a78d6;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;font-size:14px">Open the report</a>
-        <p style="color:#6b7280;font-size:13px;margin:20px 0 0;line-height:1.5">This PIN is yours alone and access is logged. Please don't forward the link or the PIN. If you weren't expecting this, you can ignore it.</p>
-        <p style="margin:24px 0 0;color:#9ca3af;font-size:12px">Blue Bayou &amp; Gulf Islands Waterparks &middot; Analytics</p>
-      </div>
-    </div>
-  `;
+  return layout({
+    preheader: `${invitedBy || 'Someone'} shared “${reportTitle}” with you. Your personal access PIN is inside.`,
+    eyebrow:   'Confidential · Shared Report',
+    title:     reportTitle,
+    brand:     'Analytics',
+    body: `
+      ${greeting(toName)}
+      ${para(`${invitedBy ? `<strong style="color:${C.ink}">${esc(invitedBy)}</strong> has` : 'You have been'} shared a confidential report with you. Open the report and enter your personal PIN to view it.`)}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 24px;background:${C.foam};border:1px solid ${C.mist}">
+        <tr><td align="center" style="padding:22px 16px">
+          <p style="margin:0 0 10px;font-family:${FONT_BODY};font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:${C.muted}">Your access PIN</p>
+          <p style="margin:0;font-family:${FONT_MONO};font-size:30px;font-weight:600;letter-spacing:.3em;color:${C.deep}">${esc(pin)}</p>
+        </td></tr>
+      </table>
+      ${button(url, 'Open the report')}
+      ${fineprint('This PIN is unique to you and every view is logged. Please don&rsquo;t forward the link or PIN. If you weren&rsquo;t expecting this, you can ignore this email.')}`,
+    footer: 'Blue Bayou &amp; Gulf Islands Waterparks &middot; Analytics',
+  });
 }
